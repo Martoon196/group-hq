@@ -9,6 +9,9 @@
       <a href="/mentees"{% if section == "mentees" %} class="is-active"{% endif %}>Mentees</a>
       <a href="/grants"{% if section == "grants" %} class="is-active"{% endif %}>Grants</a>
       <a href="/programmes"{% if section == "programmes" %} class="is-active"{% endif %}>Programmes</a>
+      <a href="/territories"{% if section == "territories" %} class="is-active"{% endif %}>Territories</a>
+      <a href="/franchise"{% if section == "franchise" %} class="is-active"{% endif %}>Franchise</a>
+      <a href="/sellers"{% if section == "sellers" %} class="is-active"{% endif %}>Sellers</a>
       <a href="/audit"{% if section == "audit" %} class="is-active"{% endif %}>Audit</a>
       {% block sidenav %}{% endblock %}
       {% if s.connectors_dry_run %}<span class="side-note">Connectors in dry run: nothing is sent to a product.</span>{% endif %}

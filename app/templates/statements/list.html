@@ -1,0 +1,71 @@
+{% extends "app_base.html" %}
+{% import "sellers/_shared.html" as sl %}
+{% import "_fields.html" as f %}
+{% set title = "Commission statements | Group HQ" %}
+{% block head %}{{ sl.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Seller commission</span>
+  <h1>Statements</h1>
+  <p class="muted">Generated on the {{ statement_day }}th for the previous calendar month and paid by the {{ payment_day }}th (heads of terms section 7). {{ pounds(outstanding_pence) }} on unpaid statements.</p>
+  <div class="actions"><a class="btn btn-ghost btn-sm" href="/sellers">Sellers</a><a class="btn btn-ghost btn-sm" href="/audit?q=statement:">History</a></div>
+</div>
+{{ sl.banner(confirmed) }}
+
+<div class="two-col">
+  <section class="panel">
+    <div class="panel-head"><h2>Generate</h2>{% if due_today %}<span class="status status-pending">today is the {{ statement_day }}th</span>{% endif %}</div>
+    <form method="post" action="/sellers/statements/generate" class="form-inline" data-confirm="Generate the statements for this period? Every payable entry not yet on a statement is collected per seller; running it again later is safe.">
+      <div class="field"><label for="period">Period (YYYY-MM)</label><input id="period" name="period" type="month" value="{{ previous_period }}" required></div>
+      <button class="btn btn-primary btn-sm" type="submit">Generate statements</button>
+    </form>
+    <p class="help mt-1">The nightly job (<code>python -m app.jobs.statements</code>) does this on the {{ statement_day }}th for {{ previous_label }}; this button is for any other day or month. A seller without a self-billing agreement is held and reported. A month whose statement came to zero or less carries forward into the next one.</p>
+    {% if waiting %}
+    <h3 class="small mt-1">Awaiting a statement</h3>
+    <table class="data">
+      <thead><tr><th>Seller</th><th class="num">Entries</th><th class="num">Net</th><th>Self-billing</th></tr></thead>
+      <tbody>{% for s, n, pence in waiting %}<tr><td><a href="/sellers/{{ s.id }}"><code>{{ s.code }}</code></a> {{ s.person.name or s.person.person_key }}</td><td class="num">{{ n }}</td><td class="num{% if pence < 0 %} neg{% endif %}">{{ pounds(pence) }}{{ sl.badge(confirmed) }}</td><td>{% if s.self_billing_agreed_at %}<span class="ok-text">yes</span>{% else %}<span class="bad-text">none: held</span>{% endif %}</td></tr>{% endfor %}</tbody>
+    </table>
+    {% else %}<p class="muted mt-1">Nothing is waiting for a statement.</p>{% endif %}
+  </section>
+
+  <section class="panel">
+    <form method="get" action="/sellers/statements" class="filters">
+      <div class="field">
+        <label for="state">State</label>
+        <select id="state" name="state"><option value="">Paid or not</option><option value="unpaid"{% if filters.state == "unpaid" %} selected{% endif %}>Unpaid</option><option value="paid"{% if filters.state == "paid" %} selected{% endif %}>Paid</option></select>
+      </div>
+      <div class="field">
+        <label for="seller">Seller</label>
+        <select id="seller" name="seller"><option value="">Any seller</option>{% for s in sellers %}<option value="{{ s.id }}"{% if filters.seller == s.id|string %} selected{% endif %}>{{ s.code }} ({{ s.person.name or s.person.person_key }})</option>{% endfor %}</select>
+      </div>
+      <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Filter</button>{% if qs %}<a class="btn btn-ghost btn-sm" href="/sellers/statements">Clear</a>{% endif %}</div>
+    </form>
+  </section>
+</div>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>{{ total }} statement{{ "s" if total != 1 else "" }}{% if qs %} matching{% endif %}</h2></div>
+  {% if rows %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Period</th><th>Seller</th><th class="num">Total</th><th>Generated</th><th>Pay by</th><th>Paid</th><th></th></tr></thead>
+    <tbody>
+    {% for st in rows %}
+    <tr>
+      <td><a href="/sellers/statements/{{ st.id }}"><strong>{{ st.period_start | date("%B %Y") }}</strong></a><br><span class="small muted">#{{ st.id }}</span></td>
+      <td><a href="/sellers/{{ st.seller_id }}"><code>{{ st.seller.code }}</code></a> {{ st.seller.person.name or st.seller.person.person_key }}</td>
+      <td class="num{% if st.total_pence < 0 %} neg{% endif %}">{{ pounds(st.total_pence) }}{{ sl.badge(confirmed) }}</td>
+      <td class="nowrap small">{{ st.generated_at | uk("%d %b %Y") }}</td>
+      <td class="nowrap small">{{ payment_due_on(st) | date }}</td>
+      <td class="nowrap">{% if st.paid_at %}<span class="ok-text">{{ st.paid_at | uk("%d %b %Y") }}</span>{% elif st.total_pence <= 0 %}<span class="muted">carries forward</span>{% else %}<span class="status status-pending">unpaid</span>{% endif %}</td>
+      <td class="nowrap"><a class="btn btn-ghost btn-sm" href="/sellers/statements/{{ st.id }}/print">Print</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ f.pager("/sellers/statements", qs_prev, qs_next, page, pages) }}
+  {% else %}<p class="muted">No statements{% if qs %} match{% else %} yet{% endif %}.</p>{% endif %}
+</section>
+{% endblock %}

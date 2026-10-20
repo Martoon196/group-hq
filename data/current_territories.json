@@ -1,0 +1,59 @@
+{
+  "_about": [
+    "Who holds today's five Hello New Home areas, mirrored from hq/content/areas-seed.json in the Hello New Home",
+    "workspace on 20 October 2026. scripts/load_territory_model.py applies this to a district only while the district",
+    "is still open with no partner, so a holding changed on the Territories screen is never overwritten by a load.",
+    "A bare postcode area (E, TA) means every district of that area in the ONS Postcode Directory extract.",
+    "partner_id is the Hello New Home partner id (people.hnh_partner_id). The ids 3 and 4 are placeholders until the",
+    "London and Somerset partner records exist in Hello New Home; edit them here or on the district screen.",
+    "state is one of open, reserved, core, hq. reserved_until is a date (YYYY-MM-DD) or null."
+  ],
+  "territories": [
+    {
+      "area": "swansea",
+      "name": "Swansea (head office)",
+      "state": "hq",
+      "partner_id": null,
+      "districts": ["SA1", "SA2", "SA3", "SA4", "SA5", "SA6", "SA7", "SA8", "SA9", "SA10", "SA11", "SA12", "SA13", "SA14", "SA15", "SA16", "SA17", "SA18"],
+      "note": "The operating model keeps SA1 to SA7 permanently and serves SA8 to SA18 from head office until they are released to a Welsh partner [CONFIRM]. Both load as hq; release the second group on the district screen when the founder decides."
+    },
+    {
+      "area": "durham",
+      "name": "Durham",
+      "state": "reserved",
+      "partner_id": null,
+      "reserved_until": null,
+      "districts": ["DH1", "DH2", "DH3", "DH4", "DH5", "DH6", "DH7", "DH8", "DH9", "DL4", "DL5", "DL12", "DL13", "DL14", "DL15", "DL16", "DL17"],
+      "note": "A launch territory with no partner yet ([Partner name] in areas-seed.json): earmarked, not offered. The operating model's proposal is core DH1, DH2, DH3, DH7 and reserved for the rest once a partner signs [CONFIRM]."
+    },
+    {
+      "area": "andover",
+      "name": "Andover",
+      "state": "reserved",
+      "partner_id": null,
+      "reserved_until": null,
+      "districts": ["SP10", "SP11", "SP9", "RG28", "SO20"],
+      "note": "A launch territory with no partner yet. The operating model's proposal is core SP10, SP11 and reserved SP9, RG28, SO20 once a partner signs [CONFIRM]."
+    },
+    {
+      "area": "london",
+      "name": "London",
+      "state": "core",
+      "partner_id": 3,
+      "districts": ["E", "EC", "N", "NW", "SE", "SW", "W", "WC", "BR", "CR", "HA", "IG", "RM", "SM", "UB",
+                    "DA5", "DA6", "DA7", "DA8", "DA14", "DA15", "DA16", "DA17", "DA18",
+                    "EN1", "EN2", "EN3", "EN4", "EN5",
+                    "KT1", "KT2", "KT3", "KT4", "KT5", "KT6", "KT9",
+                    "TW1", "TW2", "TW3", "TW4", "TW5", "TW6", "TW7", "TW8", "TW9", "TW10", "TW11", "TW12", "TW13", "TW14"],
+      "note": "Every London borough, one Local Partner for now (Ina Gutowska). Partner id 3 is a placeholder. To be split into zones as further London partners join."
+    },
+    {
+      "area": "somerset",
+      "name": "Somerset",
+      "state": "core",
+      "partner_id": 4,
+      "districts": ["TA", "BA", "BS20", "BS21", "BS22", "BS23", "BS24", "BS25", "BS26", "BS27", "BS28", "BS29", "BS39", "BS40", "BS41", "BS48", "BS49"],
+      "note": "Local Partner Martin Howard. Partner id 4 is a placeholder."
+    }
+  ]
+}

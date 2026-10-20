@@ -1,0 +1,48 @@
+{% extends "packs/_print_base.html" %}
+{% set title = "Commission statement " ~ period_label ~ ": " ~ seller.code ~ " | Hello New Home" %}
+{% set toolbar_label = "Commission statement #" ~ statement.id ~ " for " ~ seller.code %}
+{% set back = "/sellers/statements/" ~ statement.id %}
+{% block sheet %}
+<div class="cover">
+  <span class="eyebrow">{{ company }} · Local Partner programme</span>
+  <h1>Commission statement: {{ period_label }}</h1>
+  <p class="muted">Statement #{{ statement.id }}, issued {{ statement.generated_at | uk("%d %B %Y") }} for territory sales commission earned {{ statement.period_start | date("%d %B %Y") }} to {{ statement.period_end | date("%d %B %Y") }}.</p>
+</div>
+
+{% if not confirmed %}
+<div class="draft-banner"><strong>Draft.</strong> The commission rules behind this statement are a proposal awaiting the founder's confirmation. Nothing on it is payable until they are confirmed; it is printed for checking only.</div>
+{% endif %}
+
+<table>
+  <tbody>
+    <tr><th>Seller</th><td>{{ seller.person.name or seller.person.person_key }} ({{ seller.person.person_key }})</td></tr>
+    <tr><th>Seller code</th><td>{{ seller.code }}</td></tr>
+    <tr><th>Issued by</th><td>{{ company }}, on a self-billing basis{% if seller.self_billing_agreed_at %} under the agreement signed on {{ seller.self_billing_agreed_at | uk("%d %B %Y") }}{% endif %} [CONFIRM: self-billing agreement text, heads of terms schedule F]</td></tr>
+    <tr><th>Payment</th><td>{% if statement.paid_at %}Paid on {{ statement.paid_at | uk("%d %B %Y") }}{% elif statement.total_pence <= 0 %}Nothing to pay; the balance carries forward to the next statement{% else %}By bank transfer by {{ payment_due | date("%d %B %Y") }}{% if seller.bank_reference %} to {{ seller.bank_reference }}{% endif %}{% endif %}</td></tr>
+    <tr><th>VAT</th><td>None. {{ company }} is not VAT-registered; a VAT-registered seller's self-bill would carry VAT and this one does not.</td></tr>
+  </tbody>
+</table>
+
+<h2>Lines</h2>
+<table>
+  <thead><tr><th>Earned</th><th>Territory</th><th>Basis</th><th class="num">Fee received</th><th class="num">Rate</th><th class="num">Commission</th></tr></thead>
+  <tbody>
+  {% for e in entries %}
+  <tr>
+    <td>{{ e.earned_at | uk("%d %b %Y") }}</td>
+    <td>{{ e.opportunity.districts|join(", ") }}<br><span class="small muted">opportunity #{{ e.opportunity_id }}</span></td>
+    <td>{% if e.clawback_of %}Clawback of line #{{ e.clawback_of }}{% if reasons.get(e.id) %}<br><span class="small muted">{{ reasons[e.id] }}</span>{% endif %}{% else %}{{ "Upfront fee" if e.basis == "upfront" else "Monthly fee, month " ~ e.trail_month }}<br><span class="small muted">line #{{ e.id }}</span>{% endif %}</td>
+    <td class="num">{{ pounds(e.basis_pence) }}</td>
+    <td class="num">{{ percent(e.rule.upfront_pct if e.basis == "upfront" else e.rule.trail_pct) }}{% if not confirmed %} [CONFIRM]{% endif %}</td>
+    <td class="num">{{ pounds(e.amount_pence) }}{% if not confirmed %} [CONFIRM]{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">No lines.</td></tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><th colspan="5">Total{% if not confirmed %} [CONFIRM]{% endif %}</th><th class="num">{{ pounds(statement.total_pence) }}</th></tr></tfoot>
+</table>
+
+<p class="small muted">Commission is earned only when {{ company }} receives the fee. A fee refunded within 90 days of clearing is clawed back on the next statement; refunds, chargebacks, write-offs and overpayments are deducted from the next statement or statements. Queries within 30 days of this statement; Group HQ's ledger is the primary record.</p>
+<div class="footer">{{ company }} · Local Partner programme · statement #{{ statement.id }} printed {{ today | date("%d %B %Y") }}</div>
+{% endblock %}

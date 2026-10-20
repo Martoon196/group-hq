@@ -1,0 +1,52 @@
+{# A4 print view shared by the packs. Standalone: no app shell, no external script. Print to PDF makes the file. #}
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap">
+<style>
+  :root { --pink: #E0287A; --pink-deep: #B5185F; --ink: #141416; --muted: #5F5A60; --line: #E4DEE2; --mist: #F3F1F3; }
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { font-family: "Lato", "Helvetica Neue", Arial, sans-serif; color: var(--ink); background: #fff; font-size: 11.5pt; line-height: 1.5; }
+  .sheet { max-width: 190mm; margin: 0 auto; padding: 14mm 0; position: relative; }
+  h1, h2, h3, h4 { line-height: 1.15; margin: 1.1em 0 .4em; font-weight: 900; letter-spacing: -.01em; }
+  h1 { font-size: 2rem; margin-top: 0; }
+  h2 { font-size: 1.35rem; border-bottom: 2px solid var(--pink); padding-bottom: .2em; }
+  h3 { font-size: 1.1rem; }
+  p { margin: 0 0 .8em; }
+  .eyebrow { display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--pink); margin-bottom: .6em; }
+  .muted { color: var(--muted); } .small { font-size: .85em; }
+  table { width: 100%; border-collapse: collapse; font-size: .92em; margin: .4em 0 1em; page-break-inside: auto; }
+  th, td { text-align: left; padding: .4em .5em; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .74em; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  tr { page-break-inside: avoid; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  blockquote { margin: 1em 0; padding: .6em 1em; border-left: 4px solid var(--pink); background: var(--mist); }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 1.4em 0; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em; }
+  ul, ol { padding-left: 1.4em; } li { margin-bottom: .25em; }
+  .toolbar { display: flex; gap: .6rem; align-items: center; justify-content: space-between; background: var(--mist); border-bottom: 1px solid var(--line); padding: .6rem 1rem; font-size: .9rem; }
+  .toolbar a, .toolbar button { font: inherit; font-weight: 700; color: var(--pink-deep); background: none; border: 0; cursor: pointer; }
+  .watermark { position: fixed; top: 38%; left: 0; right: 0; text-align: center; font-size: 5rem; font-weight: 900; letter-spacing: .1em; color: rgba(181, 24, 95, .13); transform: rotate(-24deg); pointer-events: none; z-index: 0; }
+  .draft-banner { border: 2px dashed #B7791F; background: #FFF7EA; color: #7A3E00; border-radius: 8px; padding: .6em 1em; margin: 0 0 1.2em; font-size: .92em; }
+  .withheld { background: var(--mist); border-radius: 8px; padding: .8em 1em; color: var(--muted); font-style: italic; }
+  .cover { border-bottom: 3px solid var(--pink); padding-bottom: 1em; margin-bottom: 1.4em; }
+  .footer { margin-top: 2em; border-top: 1px solid var(--line); padding-top: .6em; font-size: .8em; color: var(--muted); }
+  .page-break { page-break-before: always; }
+  @media print { .toolbar { display: none; } .sheet { padding: 0; max-width: none; } }
+</style>
+</head>
+<body>
+<div class="toolbar"><span>{{ toolbar_label }}</span><span><button type="button" onclick="window.print()">Print or save as PDF</button> · <a href="{{ back or '/franchise' }}">Back to Group HQ</a></span></div>
+{% if watermark %}<div class="watermark" aria-hidden="true">{{ watermark }}</div>{% endif %}
+<main class="sheet">
+{% block sheet %}{% endblock %}
+</main>
+</body>
+</html>

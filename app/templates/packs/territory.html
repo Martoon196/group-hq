@@ -1,0 +1,107 @@
+{% extends "packs/_print_base.html" %}
+{% set title = "Territory report: " ~ codes|join(", ") ~ " | Hello New Home" %}
+{% set toolbar_label = "Territory report for opportunity #" ~ opportunity.id %}
+{% set back = "/franchise/" ~ opportunity.id %}
+{% block sheet %}
+<div class="cover">
+  <span class="eyebrow">Hello New Home · Local Partner programme</span>
+  <h1>Territory report: {{ codes|join(", ") }}</h1>
+  <p class="muted">Prepared for {{ person.name or person.person_key }} on {{ today | date("%d %B %Y") }}. {{ districts|length }} postcode district{{ "s" if districts|length != 1 else "" }}{% if quote.band %}, {{ band_labels.get(quote.band, quote.band) }} band{% endif %}.</p>
+</div>
+
+{% if not confirmed %}
+<div class="draft-banner"><strong>Draft.</strong> The figures behind this territory are being finalised ({{ unconfirmed }} input{{ "s" if unconfirmed != 1 else "" }} awaiting confirmation). This report shows the public data behind each district and nothing else; the fee schedule and the modelled earnings follow from head office in writing and nothing here is a quote.</div>
+{% endif %}
+
+<h2>The districts</h2>
+<p>A territory is a set of whole postcode districts. Leads from these districts route to the Area Partner; the Partner markets and serves inside them and nowhere else.</p>
+<table>
+  <thead><tr><th>District</th><th>Local authority</th><th>Nation</th><th class="num">Dwellings</th><th class="num">Private-rented households</th><th>Band</th></tr></thead>
+  <tbody>
+  {% for d in districts %}
+  <tr>
+    <td><strong>{{ d.district }}</strong></td>
+    {% if d.missing %}<td colspan="5" class="muted">Not in the current territory model.</td>
+    {% else %}
+    <td>{{ d.la_name or "" }}</td>
+    <td>{{ d.nation|replace("_", " ")|capitalize }}</td>
+    <td class="num">{{ number(d.dwellings) or "n/a" }}</td>
+    <td class="num">{{ number(d.prs_households) or "n/a" }}</td>
+    <td>{{ band_labels.get(d.band, d.band) }}</td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+  {% if prs_total %}<tfoot><tr><th colspan="3">Together</th><th class="num">{{ number(dwellings_total) }}</th><th class="num">{{ number(prs_total) }}</th><th></th></tr></tfoot>{% endif %}
+</table>
+<p class="small muted">Private-rented households are the Census 2021 tenure count for the local authority (table TS054), apportioned to the district by dwellings. Local authority from the ONS Postcode Directory. Where a figure is marked n/a the source file has not been loaded for that district.</p>
+
+<h2>Local rents</h2>
+<table>
+  <thead><tr><th>District</th><th class="num">1 bed</th><th class="num">2 bed</th><th class="num">3 bed</th><th>As of</th></tr></thead>
+  <tbody>
+  {% for d in districts if not d.missing %}
+  <tr>
+    <td><strong>{{ d.district }}</strong></td>
+    <td class="num">{{ money(d.rent_1bed) or "n/a" }}</td>
+    <td class="num">{{ money(d.rent_2bed) or "n/a" }}</td>
+    <td class="num">{{ money(d.rent_3bed) or "n/a" }}</td>
+    <td>{{ d.rent_date | date("%B %Y") or "n/a" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="small muted">Monthly private rents from the ONS Price Index of Private Rents at local authority level, so districts in one authority share a figure. Hello New Home's Full Management fee is {{ (management_pct * 100)|round(0)|int }}% of rent, capped at {{ money(fee_cap) }} a month, as published on the fee sheet.</p>
+
+<h2>Licensing</h2>
+<table>
+  <thead><tr><th>District</th><th>Scheme</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for d in districts if not d.missing %}
+  <tr><td><strong>{{ d.district }}</strong></td><td>{{ d.licensing|replace("_", " ") }}</td><td>{{ d.licensing_note or "" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="small muted">Mandatory HMO licensing applies throughout England and Wales; the scheme column is what the council adds. In Wales every landlord and agent is registered or licensed with Rent Smart Wales; head office holds the agent licence.</p>
+
+<h2>The economics</h2>
+{% if confirmed %}
+<p>The Full Management fee per managed single let, the modelled number of managed units at the end of years one to three, and the partner's modelled share in year one, from the territory model on the inputs above.</p>
+<table>
+  <thead><tr><th>District</th><th class="num">Fee per unit</th><th class="num">Units year 1</th><th class="num">Year 2</th><th class="num">Year 3</th><th class="num">Partner share, year 1</th></tr></thead>
+  <tbody>
+  {% for d in districts if not d.missing %}
+  <tr>
+    <td><strong>{{ d.district }}</strong></td>
+    <td class="num">{{ money(d.achievable_fee) or "n/a" }}</td>
+    <td class="num">{{ number(d.units_y1) or "0" }}</td>
+    <td class="num">{{ number(d.units_y2) or "0" }}</td>
+    <td class="num">{{ number(d.units_y3) or "0" }}</td>
+    <td class="num">{{ money(d.partner_net_y1) or "n/a" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<h3>Fee schedule</h3>
+{% if quote.waived %}
+<p>Fees are waived for this territory: no upfront fee, and no monthly fee while the mentorship is active.</p>
+{% else %}
+<table>
+  <thead><tr><th>Item</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  <tr><td>Upfront territory fee ({{ band_labels.get(quote.band, quote.band) }} band)</td><td class="num">{{ quote.upfront }}</td></tr>
+  <tr><td>Monthly systems and brand fee, from month 4</td><td class="num">{{ quote.monthly }} a month</td></tr>
+  </tbody>
+</table>
+{% endif %}
+<p class="small muted">Modelled, not observed: nobody has yet run a territory under this programme. Units are the plan's capture of private-rented households; the partner share is 50% of the management fee on the partner's own instructions and 25% on head office leads they service, after the partner's share of the monthly systems and brand fee (the fee is charged once for the territory and spread across its districts, so the district figures add up to the territory's). The signed agreement and the published fee sheet replace this page where they differ.</p>
+{% else %}
+<p class="withheld">{{ withheld }} This section will show the fee per managed unit, the modelled units at the end of years one to three, the partner's modelled share in year one and the fee schedule for the territory.</p>
+{% endif %}
+
+<div class="footer">
+  Hello New Home 2 Limited. Prepared by head office, {{ today | date("%d %B %Y") }}.
+  {% if model_runs %}Territory model run{{ "s" if model_runs|length != 1 else "" }}: {% for r in model_runs %}#{{ r.id }} on {{ r.ran_at | date("%d %b %Y") }}{% if r.source_files %} from {{ r.source_files|map(attribute="name")|join(", ") }}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}.{% endif %}
+  This report is not legal, tax or financial advice and does not form part of any agreement.
+</div>
+{% endblock %}

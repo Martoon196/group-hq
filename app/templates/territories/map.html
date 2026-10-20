@@ -1,0 +1,64 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% import "territories/_shared.html" as t with context %}
+{% set title = "Territory map | Group HQ" %}
+{% block head %}
+{{ f.styles() }}{{ t.styles() }}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" referrerpolicy="no-referrer">
+<style>
+  #territory-map { height: 70vh; min-height: 420px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--mist); }
+  .leaflet-popup-content { font-family: var(--font); font-size: .88rem; line-height: 1.45; }
+  .leaflet-popup-content h3 { margin: 0 0 .3rem; font-size: 1rem; }
+  .leaflet-popup-content table { border-collapse: collapse; }
+  .leaflet-popup-content td { padding: .1rem .5rem .1rem 0; vertical-align: top; }
+  .leaflet-popup-content td.k { color: var(--muted); font-weight: 700; }
+  .leaflet-popup-content .confirm { margin-left: .2rem; }
+  .missing { font-size: .85rem; color: var(--muted); margin-top: .6rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Hello New Home</span>
+  <h1>Territory map</h1>
+  <p class="muted">A marker at each district's centroid, coloured by who holds it. Click a marker for the headline figures.</p>
+  <div class="actions">
+    <a class="btn btn-ghost btn-sm" href="/territories{% if qs %}?{{ qs }}{% endif %}">List</a>
+    <a class="btn btn-ghost btn-sm" href="/api/territories.json">Export (state only)</a>
+  </div>
+</div>
+
+{{ t.banners(run, sample, unconfirmed) }}
+{% if centroids_meta.sample and run and not sample %}
+<div class="sample-banner">The district centroids on file are the SAMPLE ones (data/sample/district_centroids.json): the real model is loaded but the loader's data/district_centroids.json has not been committed yet, so the markers are hand-made stand-ins.</div>
+{% endif %}
+
+<section class="panel">
+  {{ t.filter_form("/territories/map", filters, bands, states, nations, areas, band_labels, state_labels, nation_labels, qs) }}
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head">
+    <h2>{{ points }} district{{ "s" if points != 1 else "" }} on the map{% if qs %} (filtered){% endif %}</h2>
+    <span class="help">Tiles by OpenStreetMap. Figures in a popup are proposals{{ t.confirm(badges.partner_net_y1 or badges.upfront_fee) }}.</span>
+  </div>
+  <div id="territory-map" role="application" aria-label="Map of postcode districts coloured by state"></div>
+  <p id="map-note" class="help mt-1" aria-live="polite"></p>
+  <div class="legend">
+    <span><i class="dot dot-open"></i>open</span>
+    <span><i class="dot dot-reserved"></i>reserved</span>
+    <span><i class="dot dot-core"></i>core</span>
+    <span><i class="dot dot-hq"></i>head office</span>
+    {% if centroids_meta.path %}<span class="muted">Centroids: {{ centroids_meta.path }}{% if centroids_meta.generated_at %}, {{ centroids_meta.generated_at }}{% endif %}</span>{% endif %}
+  </div>
+  {% if missing %}
+  <p class="missing">{{ missing|length }} district{{ "s" if missing|length != 1 else "" }} with no centroid on file, so not on the map: {{ missing[:40]|join(", ") }}{% if missing|length > 40 %} and {{ missing|length - 40 }} more{% endif %}. Run the loader and commit the centroids file.</p>
+  {% endif %}
+  {% if not run %}<p class="muted">Nothing to show until a model is loaded.</p>{% endif %}
+</section>
+
+<script type="application/json" id="territory-data">{{ data_json }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="/assets/territories.js"></script>
+{% endblock %}

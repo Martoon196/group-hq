@@ -1,0 +1,44 @@
+{% extends "app_base.html" %}
+{% import "sellers/_shared.html" as sl %}
+{% import "_fields.html" as f %}
+{% set title = "New seller | Group HQ" %}
+{% block head %}{{ sl.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Hello New Home territories</span>
+  <h1>New seller</h1>
+  <div class="actions"><a class="btn btn-ghost btn-sm" href="/sellers">All sellers</a></div>
+</div>
+{{ sl.banner(confirmed) }}
+
+<form method="post" action="/sellers/new" class="form">
+  <div class="form-grid">
+    <div class="field">
+      <label for="person_id">Person on the register</label>
+      <select id="person_id" name="person_id">
+        <option value="">Not on the register yet (enter their email below)</option>
+        {% for p in people %}<option value="{{ p.id }}"{% if vals.person_id == p.id|string %} selected{% endif %}>{{ p.person_key }}{% if p.name %} ({{ p.name }}){% endif %}</option>{% endfor %}
+      </select>
+      <span class="hint">One seller per person. A mentee is already on the register; an outsider may not be.</span>
+    </div>
+    {{ f.select("kind", "Kind", kinds, vals.kind, hint=kind_hints[vals.kind] if vals.kind in kind_hints else "") }}
+    {{ f.text("email", "Email (if not on the register)", vals.email, type="email", attrs='autocomplete="off"', hint="Lower-cased and trimmed; it becomes their person key.") }}
+    {{ f.text("name", "Name", vals.name, hint="Used for the initials in the generated code.") }}
+    {{ f.text("phone", "Phone", vals.phone) }}
+    {{ f.text("code", "Seller code", vals.code, attrs='autocomplete="off" placeholder="generated if blank"', hint="The tracked link is /partners-programme?seller=CODE. Leave blank for a short code like JA-7K3M; letters, digits, dashes and underscores only.") }}
+    {{ f.text("bank_reference", "Bank reference", vals.bank_reference, hint="Free text: the account the statement is paid to, or the reference to quote. Never a card number.") }}
+    <div class="field">
+      <label for="self_billing_date">Self-billing agreement</label>
+      <label class="small"><input type="checkbox" name="self_billing" value="1"{% if vals.self_billing %} checked{% endif %}> HMRC self-billing agreement signed on</label>
+      <input id="self_billing_date" name="self_billing_date" type="date" value="{{ vals.self_billing_date }}">
+      <span class="hint">No statement is issued without it (heads of terms section 7). The agreement text is schedule F, still to be confirmed.</span>
+    </div>
+    {{ f.checkbox("active", "Active: new enquiries with this code are attributed", vals.active) }}
+  </div>
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">Create seller</button>
+    <a class="btn btn-ghost" href="/sellers">Cancel</a>
+  </div>
+  <p class="form-note">Commission is earned only once a territory fee has cleared, at the rate of the rule in force for the seller's kind, and the rules are a proposal until the founder confirms them.</p>
+</form>
+{% endblock %}

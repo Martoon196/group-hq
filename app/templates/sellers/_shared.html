@@ -1,0 +1,81 @@
+{# Styles and macros shared by the seller and statement screens. The [CONFIRM] badge marks every percentage, and every
+   figure derived from one, as a proposal until the founder confirms the commission rules. #}
+{% macro styles() -%}
+<style>
+  .confirm { display: inline-block; font-size: .68rem; font-weight: 900; letter-spacing: .08em; background: #FFE2C2; color: #7A3E00; padding: .1rem .45rem; border-radius: 6px; vertical-align: middle; margin-left: .3rem; }
+  .confirm-banner { border: 1px dashed var(--amber); background: #FFF7EA; color: #7A3E00; border-radius: 10px; padding: .7rem 1rem; margin-bottom: 1.2rem; font-size: .9rem; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .neg { color: #9B1C4B; }
+  .ok-text { color: var(--green-deep); font-weight: 700; }
+  .bad-text { color: #9B1C4B; font-weight: 700; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; transform: none; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .8rem; align-items: end; }
+  .filters .field input, .filters .field select { padding: .55rem .7rem; }
+  .filters .form-actions { margin: 0; }
+  .pager { display: flex; gap: .8rem; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 1rem; }
+  .pager .btn[aria-disabled="true"] { opacity: .4; pointer-events: none; }
+  .kind { display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: .2rem .55rem; border-radius: 999px; background: var(--mist); color: var(--ink-2); }
+  .kind-mentee { background: #E8EEFF; color: #2B4A9B; }
+  .kind-franchisee { background: #E3F5EA; color: #17814A; }
+  .kind-outsider { background: #FFF1C9; color: #7A5200; }
+  .stats-5 { grid-template-columns: repeat(5, 1fr); }
+  @media (max-width: 1100px) { .stats-5 { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 560px) { .stats-5 { grid-template-columns: 1fr; } }
+  .stats-5 .stat strong { font-size: 1.45rem; }
+  .link-box { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .link-box input { flex: 1; min-width: 220px; font: inherit; font-size: .9rem; padding: .5rem .7rem; border: 2px solid var(--line); border-radius: 8px; }
+  .rules td.k { color: var(--muted); font-weight: 700; }
+  .claw-form { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+  .claw-form input { font: inherit; font-size: .85rem; padding: .4rem .6rem; border: 2px solid var(--line); border-radius: 8px; min-width: 180px; }
+  details.claw summary { cursor: pointer; font-size: .82rem; color: var(--pink-deep); font-weight: 700; }
+  .statement-total { font-size: 1.3rem; font-weight: 900; }
+</style>
+{%- endmacro %}
+
+{% macro badge(confirmed) -%}{% if not confirmed %}<span class="confirm" title="A proposal until the founder confirms the commission rules">[CONFIRM]</span>{% endif %}{%- endmacro %}
+
+{% macro banner(confirmed) -%}
+{% if not confirmed %}<div class="confirm-banner"><strong>[CONFIRM]</strong> The commission rules are the plan's proposal and the founder has not confirmed them. Every percentage on these screens, and every figure derived from one, is a proposal: nothing here may be promised to a seller, and the printable statements carry a draft watermark, until the rules are confirmed from the Sellers page.</div>{% endif %}
+{%- endmacro %}
+
+{% macro rules_table(rules, kind_labels, rule_confirmed, percent, show_confirm=False) -%}
+<div class="table-scroll">
+<table class="data rules">
+  <thead><tr><th>Seller kind</th><th>Version</th><th class="num">Upfront</th><th class="num">Trail</th><th class="num">Trail months</th><th>From</th><th>Status</th>{% if show_confirm %}<th></th>{% endif %}</tr></thead>
+  <tbody>
+  {% for kind, label in kind_labels.items() %}
+  {% set r = rules.get(kind) %}
+  <tr>
+    <td><span class="kind kind-{{ kind }}">{{ label }}</span></td>
+    {% if r %}
+    <td>v{{ r.version }}</td>
+    <td class="num">{{ percent(r.upfront_pct) }} of the upfront fee{{ badge(rule_confirmed(r)) }}</td>
+    <td class="num">{% if r.trail_pct > 0 and r.trail_months > 0 %}{{ percent(r.trail_pct) }} of the monthly fee{% else %}none{% endif %}{{ badge(rule_confirmed(r)) }}</td>
+    <td class="num">{{ r.trail_months }}</td>
+    <td class="nowrap">{{ r.active_from | date }}</td>
+    <td>{% if rule_confirmed(r) %}<span class="status status-active">confirmed</span>{% else %}<span class="status status-pending">proposal</span>{% endif %}<br><span class="small muted">{{ r.note }}</span></td>
+    {% if show_confirm %}<td class="nowrap">{% if not rule_confirmed(r) %}<form method="post" action="/sellers/rules/{{ r.id }}/confirm" data-confirm="Confirm rule version {{ r.version }} for {{ label|lower }} sellers: {{ percent(r.upfront_pct) }} of the upfront fee{% if r.trail_months %} and {{ percent(r.trail_pct) }} of the monthly fee for {{ r.trail_months }} months{% endif %}? This is the founder's sign-off and it is audited."><button class="btn btn-ghost btn-sm" type="submit">Confirm</button></form>{% endif %}</td>{% endif %}
+    {% else %}
+    <td colspan="{{ 6 if show_confirm else 5 }}" class="muted">No rule in force today.</td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}
+
+{% macro entry_rows(entries, pounds, percent, confirmed, reasons, show_seller=False, show_statement=True) -%}
+{% for e in entries %}
+<tr{% if e.clawback_of %} class="is-clawback"{% endif %}>
+  <td class="nowrap">{{ e.earned_at | uk("%d %b %Y") }}</td>
+  {% if show_seller %}<td><a href="/sellers/{{ e.seller_id }}"><code>{{ e.seller.code }}</code></a></td>{% endif %}
+  <td><a href="/franchise/{{ e.opportunity_id }}">#{{ e.opportunity_id }} {{ e.opportunity.districts|join(", ") }}</a><br><span class="small muted">{{ e.opportunity.person.name or e.opportunity.person.person_key }}</span></td>
+  <td>{% if e.clawback_of %}<span class="bad-text">Clawback</span> of #{{ e.clawback_of }}{% if reasons.get(e.id) %}<br><span class="small muted">{{ reasons[e.id] }}</span>{% endif %}{% else %}{{ "Upfront fee" if e.basis == "upfront" else "Monthly fee, month " ~ e.trail_month }}{% endif %}</td>
+  <td class="num">{{ pounds(e.basis_pence) }}</td>
+  <td class="num">{{ percent(e.rule.upfront_pct if e.basis == "upfront" else e.rule.trail_pct) }} <span class="small muted">v{{ e.rule.version }}</span>{{ badge(confirmed) }}</td>
+  <td class="num{% if e.amount_pence < 0 %} neg{% endif %}">{{ pounds(e.amount_pence) }}{{ badge(confirmed) }}</td>
+  {% if show_statement %}<td class="nowrap small">{% if e.paid_at %}<span class="ok-text">paid {{ e.paid_at | uk("%d %b %Y") }}</span>{% elif e.statement_id %}<a href="/sellers/statements/{{ e.statement_id }}">statement #{{ e.statement_id }}</a>{% else %}awaiting a statement{% endif %}</td>{% endif %}
+</tr>
+{% endfor %}
+{%- endmacro %}

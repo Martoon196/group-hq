@@ -1,0 +1,57 @@
+{% extends "app_base.html" %}
+{% import "franchise/_shared.html" as fr %}
+{% import "_fields.html" as f %}
+{% set title = "New opportunity | Group HQ" %}
+{% block head %}{{ fr.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Hello New Home territories</span>
+  <h1>New opportunity</h1>
+  <div class="actions"><a class="btn btn-ghost btn-sm" href="/franchise">Board</a></div>
+</div>
+{{ fr.banner(confirmed, unconfirmed) }}
+
+<form method="post" action="/franchise/new" class="form">
+  <h2 class="mt-0" style="border:0;padding:0">Who</h2>
+  <div class="form-grid">
+    <div class="field">
+      <label for="person_id">Person on the register</label>
+      <select id="person_id" name="person_id">
+        <option value="">Not on the register yet (fill in the email)</option>
+        {% for p in people %}<option value="{{ p.id }}"{% if vals.person_id == p.id|string %} selected{% endif %}>{{ p.person_key }}{% if p.name %} ({{ p.name }}){% endif %}</option>{% endfor %}
+      </select>
+      <span class="hint">Or leave this blank and add them with the three fields on the right.</span>
+    </div>
+    <div class="field">
+      {{ f.text("email", "Email (new person)", vals.email, type="email", hint="Lower-cased and trimmed; an address already on the register uses that record.") }}
+    </div>
+    {{ f.text("name", "Name (new person)", vals.name, hint="Hello New Home prints the partner's name on the area page, so it is needed before the hand-off.") }}
+    {{ f.text("phone", "Phone (new person)", vals.phone) }}
+  </div>
+
+  <h2>Territory</h2>
+  <div class="form-grid">
+    <div class="field full">
+      <label for="districts">Postcode districts (open or reserved only)</label>
+      <select id="districts" name="districts" class="districts-select" multiple size="12" required>
+        {% for d in districts %}<option value="{{ d.district }}"{% if d.district in vals.districts %} selected{% endif %}>{{ d.district }} · {{ d.la_name or d.area }} · {{ band_labels.get(d.band, d.band) }}{% if d.prs_households is not none %} · {{ number(d.prs_households) }} PRS households{% endif %}{% if d.state == "reserved" %} · reserved{% endif %}</option>{% endfor %}
+      </select>
+      <span class="hint">Hold Ctrl (or Cmd) to pick several. The band is the highest band among the chosen districts; the upfront fee is six months of the modelled partner share at 30 units on the districts' rents, with the band floor ({% for b, v in floors.items() %}{{ band_labels[b] }} {{ money(v) }}{% if not loop.last %}, {% endif %}{% endfor %}); the monthly fee is the band's ({% for b, v in monthly_fees.items() %}{{ band_labels[b] }} {{ money(v) }}{% if not loop.last %}, {% endif %}{% endfor %}). All of it <span class="confirm">[CONFIRM]</span>.</span>
+      {% if not districts %}<span class="hint bad-text">No open or reserved district is in the territory model. Load the model first.</span>{% endif %}
+    </div>
+    {{ f.checkbox("fee_waived", "Fees waived (an active mentee: upfront waived, monthly waived while the mentorship is active)", vals.fee_waived == "1", hint="Ticked by default when the chosen person is active on the Mentorship programme.") }}
+  </div>
+
+  <h2>Where it came from</h2>
+  <div class="form-grid">
+    {{ f.text("seller_code", "Seller code", vals.seller_code, hint="The tracked-link code (?seller=CODE) of the mentee, franchisee or outsider who referred them. Leave blank when nobody did.") }}
+    {{ f.text("source", "Source", vals.source, hint="Web form, event, referral, seller:CODE. Defaults to the seller code when one is given.") }}
+    {{ f.textarea("notes", "Notes", vals.notes, rows=4, hint="Private to Group HQ.") }}
+  </div>
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">Create and quote</button>
+    <a class="btn btn-ghost" href="/franchise">Cancel</a>
+  </div>
+  <p class="form-note">The quote is copied onto the opportunity now and never moves on its own; Requote on the opportunity page recomputes it from today's assumptions. Nothing is sent to Hello New Home until the hand-off button is pressed at onboarding.</p>
+</form>
+{% endblock %}

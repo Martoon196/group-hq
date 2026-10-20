@@ -1,0 +1,143 @@
+{% extends "app_base.html" %}
+{% import "sellers/_shared.html" as sl %}
+{% import "_fields.html" as f %}
+{% set title = seller.code ~ " | Sellers | Group HQ" %}
+{% block head %}{{ sl.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Seller #{{ seller.id }} · <code>{{ seller.code }}</code></span>
+  <h1>{{ person.name or person.person_key }} <span class="kind kind-{{ seller.kind }}">{{ kind_labels[seller.kind] }}</span>{% if not seller.active %} <span class="status status-ended">off</span>{% endif %}</h1>
+  <p class="muted">{{ person.person_key }}{% if person.phone %} · {{ person.phone }}{% endif %}</p>
+  <div class="actions">
+    <a class="btn btn-ghost btn-sm" href="/people/{{ person.id }}">Person record</a>
+    <a class="btn btn-ghost btn-sm" href="/sellers">All sellers</a>
+    <a class="btn btn-ghost btn-sm" href="/franchise/list?seller={{ seller.id }}">Opportunities</a>
+    <a class="btn btn-ghost btn-sm" href="/audit?q=seller:{{ seller.id }}">History</a>
+  </div>
+</div>
+{{ sl.banner(confirmed) }}
+{% if not seller.self_billing_agreed_at %}<div class="flash flash-err">{{ no_self_billing }}</div>{% endif %}
+
+<div class="stats stats-5">
+  <div class="stat"><strong>{{ pounds(totals.earned) }}</strong><span>earned{{ sl.badge(confirmed) }} · {{ totals.entries }} entr{{ "ies" if totals.entries != 1 else "y" }}</span></div>
+  <div class="stat{% if totals.clawed_back %} is-bad{% endif %}"><strong>{{ pounds(totals.clawed_back) }}</strong><span>clawed back</span></div>
+  <div class="stat"><strong>{{ pounds(totals.cleared) }}</strong><span>cleared (net, payable){{ sl.badge(confirmed) }}</span></div>
+  <div class="stat"><strong>{{ pounds(totals.paid) }}</strong><span>paid</span></div>
+  <div class="stat"><strong>{{ pounds(totals.owed) }}</strong><span>owed{{ sl.badge(confirmed) }}{% if totals.on_statement %} · {{ pounds(totals.on_statement) }} on a statement{% endif %}</span></div>
+</div>
+
+<div class="two-col mt-2">
+  <div>
+    <section class="panel">
+      <div class="panel-head"><h2>Tracked link</h2></div>
+      <div class="link-box"><input id="tracked-link" type="text" readonly value="{{ link }}"><button class="btn btn-ghost btn-sm" type="button" data-copy-target="#tracked-link">Copy</button></div>
+      <p class="help mt-1">An enquiry that arrives with <code>?seller={{ seller.code }}</code> lands on the opportunity with this seller attributed; it can also be typed as the seller code on an opportunity. A seller is never attributed to their own purchase.</p>
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Ledger</h2><span class="help">An entry exists only once the fee behind it has cleared.</span></div>
+      {% if entries %}
+      <div class="table-scroll">
+      <table class="data">
+        <thead><tr><th>Earned</th><th>Opportunity</th><th>Basis</th><th class="num">Fee received</th><th class="num">Rate</th><th class="num">Commission</th><th>Statement</th><th></th></tr></thead>
+        <tbody>
+        {% for e in entries %}
+        <tr>
+          <td class="nowrap">{{ e.earned_at | uk("%d %b %Y") }}</td>
+          <td><a href="/franchise/{{ e.opportunity_id }}">#{{ e.opportunity_id }} {{ e.opportunity.districts|join(", ") }}</a><br><span class="small muted">{{ e.opportunity.person.name or e.opportunity.person.person_key }}</span></td>
+          <td>{% if e.clawback_of %}<span class="bad-text">Clawback</span> of #{{ e.clawback_of }}{% if reasons.get(e.id) %}<br><span class="small muted">{{ reasons[e.id] }}</span>{% endif %}{% else %}#{{ e.id }} {{ "Upfront fee" if e.basis == "upfront" else "Monthly fee, month " ~ e.trail_month }}{% endif %}</td>
+          <td class="num">{{ pounds(e.basis_pence) }}</td>
+          <td class="num">{{ percent(e.rule.upfront_pct if e.basis == "upfront" else e.rule.trail_pct) }} <span class="small muted">v{{ e.rule.version }}</span>{{ sl.badge(confirmed) }}</td>
+          <td class="num{% if e.amount_pence < 0 %} neg{% endif %}">{{ pounds(e.amount_pence) }}{{ sl.badge(confirmed) }}</td>
+          <td class="nowrap small">{% if e.paid_at %}<span class="ok-text">paid {{ e.paid_at | uk("%d %b %Y") }}</span>{% elif e.statement_id %}<a href="/sellers/statements/{{ e.statement_id }}">statement #{{ e.statement_id }}</a>{% else %}awaiting a statement{% endif %}</td>
+          <td>
+            {% if not e.clawback_of and e.id not in clawed %}
+            <details class="claw"><summary>Claw back</summary>
+              <form method="post" action="/sellers/{{ seller.id }}/entries/{{ e.id }}/clawback" class="claw-form mt-1" data-confirm="Claw back {{ pounds(e.amount_pence) }} from entry #{{ e.id }}? A negative entry goes on the next unpaid statement.">
+                <input name="reason" type="text" placeholder="Why: refunded on, written off" required>
+                <button class="btn btn-danger btn-sm" type="submit">Claw back</button>
+              </form>
+            </details>
+            {% elif e.id in clawed %}<span class="small muted">clawed back</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}<p class="muted">No entries yet. They appear when a fee on an attributed opportunity clears.</p>{% endif %}
+      <p class="help mt-1">A refund of a fee within 90 days of clearing claws its commission back automatically when the refund is recorded; the button is for anything else (a write-off, a correction) and asks why.</p>
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Opportunities attributed</h2><a class="btn btn-ghost btn-sm" href="/franchise/new?seller={{ seller.code }}">New opportunity with this code</a></div>
+      {% if opportunities %}
+      <div class="table-scroll">
+      <table class="data">
+        <thead><tr><th>Person</th><th>Stage</th><th>Districts</th><th class="num">Upfront quoted</th><th class="num">Monthly quoted</th><th>Since</th></tr></thead>
+        <tbody>
+        {% for o in opportunities %}
+        <tr>
+          <td><a href="/franchise/{{ o.id }}"><strong>{{ o.person.name or o.person.person_key }}</strong></a></td>
+          <td>{{ stage_labels.get(o.stage, o.stage) }}</td>
+          <td>{{ o.districts|join(", ") }}</td>
+          <td class="num">{% if o.quoted_upfront_pence is not none %}{{ pounds(o.quoted_upfront_pence) }}{% endif %}</td>
+          <td class="num">{% if o.quoted_monthly_pence is not none %}{{ pounds(o.quoted_monthly_pence) }}{% endif %}</td>
+          <td class="nowrap small">{{ o.stage_changed_at | uk("%d %b %Y") }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}<p class="muted">Nothing attributed yet.</p>{% endif %}
+    </section>
+  </div>
+
+  <div>
+    <section class="panel">
+      <div class="panel-head"><h2>Rule in force</h2></div>
+      {% if rule %}
+      <dl class="kv">
+        <dt>Version</dt><dd>v{{ rule.version }} for {{ kind_labels[rule.seller_kind]|lower }} sellers, from {{ rule.active_from | date }}</dd>
+        <dt>Upfront</dt><dd>{{ percent(rule.upfront_pct) }} of the upfront fee{{ sl.badge(rule_confirmed(rule)) }}</dd>
+        <dt>Trail</dt><dd>{% if rule.trail_pct > 0 and rule.trail_months > 0 %}{{ percent(rule.trail_pct) }} of the monthly fee for months 1 to {{ rule.trail_months }}{% else %}none{% endif %}{{ sl.badge(rule_confirmed(rule)) }}</dd>
+        <dt>Status</dt><dd>{% if rule_confirmed(rule) %}<span class="status status-active">confirmed</span>{% else %}<span class="status status-pending">proposal</span>{% endif %}</dd>
+      </dl>
+      {% else %}<p class="bad-text">No commission rule is in force for {{ kind_labels[seller.kind]|lower }} sellers today, so nothing can accrue.</p>{% endif %}
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Statements</h2><a class="btn btn-ghost btn-sm" href="/sellers/statements?seller={{ seller.id }}">All</a></div>
+      {% if statements %}
+      <table class="data">
+        <thead><tr><th>Period</th><th class="num">Total</th><th>Paid</th></tr></thead>
+        <tbody>
+        {% for st in statements %}
+        <tr>
+          <td><a href="/sellers/statements/{{ st.id }}">{{ st.period_start | date("%B %Y") }}</a></td>
+          <td class="num{% if st.total_pence < 0 %} neg{% endif %}">{{ pounds(st.total_pence) }}{{ sl.badge(confirmed) }}</td>
+          <td class="nowrap small">{% if st.paid_at %}<span class="ok-text">{{ st.paid_at | uk("%d %b %Y") }}</span>{% elif st.total_pence <= 0 %}carries forward{% else %}due {{ payment_due_on(st) | date }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="muted">No statements yet. They are generated on the 10th for the previous month, once a self-billing agreement is on record.</p>{% endif %}
+    </section>
+
+    <form method="post" action="/sellers/{{ seller.id }}" class="form mt-2">
+      <h2 class="mt-0" style="border:0;padding:0">Details</h2>
+      {{ f.select("kind", "Kind", kinds, vals.kind, hint=kind_hints[vals.kind] if vals.kind in kind_hints else "") }}
+      <div class="mt-1">{{ f.text("code", "Seller code", vals.code, required=True, attrs='autocomplete="off"', hint="Changing it changes the tracked link; anything printed with the old code stops attributing.") }}</div>
+      <div class="mt-1">{{ f.text("bank_reference", "Bank reference", vals.bank_reference, hint="What the statement is paid against. Free text, never a card number.") }}</div>
+      <div class="field mt-1">
+        <label for="self_billing_date">Self-billing agreement</label>
+        <label class="small"><input type="checkbox" name="self_billing" value="1"{% if vals.self_billing %} checked{% endif %}> signed on</label>
+        <input id="self_billing_date" name="self_billing_date" type="date" value="{{ vals.self_billing_date }}">
+        <span class="hint">No statement is issued without it.</span>
+      </div>
+      <div class="mt-1">{{ f.checkbox("active", "Active: new enquiries with this code are attributed", vals.active, hint="Turning it off stops new attributions; entries already earned are unaffected.") }}</div>
+      <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}

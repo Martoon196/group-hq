@@ -1,0 +1,71 @@
+{% extends "app_base.html" %}
+{% import "franchise/_shared.html" as fr %}
+{% set title = "Franchise pipeline | Group HQ" %}
+{% block head %}{{ fr.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Hello New Home territories</span>
+  <h1>Franchise pipeline</h1>
+  <div class="actions">
+    <a class="btn btn-primary btn-sm" href="/franchise/new">New opportunity</a>
+    <a class="btn btn-ghost btn-sm" href="/franchise/list">List view</a>
+    <a class="btn btn-ghost btn-sm" href="/franchise/packs/prospectus">Prospectus</a>
+  </div>
+</div>
+{{ fr.banner(confirmed, unconfirmed) }}
+
+<div class="stats stats-4">
+  <div class="stat"><strong>{{ live }}</strong><span>live opportunities · {{ total }} in all</span></div>
+  <div class="stat"><strong>{{ columns[2].count + columns[3].count }}</strong><span>packs out (pack sent and follow-up)</span></div>
+  <div class="stat{% if overdue %} is-bad{% endif %}"><strong>{{ overdue|length }}</strong><span>overdue follow-ups · {{ due_soon|length }} due in the next two days</span></div>
+  <div class="stat"><strong>{{ columns[5].count + columns[6].count }}</strong><span>paid or onboarding</span></div>
+</div>
+
+<div class="board mt-2">
+  {% for col in columns %}
+  <section class="column{% if col.stage == 'lost' %} is-lost{% endif %}">
+    <h2><span>{{ col.label }}</span><span class="count">{{ col.count }}</span></h2>
+    {% for o in col.rows %}
+    <a class="card" href="/franchise/{{ o.id }}">
+      <strong>{{ o.person.name or o.person.person_key }}</strong>
+      <span class="meta">{{ o.districts|join(", ") }}{% if o.band %} · {{ band_labels.get(o.band, o.band) }}{% endif %}</span>
+      <span class="meta">{{ o.stage_changed_at | uk("%d %b") }}{% if overdue_by_opportunity.get(o.id) %} · <span class="overdue">{{ overdue_by_opportunity[o.id] }} overdue</span>{% elif open_by_opportunity.get(o.id) %} · {{ open_by_opportunity[o.id] }} open task{{ "s" if open_by_opportunity[o.id] != 1 else "" }}{% endif %}</span>
+    </a>
+    {% endfor %}
+    {% if col.count > column_limit %}<a class="small" href="/franchise/list?stage={{ col.stage }}">All {{ col.count }}</a>{% endif %}
+    {% if not col.rows %}<span class="small muted">None</span>{% endif %}
+  </section>
+  {% endfor %}
+</div>
+
+<div class="two-col mt-2">
+  <section class="panel">
+    <div class="panel-head"><h2>Overdue follow-ups</h2><span class="help">Open tasks whose day has passed.</span></div>
+    {% if overdue %}
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Due</th><th>Opportunity</th><th>Task</th></tr></thead>
+      <tbody>
+      {% for t in overdue %}
+      <tr>
+        <td class="nowrap bad-text">{{ t.due_on | date("%d %b") }}</td>
+        <td><a href="/franchise/{{ t.opportunity_id }}">{{ t.opportunity.person.name or t.opportunity.person.person_key }}</a><br><span class="small muted">{{ t.opportunity.districts|join(", ") }}</span></td>
+        <td>{{ t.title }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}<p class="muted">Nothing overdue.</p>{% endif %}
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2>Due soon</h2><span class="help">Today and the next two days.</span></div>
+    {% if due_soon %}
+    <ul class="tick-list">
+      {% for t in due_soon %}<li><a href="/franchise/{{ t.opportunity_id }}">{{ t.opportunity.person.name or t.opportunity.person.person_key }}</a>: {{ t.title }} <span class="small muted">({{ t.due_on | date("%d %b") }})</span></li>{% endfor %}
+    </ul>
+    {% else %}<p class="muted">Nothing due in the next two days.</p>{% endif %}
+    <p class="help mt-1">The cadence: a pack goes out, then day 2 check-in, day 5 numbers, day 9 objections, day 14 close or park. Each task carries its email on the opportunity page.</p>
+  </section>
+</div>
+{% endblock %}

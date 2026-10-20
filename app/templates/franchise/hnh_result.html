@@ -1,0 +1,49 @@
+{% extends "app_base.html" %}
+{% import "franchise/_shared.html" as fr %}
+{% set title = "Hello New Home hand-off | Group HQ" %}
+{% block head %}{{ fr.styles() }}
+<style>
+  .run-banner { border-radius: 10px; padding: .8rem 1rem; margin-bottom: 1.2rem; font-weight: 700; }
+  .run-banner.is-dry { background: #E8EEFF; color: #2B4A9B; }
+  .run-banner.is-live { background: #E3F5EA; color: #17814A; }
+  .run-banner.is-bad { background: #FDE8EE; color: #9B1C4B; }
+  pre.plan { font-size: .8rem; background: var(--mist); padding: .8rem; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Opportunity #{{ o.id }}</span>
+  <h1>Hello New Home hand-off for {{ person.name or person.person_key }}</h1>
+  <div class="actions"><a class="btn btn-ghost btn-sm" href="/franchise/{{ o.id }}">Back to the opportunity</a><a class="btn btn-ghost btn-sm" href="/grants/calls">Connector calls</a></div>
+</div>
+
+{% if error %}
+<div class="run-banner is-bad">Hello New Home refused: {{ error.summary() }}. Nothing was created. The call is recorded as failed (#{{ call.id }}) and can be pressed again once the cause is fixed.</div>
+{% elif result.dry_run %}
+<div class="run-banner is-dry">Dry run: nothing was sent. The plan below is recorded on connector call #{{ call.id }}; the next live press sends it.</div>
+{% else %}
+<div class="run-banner is-live">Created in Hello New Home{% if result.remote_ref %} as partner {{ result.remote_ref }}{% endif %}. Connector call #{{ call.id }} succeeded.</div>
+{% endif %}
+
+<div class="two-col">
+  <section class="panel">
+    <h2>What was sent</h2>
+    <dl class="kv">
+      <dt>Person</dt><dd>{{ person.name or "(no name)" }} · {{ person.person_key }}</dd>
+      <dt>Tier</dt><dd><code>area</code></dd>
+      <dt>Postcodes</dt><dd>{{ postcodes|join(", ") }}</dd>
+      <dt>Fee waived</dt><dd>{{ "yes" if fee_waived else "no" }}</dd>
+      {% if links %}<dt>Ids returned</dt><dd>{% for k, v in links.items() %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %} (stored on the person record)</dd>{% endif %}
+    </dl>
+    {% if once %}
+    <p class="mt-1"><strong class="once">{{ once }}</strong><br><span class="small muted">Pass this on now: it is not stored anywhere in Group HQ.</span></p>
+    {% endif %}
+  </section>
+  <section class="panel">
+    <h2>The call</h2>
+    {% set plan = (result.plan if result else error.plan) %}
+    {% if plan %}<pre class="plan">{{ plan | tojson(indent=2) }}</pre>{% else %}<p class="muted">No plan was recorded.</p>{% endif %}
+    <p class="help">District states (core, reserved) are set on the territory screens, not here; this button only creates the partner and their area in Hello New Home.</p>
+  </section>
+</div>
+{% endblock %}

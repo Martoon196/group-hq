@@ -1,0 +1,11 @@
+district,licensing,licensing_note,sample
+SA1,additional,"Additional HMO licensing covers Castle, Uplands, St Thomas and Waterfront wards from 14 February 2026; mandatory licensing applies to larger HMOs citywide. Every landlord must be registered with Rent Smart Wales. [SAMPLE: verify against the council register]",SAMPLE
+SA2,additional,Uplands ward is inside Swansea's additional licensing area from 14 February 2026. Rent Smart Wales registration applies. [SAMPLE: verify],SAMPLE
+SA3,mandatory_only,Mandatory HMO licensing only. Rent Smart Wales registration applies. [SAMPLE: verify],SAMPLE
+DH1,selective,County Durham's selective licensing scheme (from April 2022) covers designated streets in Durham City; check the street list before quoting. [SAMPLE: verify],SAMPLE
+DH7,selective,Parts of DH7 sit inside County Durham's selective licensing designation. [SAMPLE: verify],SAMPLE
+SP10,mandatory_only,"Test Valley: mandatory HMO licensing only, no additional or selective scheme found. [SAMPLE: verify]",SAMPLE
+E1,selective_additional,"Tower Hamlets runs borough-wide additional HMO licensing and selective licensing in Weavers, Whitechapel and Spitalfields and Banglatown. [SAMPLE: verify]",SAMPLE
+SE15,additional,Southwark: borough-wide additional HMO licensing; selective licensing in designated areas. [SAMPLE: verify],SAMPLE
+TA1,mandatory_only,Somerset Council: mandatory HMO licensing only. [SAMPLE: verify],SAMPLE
+BA1,additional,Bath and North East Somerset: additional HMO licensing in central Bath wards. [SAMPLE: verify],SAMPLE

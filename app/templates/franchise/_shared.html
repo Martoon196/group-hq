@@ -1,0 +1,64 @@
+{# Styles and small macros shared by the franchise pipeline screens. The [CONFIRM] badge marks every figure that is a
+   proposal until the founder confirms the territory model's assumptions. #}
+{% macro styles() -%}
+<style>
+  .confirm { display: inline-block; font-size: .68rem; font-weight: 900; letter-spacing: .08em; background: #FFE2C2; color: #7A3E00; padding: .1rem .45rem; border-radius: 6px; vertical-align: middle; margin-left: .3rem; }
+  .confirm-banner { border: 1px dashed var(--amber); background: #FFF7EA; color: #7A3E00; border-radius: 10px; padding: .7rem 1rem; margin-bottom: 1.2rem; font-size: .9rem; }
+  .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); gap: .8rem; overflow-x: auto; padding-bottom: .6rem; }
+  .column { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: .8rem; min-width: 0; display: flex; flex-direction: column; gap: .5rem; }
+  .column h2 { font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 .3rem; display: flex; justify-content: space-between; }
+  .column h2 .count { color: var(--pink-deep); }
+  .column.is-lost { background: var(--mist); }
+  .card { display: block; text-decoration: none; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: .6rem .7rem; background: #fff; }
+  .card:hover { border-color: var(--pink); color: var(--ink); }
+  .card strong { display: block; font-size: .95rem; }
+  .card .meta { font-size: .78rem; color: var(--muted); display: block; }
+  .card .overdue { color: #9B1C4B; font-weight: 700; }
+  .stage { display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: .2rem .55rem; border-radius: 999px; background: var(--mist); color: var(--ink-2); }
+  .stage-enquiry { background: #E8EEFF; color: #2B4A9B; }
+  .stage-discovery { background: #E8EEFF; color: #2B4A9B; }
+  .stage-pack_sent { background: #FFF1C9; color: #7A5200; }
+  .stage-follow_up { background: #FFF1C9; color: #7A5200; }
+  .stage-agreement { background: #FFE2C2; color: #7A3E00; }
+  .stage-paid { background: #E3F5EA; color: #17814A; }
+  .stage-onboarding { background: #E3F5EA; color: #17814A; }
+  .stage-lost { background: #EEE; color: #666; }
+  .band { display: inline-block; font-size: .72rem; font-weight: 700; padding: .15rem .5rem; border-radius: 6px; background: var(--pink-soft); color: var(--pink-deep); }
+  .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+  .timeline li { border-left: 3px solid var(--line); padding: .1rem 0 .1rem .8rem; }
+  .timeline li.kind-call { border-left-color: var(--green); }
+  .timeline li.kind-email { border-left-color: #2B4A9B; }
+  .timeline li.kind-task_done { border-left-color: var(--pink); }
+  .timeline .when { font-size: .78rem; color: var(--muted); }
+  .timeline .body { white-space: pre-wrap; word-break: break-word; margin: .1rem 0 0; font-size: .92rem; }
+  .task { border: 1px solid var(--line); border-radius: 10px; padding: .7rem .8rem; margin-bottom: .6rem; background: #fff; }
+  .task.is-done, .task.is-skipped { opacity: .6; }
+  .task.is-overdue { border-color: #9B1C4B; }
+  .task-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; }
+  .task-head .due { font-size: .82rem; color: var(--muted); }
+  .task-head .due.is-overdue { color: #9B1C4B; font-weight: 700; }
+  details.email { margin-top: .5rem; }
+  details.email summary { cursor: pointer; font-size: .85rem; color: var(--pink-deep); font-weight: 700; }
+  details.email textarea { width: 100%; min-height: 220px; font: inherit; font-size: .88rem; padding: .6rem; border: 2px solid var(--line); border-radius: 8px; margin-top: .4rem; }
+  .btn.is-done { background: var(--green); color: #fff; border-color: var(--green); }
+  .districts-select { min-height: 260px; }
+  .quote { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .8rem; }
+  .quote .stat strong { font-size: 1.5rem; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ok-text { color: var(--green-deep); font-weight: 700; }
+  .bad-text { color: #9B1C4B; font-weight: 700; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; transform: none; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .8rem; align-items: end; }
+  .filters .field input, .filters .field select { padding: .55rem .7rem; }
+  .filters .form-actions { margin: 0; }
+  .pager { display: flex; gap: .8rem; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 1rem; }
+  .pager .btn[aria-disabled="true"] { opacity: .4; pointer-events: none; }
+  .once { background: #FFF1C9; color: #7A5200; padding: .2rem .4rem; border-radius: 6px; }
+</style>
+{%- endmacro %}
+
+{% macro badge(confirmed) -%}{% if not confirmed %}<span class="confirm" title="A proposal until the founder confirms the territory model">[CONFIRM]</span>{% endif %}{%- endmacro %}
+
+{% macro banner(confirmed, unconfirmed) -%}
+{% if not confirmed %}<div class="confirm-banner"><strong>[CONFIRM]</strong> {{ unconfirmed }} assumption{{ "s" if unconfirmed != 1 else "" }} in the territory model {{ "are" if unconfirmed != 1 else "is" }} still unconfirmed. Every quoted and modelled figure on this screen is a proposal; the packs withhold money until the founder confirms them, and nothing here may be quoted to a prospect.</div>{% endif %}
+{%- endmacro %}

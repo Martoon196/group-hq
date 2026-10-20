@@ -48,6 +48,22 @@ services:
       # agreement exists), so PP can go live without the others burning their retry attempts every night.
       - key: CONNECTORS_DRY_RUN
         value: "ordris,kp,hnh"
+      # Franchise follow-up emails. With SMTP_HOST unset the emails are shown for copying and nothing is sent.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_STARTTLS
+        value: "1"
+      - key: MAIL_FROM
+        sync: false
+      # Bearer token Hello New Home presents to GET /api/territories.json (district, area, state only).
+      - key: TERRITORY_EXPORT_TOKEN
+        sync: false
 
   - type: cron
     name: group-hq-recompute
@@ -118,3 +134,30 @@ services:
           type: web
           name: group-hq
           envVarKey: CONNECTORS_DRY_RUN
+
+  # Seller self-billing statements: on the 10th it generates the previous month for every seller with payable
+  # entries; on any other day it is a no-op (app/jobs/statements.py). Runs after the recompute.
+  - type: cron
+    name: group-hq-statements
+    runtime: python
+    region: frankfurt
+    plan: starter
+    schedule: "40 3 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.jobs.statements
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: DATABASE_URL
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: SECRET_KEY
+      - key: BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: BASE_URL

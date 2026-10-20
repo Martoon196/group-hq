@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.log
+# Real ONS extracts are large (the ONSPD is over 100 MB); only data/sample/*.csv is tracked.
+data/*.csv

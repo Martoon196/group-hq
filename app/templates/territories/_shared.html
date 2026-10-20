@@ -1,0 +1,80 @@
+{# Shared pieces of the territory screens: the [CONFIRM] badge, the state chip colours, the filters and the banners. #}
+{% macro styles() -%}
+<style>
+  .confirm { display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .08em; padding: .1rem .4rem; border-radius: 6px; background: #FFF1C9; color: #7A5200; vertical-align: middle; margin-left: .3rem; white-space: nowrap; }
+  .status-open { background: #EEE; color: #555; }
+  .status-reserved { background: #FFF1C9; color: #7A5200; }
+  .status-core { background: #E3F5EA; color: #17814A; }
+  .status-hq { background: var(--pink-soft); color: var(--pink-deep); }
+  .sample-banner { border: 2px dashed #D98E04; background: #FFF7E6; color: #7A3E00; border-radius: 10px; padding: .7rem 1rem; margin-bottom: 1.2rem; font-weight: 700; }
+  .counts { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0 0; }
+  .counts a { text-decoration: none; }
+  .counts a.is-on .chip { border-color: var(--pink); color: var(--pink-deep); }
+  .counts .chip { white-space: nowrap; }
+  table.data td.k { color: var(--muted); font-weight: 700; width: 38%; }
+  .neg { color: #9B1C4B; }
+  .legend { display: flex; flex-wrap: wrap; gap: .8rem 1.2rem; align-items: center; margin: .6rem 0 0; font-size: .88rem; }
+  .legend .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: .35rem; border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); vertical-align: -1px; }
+  .dot-open { background: #8A8A8A; } .dot-reserved { background: #D98E04; } .dot-core { background: #1F9D55; } .dot-hq { background: #E0287A; }
+</style>
+{%- endmacro %}
+
+{% macro confirm(on, title="A proposal: the founder has not confirmed the assumptions behind this figure (docs/territory-model.md)") -%}
+{% if on %}<span class="confirm" title="{{ title }}">[CONFIRM]</span>{% endif %}
+{%- endmacro %}
+
+{% macro state_chip(state) -%}
+<span class="status status-{{ state }}" title="{{ state_labels[state] }}">{{ "head office" if state == "hq" else state }}</span>
+{%- endmacro %}
+
+{% macro banners(run, sample, unconfirmed) -%}
+{% if not run %}
+<div class="flash flash-err">No territory model has been loaded yet. Run <code>python scripts/load_territory_model.py --sample</code> to see the screens with hand-made sample data, or load the real files as <code>data/README.md</code> describes.</div>
+{% elif sample %}
+<div class="sample-banner">SAMPLE DATA. Model run #{{ run.id }} on {{ run.ran_at | uk }} read the hand-made files under data/sample: nothing on this screen is a fact about a district. Load the real ONS files to replace it.</div>
+{% endif %}
+{% if unconfirmed %}
+<p class="help">{{ unconfirmed|length }} of the model's assumptions are unconfirmed, so every modelled figure below is a proposal and wears the <span class="confirm">[CONFIRM]</span> badge. Partners never see these figures.</p>
+{% endif %}
+{%- endmacro %}
+
+{% macro filter_form(action, filters, bands, states, nations, areas, band_labels, state_labels, nation_labels, qs) -%}
+<form method="get" action="{{ action }}" class="filters">
+  <div class="field">
+    <label for="band">Band</label>
+    <select id="band" name="band">
+      <option value="">Any band</option>
+      {% for b in bands %}<option value="{{ b }}"{% if filters.band == b %} selected{% endif %}>{{ band_labels[b] }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="state">State</label>
+    <select id="state" name="state">
+      <option value="">Any state</option>
+      {% for st in states %}<option value="{{ st }}"{% if filters.state == st %} selected{% endif %}>{{ "Head office" if st == "hq" else st|capitalize }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="area">Postcode area</label>
+    <select id="area" name="area">
+      <option value="">Any area</option>
+      {% for ar in areas %}<option value="{{ ar }}"{% if filters.area == ar %} selected{% endif %}>{{ ar }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="nation">Nation</label>
+    <select id="nation" name="nation">
+      <option value="">Any nation</option>
+      {% for n in nations %}<option value="{{ n }}"{% if filters.nation == n %} selected{% endif %}>{{ nation_labels[n] }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="q">Search</label>
+    <input id="q" name="q" type="search" value="{{ filters.q }}" placeholder="District or authority">
+  </div>
+  <div class="form-actions">
+    <button class="btn btn-primary btn-sm" type="submit">Filter</button>
+    {% if qs %}<a class="btn btn-ghost btn-sm" href="{{ action }}">Clear</a>{% endif %}
+  </div>
+</form>
+{%- endmacro %}

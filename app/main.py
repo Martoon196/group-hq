@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Group HQ", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/assets", StaticFiles(directory=str(config.APP_DIR / "static")), name="assets")
 
-from .routers import audit, auth, dashboard, grants, mentees, people, programmes  # noqa: E402  (after templates exist)
+from .routers import audit, auth, dashboard, franchise, grants, mentees, people, programmes, sellers, territories  # noqa: E402  (after templates exist)
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
@@ -38,6 +38,9 @@ app.include_router(people.router)
 app.include_router(mentees.router)
 app.include_router(grants.router)
 app.include_router(programmes.router)
+app.include_router(franchise.router)
+app.include_router(sellers.router)
+app.include_router(territories.router)
 app.include_router(audit.router)
 
 NO_STORE_PREFIXES = ("/login", "/password")

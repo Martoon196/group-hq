@@ -1,0 +1,58 @@
+{% extends "app_base.html" %}
+{% import "franchise/_shared.html" as fr %}
+{% import "_fields.html" as f %}
+{% set title = "Opportunities | Group HQ" %}
+{% block head %}{{ fr.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Hello New Home territories</span>
+  <h1>Opportunities</h1>
+  <div class="actions"><a class="btn btn-primary btn-sm" href="/franchise/new">New opportunity</a><a class="btn btn-ghost btn-sm" href="/franchise">Board</a></div>
+</div>
+{{ fr.banner(confirmed, unconfirmed) }}
+
+<section class="panel">
+  <form method="get" action="/franchise/list" class="filters">
+    <div class="field">
+      <label for="stage">Stage</label>
+      <select id="stage" name="stage"><option value="">Any stage</option>{% for st in stages %}<option value="{{ st }}"{% if filters.stage == st %} selected{% endif %}>{{ stage_labels[st] }}</option>{% endfor %}</select>
+    </div>
+    <div class="field">
+      <label for="seller">Seller</label>
+      <select id="seller" name="seller"><option value="">Any seller</option>{% for sl in sellers %}<option value="{{ sl.id }}"{% if filters.seller == sl.id|string %} selected{% endif %}>{{ sl.code }} ({{ sl.person.name or sl.person.person_key }})</option>{% endfor %}</select>
+    </div>
+    <div class="field">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="search" value="{{ filters.q }}" placeholder="Email, name, district or source">
+    </div>
+    <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Filter</button>{% if qs %}<a class="btn btn-ghost btn-sm" href="/franchise/list">Clear</a>{% endif %}</div>
+  </form>
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>{{ total }} opportunit{{ "ies" if total != 1 else "y" }}{% if qs %} matching{% endif %}</h2></div>
+  {% if rows %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Person</th><th>Stage</th><th>Districts</th><th>Band</th><th class="num">Upfront</th><th class="num">Monthly</th><th>Seller</th><th>Source</th><th>Since</th></tr></thead>
+    <tbody>
+    {% for o in rows %}
+    <tr>
+      <td><a href="/franchise/{{ o.id }}"><strong>{{ o.person.name or o.person.person_key }}</strong></a>{% if o.person.name %}<br><span class="small muted">{{ o.person.person_key }}</span>{% endif %}{% if overdue_by_opportunity.get(o.id) %}<br><span class="small bad-text">{{ overdue_by_opportunity[o.id] }} overdue</span>{% endif %}</td>
+      <td><span class="stage stage-{{ o.stage }}">{{ stage_labels[o.stage] }}</span></td>
+      <td>{{ o.districts|join(", ") }}</td>
+      <td>{% if o.band %}<span class="band">{{ band_labels.get(o.band, o.band) }}</span>{% endif %}</td>
+      <td class="num">{% if o.quoted_upfront_pence is not none %}{{ pounds(o.quoted_upfront_pence) }}{{ fr.badge(confirmed) }}{% endif %}</td>
+      <td class="num">{% if o.quoted_monthly_pence is not none %}{{ pounds(o.quoted_monthly_pence) }}{{ fr.badge(confirmed) }}{% endif %}</td>
+      <td>{% if o.seller %}<code>{{ o.seller.code }}</code>{% endif %}</td>
+      <td class="small">{{ o.source }}</td>
+      <td class="nowrap small">{{ o.stage_changed_at | uk("%d %b %Y") }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ f.pager("/franchise/list", qs_prev, qs_next, page, pages) }}
+  {% else %}<p class="muted">No opportunities{% if qs %} match{% else %} yet{% endif %}.</p>{% endif %}
+</section>
+{% endblock %}

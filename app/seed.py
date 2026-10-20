@@ -12,6 +12,7 @@ from . import config
 from .auth import find_user_by_email, generate_password, hash_password
 from .db import SessionLocal
 from .models import Programme, User
+from .services import territory_rules
 
 # Package table from the plan (Phase 2). Items are {product, kind, value} and may carry "months" when the
 # item runs for a fixed term rather than following the mentee's computed end date. Existing rows are
@@ -106,6 +107,10 @@ def seed(db: Session | None = None, *, quiet: bool = False) -> dict:
     db = db or SessionLocal()
     try:
         report: dict = {"programmes_added": ensure_programmes(db)}
+        # Territory-model assumptions and commission rule version 1 (both unconfirmed proposals until the founder
+        # presses Confirm): idempotent, never overwrite, so a database that predates a new key gets it at boot.
+        report["assumptions_added"] = territory_rules.ensure_assumptions(db)
+        report["commission_rules_added"] = territory_rules.ensure_commission_rules(db)
         report.update(ensure_admin(db, quiet=quiet))
         db.commit()
         return report

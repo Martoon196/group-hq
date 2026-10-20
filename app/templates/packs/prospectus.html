@@ -1,0 +1,11 @@
+{% extends "packs/_print_base.html" %}
+{% set title = "Local Partner prospectus | Hello New Home" %}
+{% set toolbar_label = "Local Partner prospectus (print view)" %}
+{% set back = "/franchise" %}
+{% block sheet %}
+{% if not confirmed %}
+<div class="draft-banner"><strong>Draft for founder sign-off.</strong> The fee figures in this prospectus are the published fee sheet; the programme figures marked [CONFIRM] in the text have not been signed off, and {{ unconfirmed }} input{{ "s" if unconfirmed != 1 else "" }} in the territory model {{ "are" if unconfirmed != 1 else "is" }} still unconfirmed. Do not send this document to a prospect until the founder has confirmed it.</div>
+{% endif %}
+{{ body }}
+<div class="footer">Hello New Home 2 Limited. Printed from Group HQ on {{ today | date("%d %B %Y") }}. This document is not legal, tax or financial advice; the signed agreement and the published fee sheet win where they differ.</div>
+{% endblock %}

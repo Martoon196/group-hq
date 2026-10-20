@@ -1,0 +1,86 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% import "territories/_shared.html" as t with context %}
+{% set title = "Territories | Group HQ" %}
+{% block head %}{{ f.styles() }}{{ t.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Hello New Home</span>
+  <h1>Territories</h1>
+  <p class="muted">One row per postcode district: the public data behind it, what the model says a territory there could earn, and who holds it.</p>
+  <div class="actions">
+    <a class="btn btn-primary btn-sm" href="/territories/map{% if qs %}?{{ qs }}{% endif %}">Map</a>
+    <a class="btn btn-ghost btn-sm" href="/api/territories.json">Export (state only)</a>
+    <a class="btn btn-ghost btn-sm" href="/audit?q=district:">History</a>
+  </div>
+</div>
+
+{{ t.banners(run, sample, unconfirmed) }}
+
+<section class="panel">
+  {{ t.filter_form("/territories", filters, bands, states, nations, areas, band_labels, state_labels, nation_labels, qs) }}
+</section>
+
+<div class="stats stats-4 mt-2">
+  <div class="stat"><strong>{{ totals.districts }}</strong><span>district{{ "s" if totals.districts != 1 else "" }}{% if qs %} matching{% endif %} · {{ totals.priced }} with a rent on file</span></div>
+  <div class="stat"><strong>{{ "{:,}".format(totals.prs_households) }}</strong><span>private-rented households (census, apportioned)</span></div>
+  <div class="stat"><strong>{{ "{:,}".format(totals.units_y1) }}</strong><span>managed units by the end of year one {{ t.confirm(badges.units) }} · {{ "{:,}".format(totals.units_y3) }} by year three</span></div>
+  <div class="stat{% if totals.hq_contribution_y1 is not none and totals.hq_contribution_y1 < 0 %} is-bad{% endif %}"><strong>{{ money(totals.hq_contribution_y1) or "-" }}</strong><span>HQ contribution, year one {{ t.confirm(badges.hq_contribution_y1) }} · partners {{ money(totals.partner_net_y1) or "-" }} {{ t.confirm(badges.partner_net_y1) }} · each territory's fixed costs and systems fee counted once</span></div>
+</div>
+
+<section class="panel mt-2">
+  <div class="panel-head">
+    <h2>By state and band</h2>
+    <span class="help">Counts for the rows that match the filters. Click to narrow further.</span>
+  </div>
+  <div class="counts">
+    {% for st in states %}<a href="/territories?{{ state_links[st] }}"{% if filters.state == st %} class="is-on"{% endif %}><span class="chip">{{ totals.states[st] }} {{ "head office" if st == "hq" else st }}</span></a>{% endfor %}
+  </div>
+  <div class="counts">
+    {% for b in bands %}<a href="/territories?{{ band_links[b] }}"{% if filters.band == b %} class="is-on"{% endif %}><span class="chip">{{ totals.bands[b] }} {{ band_labels[b]|lower }}</span></a>{% endfor %}
+    {{ t.confirm(badges.band, "The band rule (London areas, core cities, 3,000 private-rented households for a town) is a proposal") }}
+  </div>
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head">
+    <h2>{{ total }} district{{ "s" if total != 1 else "" }}{% if qs %} matching{% endif %}</h2>
+    <span class="help">{{ page_size }} a page, in postcode order. Fee is the achievable Full Management fee per managed unit a month; the year-one figures are whole-year totals on the plan's ramp, each district carrying its share of its territory's fixed costs and systems fee (the district screen says how much).</span>
+  </div>
+  {% if rows %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr>
+      <th>District</th><th>Authority</th><th>Band</th><th class="num">PRS hh</th><th class="num">2-bed rent</th><th class="num">Fee</th>
+      <th class="num">Units y1 / y2 / y3</th><th class="num">Partner y1</th><th class="num">HQ y1</th><th class="num">Upfront</th><th class="num">Monthly</th>
+      <th>State</th><th>Partner</th><th>Until</th>
+    </tr></thead>
+    <tbody>
+    {% for d, price in rows %}
+    <tr>
+      <td class="nowrap"><a href="/territories/{{ d.district }}"><strong>{{ d.district }}</strong></a><br><span class="small muted">{{ nation_labels[d.nation] }}</span></td>
+      <td>{{ d.la_name or "" }}{% if d.la_gss %}<br><span class="small muted">{{ d.la_gss }}</span>{% endif %}</td>
+      <td class="nowrap">{{ band_labels[d.band] }}{{ t.confirm(badges.band) }}</td>
+      <td class="num">{% if d.prs_households is not none %}{{ "{:,}".format(d.prs_households) }}{% else %}<span class="muted">-</span>{% endif %}</td>
+      <td class="num">{{ money(d.rent_2bed) or "-" }}</td>
+      <td class="num">{{ money(d.achievable_fee) or "-" }}{{ t.confirm(badges.achievable_fee and d.achievable_fee is not none) }}</td>
+      <td class="num nowrap">{% if d.units_y1 is not none %}{{ d.units_y1 }} / {{ d.units_y2 }} / {{ d.units_y3 }}{{ t.confirm(badges.units) }}{% else %}-{% endif %}</td>
+      <td class="num">{{ money(d.partner_net_y1) or "-" }}{{ t.confirm(badges.partner_net_y1 and d.partner_net_y1 is not none) }}</td>
+      <td class="num{% if d.hq_contribution_y1 is not none and d.hq_contribution_y1 < 0 %} neg{% endif %}">{{ money(d.hq_contribution_y1) or "-" }}{{ t.confirm(badges.hq_contribution_y1 and d.hq_contribution_y1 is not none) }}</td>
+      <td class="num">{{ money(price.upfront_fee) or "-" }}{{ t.confirm(badges.upfront_fee and price.upfront_fee is not none) }}</td>
+      <td class="num">{{ money(price.monthly_fee) }}{{ t.confirm(badges.monthly_fee) }}</td>
+      <td>{{ t.state_chip(d.state) }}</td>
+      <td class="num">{% if d.partner_id %}{{ d.partner_id }}{% else %}<span class="muted">-</span>{% endif %}</td>
+      <td class="nowrap">{{ d.reserved_until | date }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ f.pager("/territories", qs_prev, qs_next, page, pages) }}
+  {% else %}
+  <p class="muted">{% if qs %}No districts match.{% elif run %}The last model run wrote no districts.{% else %}No districts loaded yet.{% endif %}</p>
+  {% endif %}
+  <p class="help mt-1">Every modelled column is a proposal until its assumptions are confirmed; see <code>docs/territory-model.md</code> and <code>docs/pricing-bands.md</code>. The export at <code>/api/territories.json</code> carries state, district and area only: no money and no band.</p>
+</section>
+{% endblock %}

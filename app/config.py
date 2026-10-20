@@ -64,6 +64,25 @@ KP_BASE_URL = os.environ.get("KP_BASE_URL", "https://portal.keypropertiesuk.co.u
 KP_PARTNER_TOKEN = os.environ.get("KP_PARTNER_TOKEN", "")
 HNH_BASE_URL = os.environ.get("HNH_BASE_URL", "https://hellonewhome.co.uk").rstrip("/")
 HNH_PARTNER_TOKEN = os.environ.get("HNH_PARTNER_TOKEN", "")
+
+
+def _int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    try:
+        return int(raw) if raw else default
+    except ValueError:
+        return default
+
+
+# Outbound email for the franchise follow-ups (app.services.followups). With SMTP_HOST unset the emails are
+# rendered on the opportunity page for copying and nothing is ever sent; MAIL_FROM is the From address and
+# should be a Hello New Home mailbox, since the prospect is talking to Hello New Home, not to Group HQ.
+SMTP_HOST = (os.environ.get("SMTP_HOST") or "").strip()
+SMTP_PORT = _int("SMTP_PORT", 587)
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_STARTTLS = _bool("SMTP_STARTTLS", True)
+MAIL_FROM = (os.environ.get("MAIL_FROM") or "").strip()
 # CONNECTORS_DRY_RUN: "1" records every outbound connector call instead of sending it (tests and rehearsals
 # run this way); "0" sends to every product; a comma-separated list of products ("ordris,kp,hnh") keeps only
 # those in dry run while the others go live, which is how PP can be live before the other contracts exist.

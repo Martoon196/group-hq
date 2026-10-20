@@ -1,0 +1,208 @@
+{% extends "app_base.html" %}
+{% import "franchise/_shared.html" as fr %}
+{% import "_fields.html" as f %}
+{% set title = (person.name or person.person_key) ~ " | Franchise | Group HQ" %}
+{% block head %}{{ fr.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Opportunity #{{ o.id }} · {{ o.districts|join(", ") }}</span>
+  <h1>{{ person.name or person.person_key }} <span class="stage stage-{{ o.stage }}">{{ stage_labels[o.stage] }}</span></h1>
+  <p class="muted">{{ person.person_key }}{% if person.phone %} · {{ person.phone }}{% endif %}{% if o.source %} · from {{ o.source }}{% endif %}{% if o.seller %} · seller <code>{{ o.seller.code }}</code>{% endif %}</p>
+  <div class="actions">
+    <a class="btn btn-ghost btn-sm" href="/people/{{ person.id }}">Person record</a>
+    <a class="btn btn-ghost btn-sm" href="/franchise">Board</a>
+    <a class="btn btn-ghost btn-sm" href="/audit?q=opportunity:{{ o.id }}">History</a>
+  </div>
+</div>
+{{ fr.banner(confirmed, unconfirmed) }}
+
+<div class="quote">
+  <div class="stat"><strong>{% if o.band %}{{ band_labels.get(o.band, o.band) }}{% else %}None{% endif %}</strong><span>band (highest of the districts){{ fr.badge(confirmed) }}</span></div>
+  <div class="stat"><strong>{% if fee_waived %}Waived{% elif o.quoted_upfront_pence is not none %}{{ pounds(o.quoted_upfront_pence) }}{% else %}None{% endif %}</strong><span>upfront fee{{ fr.badge(confirmed) }}</span></div>
+  <div class="stat"><strong>{% if fee_waived %}Waived{% elif o.quoted_monthly_pence is not none %}{{ pounds(o.quoted_monthly_pence) }}{% else %}None{% endif %}</strong><span>a month{{ fr.badge(confirmed) }}</span></div>
+  <div class="stat"><strong>{{ pounds(cleared_pence) }}</strong><span>cleared</span></div>
+  <div class="stat"><strong>{{ o.stage_changed_at | uk("%d %b") }}</strong><span>at this stage since</span></div>
+</div>
+
+<div class="two-col mt-2">
+  <div>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Stage</h2>
+        <form method="post" action="/franchise/{{ o.id }}/requote" class="row-actions"{% if o.stage in quote_frozen_stages %} data-confirm="A territory at Agreement or beyond keeps the quote it was sold on."{% endif %}>
+          <label class="small"><input type="checkbox" name="fee_waived" value="1"{% if fee_waived %} checked{% endif %}> waived</label>
+          <button class="btn btn-ghost btn-sm" type="submit"{% if o.stage in quote_frozen_stages %} disabled{% endif %}>Requote</button>
+        </form>
+      </div>
+      <form method="post" action="/franchise/{{ o.id }}/stage" class="form-inline">
+        <div class="field"><label for="stage">Move to</label><select id="stage" name="stage">{% for v, l in stage_choices %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+        <div class="field" style="flex:1"><label for="stage_note">Note (optional; required with an override)</label><input id="stage_note" name="note" type="text" placeholder="Why, or what was agreed"></div>
+        <div class="field"><label for="stage_paid_at">Paid on (for Paid)</label><input id="stage_paid_at" name="paid_at" type="date" value="{{ today.isoformat() }}"></div>
+        {% if not fee_waived and not upfront_cleared %}<label class="small"><input type="checkbox" name="override" value="1"> Override: move without the payment check (recorded in the audit log)</label>{% endif %}
+        <button class="btn btn-primary btn-sm" type="submit">Move</button>
+      </form>
+      <p class="help mt-1">Pack sent creates the day 2, 5, 9 and 14 follow-ups and points at the territory report. Paid and Onboarding need the upfront fee cleared (or waived): record the payment below and mark it cleared first. {% if not fee_waived and not upfront_cleared %}To move without cleared money, tick Override in the form and say why in the note; the audit log records it.{% endif %} Onboarding is when the Hello New Home hand-off is pressed.</p>
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Districts</h2><a class="btn btn-ghost btn-sm" href="/franchise/{{ o.id }}/pack/territory">Territory report</a></div>
+      {% if districts %}
+      <div class="table-scroll">
+      <table class="data">
+        <thead><tr><th>District</th><th>Authority</th><th>Band</th><th class="num">PRS households</th><th class="num">2-bed rent</th><th>State</th></tr></thead>
+        <tbody>
+        {% for d in districts %}
+        <tr>
+          <td><strong>{{ d.district }}</strong></td>
+          <td>{{ d.la_name }}</td>
+          <td><span class="band">{{ band_labels.get(d.band, d.band) }}</span></td>
+          <td class="num">{{ number(d.prs_households) or "-" }}</td>
+          <td class="num">{% if d.rent_2bed is not none %}{{ money(d.rent_2bed) }}{% if d.rent_date %} <span class="small muted">{{ d.rent_date | date("%b %Y") }}</span>{% endif %}{% else %}-{% endif %}</td>
+          <td><span class="status status-{{ 'active' if d.state == 'open' else 'pending' if d.state == 'reserved' else 'revoked' }}">{{ d.state }}</span></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% endif %}
+      {% if missing_districts %}<p class="small bad-text">Not in the territory model any more: {{ missing_districts|join(", ") }}.</p>{% endif %}
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Follow-ups</h2><span class="help">Each task carries its email. Copy it, or send it from here when email is configured.</span></div>
+      {% if tasks %}
+      {% for t in tasks %}
+      {% set overdue = t.state == "open" and t.due_on < today %}
+      <div class="task is-{{ t.state }}{% if overdue %} is-overdue{% endif %}">
+        <div class="task-head">
+          <div><strong>{{ t.title }}</strong><br><span class="due{% if overdue %} is-overdue{% endif %}">Due {{ t.due_on | date("%d %b %Y") }}{% if overdue %} (overdue){% endif %}{% if t.state != "open" %} · {{ t.state }} {{ t.done_at | uk("%d %b") }}{% endif %}</span></div>
+          {% if t.state == "open" %}
+          <div class="row-actions">
+            {% if emails.get(t.id) %}<form method="post" action="/franchise/{{ o.id }}/tasks/{{ t.id }}/send" data-confirm="Send this email to {{ person.person_key }} now?"><button class="btn btn-primary btn-sm" type="submit"{% if not smtp_configured %} disabled title="SMTP is not configured"{% endif %}>Send email</button></form>{% endif %}
+            <form method="post" action="/franchise/{{ o.id }}/tasks/{{ t.id }}/done"><button class="btn btn-ghost btn-sm" type="submit">Done</button></form>
+            <form method="post" action="/franchise/{{ o.id }}/tasks/{{ t.id }}/skip"><button class="btn btn-ghost btn-sm" type="submit">Skip</button></form>
+          </div>
+          {% endif %}
+        </div>
+        {% if emails.get(t.id) %}
+        <details class="email">
+          <summary>Email: {{ emails[t.id].subject }}</summary>
+          <textarea id="email-{{ t.id }}" readonly>Subject: {{ emails[t.id].subject }}
+
+{{ emails[t.id].body }}</textarea>
+          <button class="btn btn-ghost btn-sm" type="button" data-copy-target="#email-{{ t.id }}">Copy</button>
+        </details>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% else %}<p class="muted">No follow-ups yet. They are created when the stage moves to Pack sent.</p>{% endif %}
+      {% if not smtp_configured %}<p class="help">Email is not configured on this server (SMTP_HOST and MAIL_FROM), so the Send buttons are off; copy the text into your mail client.</p>{% endif %}
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Timeline</h2></div>
+      <form method="post" action="/franchise/{{ o.id }}/activities" class="form-inline">
+        <div class="field"><label for="kind">What</label><select id="kind" name="kind">{% for v, l in activity_choices %}<option value="{{ v }}"{% if activity_vals.kind == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+        <div class="field" style="flex:1"><label for="body">Happened</label><input id="body" name="body" type="text" value="{{ activity_vals.body }}" placeholder="Called; wants to see Andover first" required></div>
+        <button class="btn btn-ghost btn-sm" type="submit">Add</button>
+      </form>
+      {% if activities %}
+      <ul class="timeline mt-1">
+        {% for a in activities %}
+        <li class="kind-{{ a.kind }}"><span class="when">{{ a.at | uk }} · {{ a.kind|replace("_", " ") }} · {{ a.actor }}</span><p class="body">{{ a.body }}</p></li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="muted mt-1">Nothing on the timeline yet.</p>{% endif %}
+    </section>
+  </div>
+
+  <div>
+    <section class="panel">
+      <div class="panel-head"><h2>Packs</h2></div>
+      <ul class="tick-list">
+        <li><a href="/franchise/{{ o.id }}/pack/territory">Territory report</a> for {{ o.districts|join(", ") }} (print view; Print to PDF to attach)</li>
+        <li><a href="/franchise/packs/prospectus">Local Partner prospectus</a> (print view)</li>
+      </ul>
+      <p class="help mt-1">{% if confirmed %}The assumptions are confirmed, so the packs carry the quoted fees.{% else %}While any assumption is unconfirmed the packs carry a [CONFIRM] watermark and show no money at all.{% endif %}</p>
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Hello New Home hand-off</h2></div>
+      {% if person.hnh_partner_id %}
+      <p class="ok-text">Partner id {{ person.hnh_partner_id }} in Hello New Home.</p>
+      {% elif hnh_call and hnh_call.status == "succeeded" %}
+      <p class="ok-text">Created (connector call #{{ hnh_call.id }}).</p>
+      {% else %}
+      <p class="help">Creates the Local Partner in Hello New Home with tier <code>area</code>, the districts above as the new area's postcodes and fee waived {{ "yes" if fee_waived else "no" }}. Needs the person's name. {% if hnh_dry_run %}The HNH connector is in dry run on this server, so the plan is recorded and nothing is sent.{% endif %}</p>
+      <form method="post" action="/franchise/{{ o.id }}/hnh" data-confirm="Create {{ person.name or person.person_key }} as a Local Partner in Hello New Home with {{ o.districts|join(', ') }}?">
+        <label class="small"><input type="checkbox" name="dry_run" value="1"{% if hnh_dry_run %} checked disabled{% endif %}> dry run</label>
+        <button class="btn btn-primary btn-sm" type="submit">Create Local Partner in Hello New Home</button>
+      </form>
+      {% if hnh_call %}<p class="small muted mt-1">Last attempt {{ hnh_call.last_attempt_at | uk }}: {{ hnh_call.status }} ({{ hnh_call.attempts }} attempt{{ "s" if hnh_call.attempts != 1 else "" }}).</p>{% endif %}
+      {% endif %}
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Payments</h2></div>
+      {% if payments %}
+      <div class="table-scroll">
+      <table class="data">
+        <thead><tr><th>Fee</th><th class="num">Amount</th><th>Paid</th><th>Cleared</th><th></th></tr></thead>
+        <tbody>
+        {% for p in payments %}
+        <tr>
+          <td>{{ p.basis }}{% if p.trail_month %} month {{ p.trail_month }}{% endif %}{% if p.reference %}<br><span class="small muted">{{ p.reference }}</span>{% endif %}{% if p.refunded_at %}<br><span class="small bad-text">refunded {{ p.refunded_at | uk("%d %b %Y") }}</span>{% endif %}</td>
+          <td class="num">{{ pounds(p.amount_pence) }}</td>
+          <td class="nowrap">{{ p.paid_at | uk("%d %b %Y") }}</td>
+          <td class="nowrap">{% if p.cleared_at %}<span class="ok-text">{{ p.cleared_at | uk("%d %b %Y") }}</span>{% elif p.refunded_at %}<span class="muted">never cleared</span>{% else %}<form method="post" action="/franchise/{{ o.id }}/payments/{{ p.id }}/clear" class="row-actions" data-confirm="Mark {{ pounds(p.amount_pence) }} as cleared today? Seller commission accrues on it."><button class="btn btn-primary btn-sm" type="submit">Mark cleared</button></form>{% endif %}</td>
+          <td class="nowrap">{% if not p.refunded_at %}<details class="claw"><summary class="small">Refund</summary><form method="post" action="/franchise/{{ o.id }}/payments/{{ p.id }}/refund" class="claw-form mt-1" data-confirm="Mark {{ pounds(p.amount_pence) }} as refunded? Commission earned on it inside 90 days is clawed back.">
+            <input name="refunded_at" type="date" value="{{ refund_vals.refunded_at }}" aria-label="Refunded on">
+            <input name="reason" type="text" placeholder="Why" required aria-label="Reason">
+            <button class="btn btn-ghost btn-sm" type="submit">Refund</button></form></details>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}<p class="muted">No payments yet. Moving to Paid records the upfront fee; monthly fees are added below.</p>{% endif %}
+      <details class="mt-1">
+        <summary class="small">Record a payment</summary>
+        <form method="post" action="/franchise/{{ o.id }}/payments" class="form-grid mt-1">
+          {{ f.select("basis", "Fee", [("upfront", "Upfront fee"), ("monthly", "Monthly fee")], payment_vals.basis) }}
+          {{ f.text("trail_month", "Month number (monthly only)", payment_vals.trail_month, attrs='inputmode="numeric" placeholder="1"') }}
+          {{ f.text("amount", "Amount in pounds", payment_vals.amount, required=True, attrs='inputmode="decimal" placeholder="13000.00"') }}
+          {{ f.select("method", "How it arrived", methods, payment_vals.method) }}
+          {{ f.text("paid_at", "Paid on", payment_vals.paid_at, type="date", required=True) }}
+          {{ f.text("cleared_at", "Cleared on", payment_vals.cleared_at, type="date", hint="Leave blank until the money has arrived.") }}
+          {{ f.text("reference", "Reference", payment_vals.reference) }}
+          {{ f.textarea("notes", "Notes", payment_vals.notes, rows=2) }}
+          <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Record</button></div>
+        </form>
+      </details>
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Seller commission</h2></div>
+      {% if o.seller %}
+      <p class="small">Seller <code>{{ o.seller.code }}</code> ({{ o.seller.person.name or o.seller.person.person_key }}, {{ o.seller.kind }}). Entries exist only once a fee has cleared.{% if not ledger_available %} The ledger service is not installed on this server, so a cleared fee is noted as pending on the timeline.{% endif %}</p>
+      {% if entries %}
+      <table class="data">
+        <thead><tr><th>Basis</th><th class="num">On</th><th class="num">Amount</th><th>Paid</th></tr></thead>
+        <tbody>{% for e in entries %}<tr><td>{{ e.basis }}{% if e.trail_month %} month {{ e.trail_month }}{% endif %}{% if e.clawback_of %} (clawback){% endif %}</td><td class="num">{{ pounds(e.basis_pence) }}</td><td class="num">{{ pounds(e.amount_pence) }}</td><td class="nowrap small">{{ e.paid_at | uk("%d %b %Y") or "not yet" }}</td></tr>{% endfor %}</tbody>
+      </table>
+      {% else %}<p class="muted">No entries yet.</p>{% endif %}
+      {% else %}<p class="muted">No seller is attributed, so no commission arises.</p>{% endif %}
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Notes and attribution</h2></div>
+      <form method="post" action="/franchise/{{ o.id }}/details">
+        {{ f.text("source", "Source", detail_vals.source) }}
+        <div class="mt-1">{{ f.text("seller_code", "Seller code", detail_vals.seller_code, hint="Blank removes the attribution.") }}</div>
+        <div class="mt-1">{{ f.textarea("notes", "Notes", detail_vals.notes, rows=5, full=False) }}</div>
+        <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+      </form>
+    </section>
+  </div>
+</div>
+{% endblock %}

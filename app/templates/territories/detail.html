@@ -1,0 +1,138 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% import "territories/_shared.html" as t with context %}
+{% set title = d.district ~ " territory | Group HQ" %}
+{% block head %}{{ f.styles() }}{{ t.styles() }}
+<style>
+  .holding-forms { display: grid; gap: 1rem; }
+  .holding-forms .form { padding: 1.1rem 1.2rem; box-shadow: none; }
+  .holding-forms h3 { margin: 0 0 .6rem; font-size: 1rem; }
+  .inline-actions { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+  .inline-actions form { margin: 0; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">{{ d.area }} · {{ nation_labels[d.nation] }}{% if d.la_name %} · {{ d.la_name }}{% endif %}</span>
+  <h1>{{ d.district }} {{ t.state_chip(d.state) }}</h1>
+  <p class="muted">{{ state_labels[d.state] }}{% if d.partner_id %} · partner {{ d.partner_id }}{% if holder %} ({{ holder.name or holder.person_key }}){% endif %}{% endif %}{% if d.reserved_until %} · until {{ d.reserved_until | date }}{% endif %}</p>
+  <div class="actions">
+    <a class="btn btn-ghost btn-sm" href="/territories?area={{ d.area }}">All {{ d.area }} districts</a>
+    <a class="btn btn-ghost btn-sm" href="/territories/map?area={{ d.area }}">On the map</a>
+    <a class="btn btn-ghost btn-sm" href="/audit?q=district:{{ d.district }}">History</a>
+  </div>
+</div>
+
+{{ t.banners(run, sample, unconfirmed) }}
+
+<div class="stats stats-4">
+  <div class="stat"><strong>{{ band_labels[d.band] }}</strong><span>band {{ t.confirm(badges.band) }}</span></div>
+  <div class="stat"><strong>{% if d.prs_households is not none %}{{ "{:,}".format(d.prs_households) }}{% else %}-{% endif %}</strong><span>private-rented households{% if d.dwellings is none and d.prs_households is not none %} (apportioned by postcodes){% endif %}</span></div>
+  <div class="stat"><strong>{{ money(d.achievable_fee) or "-" }}</strong><span>fee per managed unit a month {{ t.confirm(badges.achievable_fee and d.achievable_fee is not none) }}</span></div>
+  <div class="stat"><strong>{{ money(live.upfront_fee) or "-" }}</strong><span>upfront fee today {{ t.confirm(badges.upfront_fee and live.upfront_fee is not none) }} · {{ money(live.monthly_fee) }} a month {{ t.confirm(badges.monthly_fee) }}</span></div>
+</div>
+
+<div class="two-col mt-2">
+  <div>
+    <section class="panel">
+      <div class="panel-head"><h2>Public data</h2><span class="help">Loaded by scripts/load_territory_model.py{% if run %}; run #{{ d.model_run_id or run.id }}{% endif %}.</span></div>
+      <table class="data">
+        <tbody>
+          <tr><td class="k">District</td><td>{{ d.district }} (area {{ d.area }})</td></tr>
+          <tr><td class="k">Nation</td><td>{{ nation_labels[d.nation] }}</td></tr>
+          <tr><td class="k">Local authority</td><td>{{ d.la_name or "-" }}{% if d.la_gss %} <span class="small muted">{{ d.la_gss }}</span>{% endif %}</td></tr>
+          <tr><td class="k">Dwellings</td><td>{% if d.dwellings is not none %}{{ "{:,}".format(d.dwellings) }}{% else %}<span class="muted">no address-points export; the PRS count is apportioned by live postcodes</span>{% endif %}</td></tr>
+          <tr><td class="k">Private-rented households</td><td>{% if d.prs_households is not none %}{{ "{:,}".format(d.prs_households) }}{% else %}<span class="muted">no census figure (rural by default)</span>{% endif %}</td></tr>
+          <tr><td class="k">Authority's private-rented share</td><td>{% if d.prs_share is not none %}{{ "%.1f"|format(d.prs_share * 100) }}%{% else %}-{% endif %}</td></tr>
+          <tr><td class="k">Rent, 1 / 2 / 3 bed</td><td>{{ money(d.rent_1bed) or "-" }} / {{ money(d.rent_2bed) or "-" }} / {{ money(d.rent_3bed) or "-" }}{% if d.rent_date %} <span class="small muted">({{ d.rent_date.strftime("%B %Y") }}, authority level)</span>{% endif %}</td></tr>
+          <tr><td class="k">Licensing</td><td>{{ d.licensing|replace("_", " ") }}{% if d.licensing_note %}<br><span class="small">{{ d.licensing_note }}</span>{% endif %}</td></tr>
+          <tr><td class="k">Centroid</td><td>{% if centroid %}{{ centroid[0] }}, {{ centroid[1] }}{% if centroids_meta.sample %} <span class="small muted">(sample)</span>{% endif %}{% else %}<span class="muted">none on file</span>{% endif %}</td></tr>
+          <tr><td class="k">Loaded</td><td>{{ d.updated_at | uk }}{% if d.model_run %} · run #{{ d.model_run.id }} of {{ d.model_run.ran_at | uk }}{% endif %}</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Modelled, as loaded</h2><span class="help">Stored by the last run that touched this row. Every figure is a proposal{{ t.confirm(true) }}.</span></div>
+      <table class="data">
+        <tbody>
+          <tr><td class="k">Band</td><td>{{ band_labels[d.band] }}{{ t.confirm(badges.band) }}</td></tr>
+          <tr><td class="k">Achievable fee per unit</td><td>{{ money(d.achievable_fee) or "-" }}{{ t.confirm(badges.achievable_fee and d.achievable_fee is not none) }} <span class="small muted">min(cap, 12% of the two-bed rent)</span></td></tr>
+          <tr><td class="k">Cost to serve per unit</td><td>{{ money(d.cost_to_serve) or "-" }}{{ t.confirm(badges.cost_to_serve) }}</td></tr>
+          <tr><td class="k">Units, year one / two / three</td><td>{% if d.units_y1 is not none %}{{ d.units_y1 }} / {{ d.units_y2 }} / {{ d.units_y3 }}{{ t.confirm(badges.units) }}{% else %}-{% endif %}</td></tr>
+          <tr><td class="k">Partner net, year one</td><td>{{ money(d.partner_net_y1) or "-" }}{{ t.confirm(badges.partner_net_y1 and d.partner_net_y1 is not none) }}</td></tr>
+          <tr><td class="k">HQ contribution, year one</td><td><span{% if d.hq_contribution_y1 is not none and d.hq_contribution_y1 < 0 %} class="neg"{% endif %}>{{ money(d.hq_contribution_y1) or "-" }}</span>{{ t.confirm(badges.hq_contribution_y1 and d.hq_contribution_y1 is not none) }} <span class="small muted">recurring fees only; one-off income is not in it</span></td></tr>
+          <tr><td class="k">Share of the territory's fixed costs</td><td>{{ "%.1f"|format(cost_share * 100) }}%{{ t.confirm(badges.hq_contribution_y1) }} <span class="small muted">{% if cost_share_known %}of its territory's portals, ads and letters ({{ money(live.fixed_costs) }} a month) and of the one systems fee ({{ money(live.systems_fee) }} a month) are in the two year-one figures above, by its share of the territory's year-one units; the rest sits on the other districts of the territory{% else %}loaded before the apportionment existed: the two year-one figures above carry the whole area's fixed costs and systems fee, as if this district were the whole territory. Run the loader again{% endif %}</span></td></tr>
+        </tbody>
+      </table>
+      {% if moved %}<p class="help mt-1">The assumptions have changed since this row was loaded: {{ moved|join(", ") }} would now come out differently. Run the loader again to refresh every district.</p>{% endif %}
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Priced today</h2><span class="help">From the current assumptions (docs/pricing-bands.md). A quote is copied onto the opportunity when it is made, so this can move without changing a quote.</span></div>
+      <table class="data">
+        <tbody>
+          <tr><td class="k">Upfront fee</td><td>{{ money(live.upfront_fee) or "-" }}{{ t.confirm(badges.upfront_fee and live.upfront_fee is not none) }} <span class="small muted">6 x the partner's share at 30 units, to the nearest 500, with the band's floor</span></td></tr>
+          <tr><td class="k">Monthly fee</td><td>{{ money(live.monthly_fee) }}{{ t.confirm(badges.monthly_fee) }} <span class="small muted">{{ band_labels[d.band]|lower }} band</span></td></tr>
+          <tr><td class="k">Break-even units</td><td>{% if live.break_even_units is not none %}{{ "%.1f"|format(live.break_even_units) }}{{ t.confirm(badges.break_even_units) }} <span class="small muted">steady state, single lets only</span>{% else %}-{% endif %}</td></tr>
+          <tr><td class="k">Blended partner share</td><td>{{ "%.0f"|format(blended_split * 100) }}%{{ t.confirm(badges.blended_split) }}</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <div>
+    <section class="panel">
+      <div class="panel-head"><h2>Holding</h2></div>
+      <p class="help">Open: nobody holds it. Reserved: first refusal for {{ reserve_months }} months; converts to core at 3 live instructions [CONFIRM]. Core: exclusive, the partner must serve it. Head office: never offered. Every change is audited. Telling Hello New Home is not wired from here yet: set the partner's area in Hello New Home HQ as well.</p>
+      <div class="holding-forms">
+        {% if d.state != "hq" and d.state != "core" %}
+        <form method="post" action="/territories/{{ d.district }}/reserve" class="form">
+          <h3>Reserve</h3>
+          <div class="form-grid">
+            {{ f.text("partner_id", "Hello New Home partner id", vals.partner_id, hint="The partner's id in Hello New Home.", attrs='inputmode="numeric"') }}
+            {{ f.select("person_id", "Or a person on the register", people_choices, vals.person_id, hint="Only people with a Hello New Home partner id are listed.") }}
+            {{ f.text("reserved_until", "Reserved until", vals.reserved_until, type="date", hint=("Defaults to " ~ reserve_months ~ " months from today.")) }}
+          </div>
+          <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Reserve</button></div>
+        </form>
+        {% endif %}
+        {% if d.state != "hq" %}
+        <form method="post" action="/territories/{{ d.district }}/assign" class="form" data-confirm="Make {{ d.district }} a core (exclusive) district for this partner?">
+          <h3>Assign as core</h3>
+          <div class="form-grid">
+            {{ f.text("partner_id", "Hello New Home partner id", d.partner_id if d.partner_id else vals.partner_id, id="assign_partner_id", attrs='inputmode="numeric"') }}
+            {{ f.select("person_id", "Or a person on the register", people_choices, vals.person_id, id="assign_person_id") }}
+          </div>
+          <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Assign</button></div>
+        </form>
+        {% endif %}
+        <div class="inline-actions">
+          {% if d.state != "open" or d.partner_id %}
+          <form method="post" action="/territories/{{ d.district }}/release" data-confirm="Release {{ d.district }}? It becomes open: nobody holds it and leads route to head office."><button class="btn btn-ghost btn-sm" type="submit">Release</button></form>
+          {% endif %}
+          {% if d.state != "hq" and not d.partner_id %}
+          <form method="post" action="/territories/{{ d.district }}/hq" data-confirm="Keep {{ d.district }} for head office? It will not be offered to a partner."><button class="btn btn-ghost btn-sm" type="submit">Keep for head office</button></form>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>History</h2><a class="btn btn-ghost btn-sm" href="/audit?q=district:{{ d.district }}">Audit log</a></div>
+      {% if history %}
+      <div class="table-scroll">
+      <table class="data">
+        <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Change</th></tr></thead>
+        <tbody>
+        {% for h in history %}
+        <tr><td class="nowrap">{{ h.created_at | uk("%d %b %Y %H:%M") }}</td><td>{{ h.actor }}</td><td class="action">{{ h.action }}</td><td class="small">{% if h.after %}{% for k, v in h.after.items() %}{{ k }}: {{ v if v is not none else "-" }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}<p class="muted">No holding changes recorded for {{ d.district }}.</p>{% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

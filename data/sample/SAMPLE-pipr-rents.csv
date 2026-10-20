@@ -1,0 +1,421 @@
+Date,Area code,Area name,Bedroom category,Average rent,sample
+2026-05,E09000002,Barking and Dagenham,One bedroom,1237.50,SAMPLE
+2026-05,E09000002,Barking and Dagenham,Two bedrooms,1534.50,SAMPLE
+2026-05,E09000002,Barking and Dagenham,Three bedrooms,1831.50,SAMPLE
+2026-05,E09000002,Barking and Dagenham,Four or more bedrooms,2380.95,SAMPLE
+2026-05,E09000002,Barking and Dagenham,All categories,1534.50,SAMPLE
+2026-06,E09000002,Barking and Dagenham,One bedroom,1250.00,SAMPLE
+2026-06,E09000002,Barking and Dagenham,Two bedrooms,1550.00,SAMPLE
+2026-06,E09000002,Barking and Dagenham,Three bedrooms,1850.00,SAMPLE
+2026-06,E09000002,Barking and Dagenham,Four or more bedrooms,2405.00,SAMPLE
+2026-06,E09000002,Barking and Dagenham,All categories,1550.00,SAMPLE
+2026-05,E09000003,Barnet,One bedroom,1435.50,SAMPLE
+2026-05,E09000003,Barnet,Two bedrooms,1831.50,SAMPLE
+2026-05,E09000003,Barnet,Three bedrooms,2277.00,SAMPLE
+2026-05,E09000003,Barnet,Four or more bedrooms,2960.10,SAMPLE
+2026-05,E09000003,Barnet,All categories,1848.33,SAMPLE
+2026-06,E09000003,Barnet,One bedroom,1450.00,SAMPLE
+2026-06,E09000003,Barnet,Two bedrooms,1850.00,SAMPLE
+2026-06,E09000003,Barnet,Three bedrooms,2300.00,SAMPLE
+2026-06,E09000003,Barnet,Four or more bedrooms,2990.00,SAMPLE
+2026-06,E09000003,Barnet,All categories,1867.00,SAMPLE
+2026-05,E07000084,Basingstoke and Deane,One bedroom,990.00,SAMPLE
+2026-05,E07000084,Basingstoke and Deane,Two bedrooms,1217.70,SAMPLE
+2026-05,E07000084,Basingstoke and Deane,Three bedrooms,1485.00,SAMPLE
+2026-05,E07000084,Basingstoke and Deane,Four or more bedrooms,1930.50,SAMPLE
+2026-05,E07000084,Basingstoke and Deane,All categories,1230.57,SAMPLE
+2026-06,E07000084,Basingstoke and Deane,One bedroom,1000.00,SAMPLE
+2026-06,E07000084,Basingstoke and Deane,Two bedrooms,1230.00,SAMPLE
+2026-06,E07000084,Basingstoke and Deane,Three bedrooms,1500.00,SAMPLE
+2026-06,E07000084,Basingstoke and Deane,Four or more bedrooms,1950.00,SAMPLE
+2026-06,E07000084,Basingstoke and Deane,All categories,1243.00,SAMPLE
+2026-05,E06000022,Bath and North East Somerset,One bedroom,1089.00,SAMPLE
+2026-05,E06000022,Bath and North East Somerset,Two bedrooms,1386.00,SAMPLE
+2026-05,E06000022,Bath and North East Somerset,Three bedrooms,1732.50,SAMPLE
+2026-05,E06000022,Bath and North East Somerset,Four or more bedrooms,2252.25,SAMPLE
+2026-05,E06000022,Bath and North East Somerset,All categories,1402.83,SAMPLE
+2026-06,E06000022,Bath and North East Somerset,One bedroom,1100.00,SAMPLE
+2026-06,E06000022,Bath and North East Somerset,Two bedrooms,1400.00,SAMPLE
+2026-06,E06000022,Bath and North East Somerset,Three bedrooms,1750.00,SAMPLE
+2026-06,E06000022,Bath and North East Somerset,Four or more bedrooms,2275.00,SAMPLE
+2026-06,E06000022,Bath and North East Somerset,All categories,1417.00,SAMPLE
+2026-05,E09000004,Bexley,One bedroom,1138.50,SAMPLE
+2026-05,E09000004,Bexley,Two bedrooms,1435.50,SAMPLE
+2026-05,E09000004,Bexley,Three bedrooms,1732.50,SAMPLE
+2026-05,E09000004,Bexley,Four or more bedrooms,2252.25,SAMPLE
+2026-05,E09000004,Bexley,All categories,1435.50,SAMPLE
+2026-06,E09000004,Bexley,One bedroom,1150.00,SAMPLE
+2026-06,E09000004,Bexley,Two bedrooms,1450.00,SAMPLE
+2026-06,E09000004,Bexley,Three bedrooms,1750.00,SAMPLE
+2026-06,E09000004,Bexley,Four or more bedrooms,2275.00,SAMPLE
+2026-06,E09000004,Bexley,All categories,1450.00,SAMPLE
+2026-05,E09000005,Brent,One bedroom,1485.00,SAMPLE
+2026-05,E09000005,Brent,Two bedrooms,1881.00,SAMPLE
+2026-05,E09000005,Brent,Three bedrooms,2326.50,SAMPLE
+2026-05,E09000005,Brent,Four or more bedrooms,3024.45,SAMPLE
+2026-05,E09000005,Brent,All categories,1897.83,SAMPLE
+2026-06,E09000005,Brent,One bedroom,1500.00,SAMPLE
+2026-06,E09000005,Brent,Two bedrooms,1900.00,SAMPLE
+2026-06,E09000005,Brent,Three bedrooms,2350.00,SAMPLE
+2026-06,E09000005,Brent,Four or more bedrooms,3055.00,SAMPLE
+2026-06,E09000005,Brent,All categories,1917.00,SAMPLE
+2026-05,E06000023,"Bristol, City of",One bedroom,1188.00,SAMPLE
+2026-05,E06000023,"Bristol, City of",Two bedrooms,1485.00,SAMPLE
+2026-05,E06000023,"Bristol, City of",Three bedrooms,1782.00,SAMPLE
+2026-05,E06000023,"Bristol, City of",Four or more bedrooms,2316.60,SAMPLE
+2026-05,E06000023,"Bristol, City of",All categories,1485.00,SAMPLE
+2026-06,E06000023,"Bristol, City of",One bedroom,1200.00,SAMPLE
+2026-06,E06000023,"Bristol, City of",Two bedrooms,1500.00,SAMPLE
+2026-06,E06000023,"Bristol, City of",Three bedrooms,1800.00,SAMPLE
+2026-06,E06000023,"Bristol, City of",Four or more bedrooms,2340.00,SAMPLE
+2026-06,E06000023,"Bristol, City of",All categories,1500.00,SAMPLE
+2026-05,E09000006,Bromley,One bedroom,1237.50,SAMPLE
+2026-05,E09000006,Bromley,Two bedrooms,1584.00,SAMPLE
+2026-05,E09000006,Bromley,Three bedrooms,1930.50,SAMPLE
+2026-05,E09000006,Bromley,Four or more bedrooms,2509.65,SAMPLE
+2026-05,E09000006,Bromley,All categories,1584.00,SAMPLE
+2026-06,E09000006,Bromley,One bedroom,1250.00,SAMPLE
+2026-06,E09000006,Bromley,Two bedrooms,1600.00,SAMPLE
+2026-06,E09000006,Bromley,Three bedrooms,1950.00,SAMPLE
+2026-06,E09000006,Bromley,Four or more bedrooms,2535.00,SAMPLE
+2026-06,E09000006,Bromley,All categories,1600.00,SAMPLE
+2026-05,E09000007,Camden,One bedroom,1980.00,SAMPLE
+2026-05,E09000007,Camden,Two bedrooms,2623.50,SAMPLE
+2026-05,E09000007,Camden,Three bedrooms,3366.00,SAMPLE
+2026-05,E09000007,Camden,Four or more bedrooms,4375.80,SAMPLE
+2026-05,E09000007,Camden,All categories,2656.17,SAMPLE
+2026-06,E09000007,Camden,One bedroom,2000.00,SAMPLE
+2026-06,E09000007,Camden,Two bedrooms,2650.00,SAMPLE
+2026-06,E09000007,Camden,Three bedrooms,3400.00,SAMPLE
+2026-06,E09000007,Camden,Four or more bedrooms,4420.00,SAMPLE
+2026-06,E09000007,Camden,All categories,2683.00,SAMPLE
+2026-05,W06000010,Carmarthenshire,One bedroom,554.40,SAMPLE
+2026-05,W06000010,Carmarthenshire,Two bedrooms,693.00,SAMPLE
+2026-05,W06000010,Carmarthenshire,Three bedrooms,811.80,SAMPLE
+2026-05,W06000010,Carmarthenshire,Four or more bedrooms,1055.34,SAMPLE
+2026-05,W06000010,Carmarthenshire,All categories,686.07,SAMPLE
+2026-06,W06000010,Carmarthenshire,One bedroom,560.00,SAMPLE
+2026-06,W06000010,Carmarthenshire,Two bedrooms,700.00,SAMPLE
+2026-06,W06000010,Carmarthenshire,Three bedrooms,820.00,SAMPLE
+2026-06,W06000010,Carmarthenshire,Four or more bedrooms,1066.00,SAMPLE
+2026-06,W06000010,Carmarthenshire,All categories,693.00,SAMPLE
+2026-05,E09000001,City of London,One bedroom,2277.00,SAMPLE
+2026-05,E09000001,City of London,Two bedrooms,2970.00,SAMPLE
+2026-05,E09000001,City of London,Three bedrooms,3762.00,SAMPLE
+2026-05,E09000001,City of London,Four or more bedrooms,4890.60,SAMPLE
+2026-05,E09000001,City of London,All categories,3002.67,SAMPLE
+2026-06,E09000001,City of London,One bedroom,2300.00,SAMPLE
+2026-06,E09000001,City of London,Two bedrooms,3000.00,SAMPLE
+2026-06,E09000001,City of London,Three bedrooms,3800.00,SAMPLE
+2026-06,E09000001,City of London,Four or more bedrooms,4940.00,SAMPLE
+2026-06,E09000001,City of London,All categories,3033.00,SAMPLE
+2026-05,E06000047,County Durham,One bedroom,514.80,SAMPLE
+2026-05,E06000047,County Durham,Two bedrooms,643.50,SAMPLE
+2026-05,E06000047,County Durham,Three bedrooms,752.40,SAMPLE
+2026-05,E06000047,County Durham,Four or more bedrooms,978.12,SAMPLE
+2026-05,E06000047,County Durham,All categories,636.57,SAMPLE
+2026-06,E06000047,County Durham,One bedroom,520.00,SAMPLE
+2026-06,E06000047,County Durham,Two bedrooms,650.00,SAMPLE
+2026-06,E06000047,County Durham,Three bedrooms,760.00,SAMPLE
+2026-06,E06000047,County Durham,Four or more bedrooms,988.00,SAMPLE
+2026-06,E06000047,County Durham,All categories,643.00,SAMPLE
+2026-05,E09000008,Croydon,One bedroom,1188.00,SAMPLE
+2026-05,E09000008,Croydon,Two bedrooms,1485.00,SAMPLE
+2026-05,E09000008,Croydon,Three bedrooms,1831.50,SAMPLE
+2026-05,E09000008,Croydon,Four or more bedrooms,2380.95,SAMPLE
+2026-05,E09000008,Croydon,All categories,1501.83,SAMPLE
+2026-06,E09000008,Croydon,One bedroom,1200.00,SAMPLE
+2026-06,E09000008,Croydon,Two bedrooms,1500.00,SAMPLE
+2026-06,E09000008,Croydon,Three bedrooms,1850.00,SAMPLE
+2026-06,E09000008,Croydon,Four or more bedrooms,2405.00,SAMPLE
+2026-06,E09000008,Croydon,All categories,1517.00,SAMPLE
+2026-05,E07000066,Dartford,One bedroom,1138.50,SAMPLE
+2026-05,E07000066,Dartford,Two bedrooms,1386.00,SAMPLE
+2026-05,E07000066,Dartford,Three bedrooms,1683.00,SAMPLE
+2026-05,E07000066,Dartford,Four or more bedrooms,2187.90,SAMPLE
+2026-05,E07000066,Dartford,All categories,1402.83,SAMPLE
+2026-06,E07000066,Dartford,One bedroom,1150.00,SAMPLE
+2026-06,E07000066,Dartford,Two bedrooms,1400.00,SAMPLE
+2026-06,E07000066,Dartford,Three bedrooms,1700.00,SAMPLE
+2026-06,E07000066,Dartford,Four or more bedrooms,2210.00,SAMPLE
+2026-06,E07000066,Dartford,All categories,1417.00,SAMPLE
+2026-05,E09000009,Ealing,One bedroom,1435.50,SAMPLE
+2026-05,E09000009,Ealing,Two bedrooms,1831.50,SAMPLE
+2026-05,E09000009,Ealing,Three bedrooms,2277.00,SAMPLE
+2026-05,E09000009,Ealing,Four or more bedrooms,2960.10,SAMPLE
+2026-05,E09000009,Ealing,All categories,1848.33,SAMPLE
+2026-06,E09000009,Ealing,One bedroom,1450.00,SAMPLE
+2026-06,E09000009,Ealing,Two bedrooms,1850.00,SAMPLE
+2026-06,E09000009,Ealing,Three bedrooms,2300.00,SAMPLE
+2026-06,E09000009,Ealing,Four or more bedrooms,2990.00,SAMPLE
+2026-06,E09000009,Ealing,All categories,1867.00,SAMPLE
+2026-05,E07000207,Elmbridge,One bedroom,1386.00,SAMPLE
+2026-05,E07000207,Elmbridge,Two bedrooms,1782.00,SAMPLE
+2026-05,E07000207,Elmbridge,Three bedrooms,2277.00,SAMPLE
+2026-05,E07000207,Elmbridge,Four or more bedrooms,2960.10,SAMPLE
+2026-05,E07000207,Elmbridge,All categories,1814.67,SAMPLE
+2026-06,E07000207,Elmbridge,One bedroom,1400.00,SAMPLE
+2026-06,E07000207,Elmbridge,Two bedrooms,1800.00,SAMPLE
+2026-06,E07000207,Elmbridge,Three bedrooms,2300.00,SAMPLE
+2026-06,E07000207,Elmbridge,Four or more bedrooms,2990.00,SAMPLE
+2026-06,E07000207,Elmbridge,All categories,1833.00,SAMPLE
+2026-05,E09000010,Enfield,One bedroom,1287.00,SAMPLE
+2026-05,E09000010,Enfield,Two bedrooms,1633.50,SAMPLE
+2026-05,E09000010,Enfield,Three bedrooms,1980.00,SAMPLE
+2026-05,E09000010,Enfield,Four or more bedrooms,2574.00,SAMPLE
+2026-05,E09000010,Enfield,All categories,1633.50,SAMPLE
+2026-06,E09000010,Enfield,One bedroom,1300.00,SAMPLE
+2026-06,E09000010,Enfield,Two bedrooms,1650.00,SAMPLE
+2026-06,E09000010,Enfield,Three bedrooms,2000.00,SAMPLE
+2026-06,E09000010,Enfield,Four or more bedrooms,2600.00,SAMPLE
+2026-06,E09000010,Enfield,All categories,1650.00,SAMPLE
+2026-05,E09000012,Hackney,One bedroom,1831.50,SAMPLE
+2026-05,E09000012,Hackney,Two bedrooms,2277.00,SAMPLE
+2026-05,E09000012,Hackney,Three bedrooms,2821.50,SAMPLE
+2026-05,E09000012,Hackney,Four or more bedrooms,3667.95,SAMPLE
+2026-05,E09000012,Hackney,All categories,2309.67,SAMPLE
+2026-06,E09000012,Hackney,One bedroom,1850.00,SAMPLE
+2026-06,E09000012,Hackney,Two bedrooms,2300.00,SAMPLE
+2026-06,E09000012,Hackney,Three bedrooms,2850.00,SAMPLE
+2026-06,E09000012,Hackney,Four or more bedrooms,3705.00,SAMPLE
+2026-06,E09000012,Hackney,All categories,2333.00,SAMPLE
+2026-05,E09000014,Haringey,One bedroom,1485.00,SAMPLE
+2026-05,E09000014,Haringey,Two bedrooms,1881.00,SAMPLE
+2026-05,E09000014,Haringey,Three bedrooms,2376.00,SAMPLE
+2026-05,E09000014,Haringey,Four or more bedrooms,3088.80,SAMPLE
+2026-05,E09000014,Haringey,All categories,1913.67,SAMPLE
+2026-06,E09000014,Haringey,One bedroom,1500.00,SAMPLE
+2026-06,E09000014,Haringey,Two bedrooms,1900.00,SAMPLE
+2026-06,E09000014,Haringey,Three bedrooms,2400.00,SAMPLE
+2026-06,E09000014,Haringey,Four or more bedrooms,3120.00,SAMPLE
+2026-06,E09000014,Haringey,All categories,1933.00,SAMPLE
+2026-05,E09000015,Harrow,One bedroom,1287.00,SAMPLE
+2026-05,E09000015,Harrow,Two bedrooms,1633.50,SAMPLE
+2026-05,E09000015,Harrow,Three bedrooms,1980.00,SAMPLE
+2026-05,E09000015,Harrow,Four or more bedrooms,2574.00,SAMPLE
+2026-05,E09000015,Harrow,All categories,1633.50,SAMPLE
+2026-06,E09000015,Harrow,One bedroom,1300.00,SAMPLE
+2026-06,E09000015,Harrow,Two bedrooms,1650.00,SAMPLE
+2026-06,E09000015,Harrow,Three bedrooms,2000.00,SAMPLE
+2026-06,E09000015,Harrow,Four or more bedrooms,2600.00,SAMPLE
+2026-06,E09000015,Harrow,All categories,1650.00,SAMPLE
+2026-05,E09000016,Havering,One bedroom,1188.00,SAMPLE
+2026-05,E09000016,Havering,Two bedrooms,1485.00,SAMPLE
+2026-05,E09000016,Havering,Three bedrooms,1831.50,SAMPLE
+2026-05,E09000016,Havering,Four or more bedrooms,2380.95,SAMPLE
+2026-05,E09000016,Havering,All categories,1501.83,SAMPLE
+2026-06,E09000016,Havering,One bedroom,1200.00,SAMPLE
+2026-06,E09000016,Havering,Two bedrooms,1500.00,SAMPLE
+2026-06,E09000016,Havering,Three bedrooms,1850.00,SAMPLE
+2026-06,E09000016,Havering,Four or more bedrooms,2405.00,SAMPLE
+2026-06,E09000016,Havering,All categories,1517.00,SAMPLE
+2026-05,E07000098,Hertsmere,One bedroom,1237.50,SAMPLE
+2026-05,E07000098,Hertsmere,Two bedrooms,1584.00,SAMPLE
+2026-05,E07000098,Hertsmere,Three bedrooms,1980.00,SAMPLE
+2026-05,E07000098,Hertsmere,Four or more bedrooms,2574.00,SAMPLE
+2026-05,E07000098,Hertsmere,All categories,1600.83,SAMPLE
+2026-06,E07000098,Hertsmere,One bedroom,1250.00,SAMPLE
+2026-06,E07000098,Hertsmere,Two bedrooms,1600.00,SAMPLE
+2026-06,E07000098,Hertsmere,Three bedrooms,2000.00,SAMPLE
+2026-06,E07000098,Hertsmere,Four or more bedrooms,2600.00,SAMPLE
+2026-06,E07000098,Hertsmere,All categories,1617.00,SAMPLE
+2026-05,E09000017,Hillingdon,One bedroom,1287.00,SAMPLE
+2026-05,E09000017,Hillingdon,Two bedrooms,1633.50,SAMPLE
+2026-05,E09000017,Hillingdon,Three bedrooms,1980.00,SAMPLE
+2026-05,E09000017,Hillingdon,Four or more bedrooms,2574.00,SAMPLE
+2026-05,E09000017,Hillingdon,All categories,1633.50,SAMPLE
+2026-06,E09000017,Hillingdon,One bedroom,1300.00,SAMPLE
+2026-06,E09000017,Hillingdon,Two bedrooms,1650.00,SAMPLE
+2026-06,E09000017,Hillingdon,Three bedrooms,2000.00,SAMPLE
+2026-06,E09000017,Hillingdon,Four or more bedrooms,2600.00,SAMPLE
+2026-06,E09000017,Hillingdon,All categories,1650.00,SAMPLE
+2026-05,E09000018,Hounslow,One bedroom,1336.50,SAMPLE
+2026-05,E09000018,Hounslow,Two bedrooms,1732.50,SAMPLE
+2026-05,E09000018,Hounslow,Three bedrooms,2128.50,SAMPLE
+2026-05,E09000018,Hounslow,Four or more bedrooms,2767.05,SAMPLE
+2026-05,E09000018,Hounslow,All categories,1732.50,SAMPLE
+2026-06,E09000018,Hounslow,One bedroom,1350.00,SAMPLE
+2026-06,E09000018,Hounslow,Two bedrooms,1750.00,SAMPLE
+2026-06,E09000018,Hounslow,Three bedrooms,2150.00,SAMPLE
+2026-06,E09000018,Hounslow,Four or more bedrooms,2795.00,SAMPLE
+2026-06,E09000018,Hounslow,All categories,1750.00,SAMPLE
+2026-05,E09000019,Islington,One bedroom,1930.50,SAMPLE
+2026-05,E09000019,Islington,Two bedrooms,2475.00,SAMPLE
+2026-05,E09000019,Islington,Three bedrooms,3069.00,SAMPLE
+2026-05,E09000019,Islington,Four or more bedrooms,3989.70,SAMPLE
+2026-05,E09000019,Islington,All categories,2491.83,SAMPLE
+2026-06,E09000019,Islington,One bedroom,1950.00,SAMPLE
+2026-06,E09000019,Islington,Two bedrooms,2500.00,SAMPLE
+2026-06,E09000019,Islington,Three bedrooms,3100.00,SAMPLE
+2026-06,E09000019,Islington,Four or more bedrooms,4030.00,SAMPLE
+2026-06,E09000019,Islington,All categories,2517.00,SAMPLE
+2026-05,E09000021,Kingston upon Thames,One bedroom,1435.50,SAMPLE
+2026-05,E09000021,Kingston upon Thames,Two bedrooms,1831.50,SAMPLE
+2026-05,E09000021,Kingston upon Thames,Three bedrooms,2277.00,SAMPLE
+2026-05,E09000021,Kingston upon Thames,Four or more bedrooms,2960.10,SAMPLE
+2026-05,E09000021,Kingston upon Thames,All categories,1848.33,SAMPLE
+2026-06,E09000021,Kingston upon Thames,One bedroom,1450.00,SAMPLE
+2026-06,E09000021,Kingston upon Thames,Two bedrooms,1850.00,SAMPLE
+2026-06,E09000021,Kingston upon Thames,Three bedrooms,2300.00,SAMPLE
+2026-06,E09000021,Kingston upon Thames,Four or more bedrooms,2990.00,SAMPLE
+2026-06,E09000021,Kingston upon Thames,All categories,1867.00,SAMPLE
+2026-05,E09000022,Lambeth,One bedroom,1683.00,SAMPLE
+2026-05,E09000022,Lambeth,Two bedrooms,2128.50,SAMPLE
+2026-05,E09000022,Lambeth,Three bedrooms,2673.00,SAMPLE
+2026-05,E09000022,Lambeth,Four or more bedrooms,3474.90,SAMPLE
+2026-05,E09000022,Lambeth,All categories,2161.17,SAMPLE
+2026-06,E09000022,Lambeth,One bedroom,1700.00,SAMPLE
+2026-06,E09000022,Lambeth,Two bedrooms,2150.00,SAMPLE
+2026-06,E09000022,Lambeth,Three bedrooms,2700.00,SAMPLE
+2026-06,E09000022,Lambeth,Four or more bedrooms,3510.00,SAMPLE
+2026-06,E09000022,Lambeth,All categories,2183.00,SAMPLE
+2026-05,E09000024,Merton,One bedroom,1485.00,SAMPLE
+2026-05,E09000024,Merton,Two bedrooms,1881.00,SAMPLE
+2026-05,E09000024,Merton,Three bedrooms,2376.00,SAMPLE
+2026-05,E09000024,Merton,Four or more bedrooms,3088.80,SAMPLE
+2026-05,E09000024,Merton,All categories,1913.67,SAMPLE
+2026-06,E09000024,Merton,One bedroom,1500.00,SAMPLE
+2026-06,E09000024,Merton,Two bedrooms,1900.00,SAMPLE
+2026-06,E09000024,Merton,Three bedrooms,2400.00,SAMPLE
+2026-06,E09000024,Merton,Four or more bedrooms,3120.00,SAMPLE
+2026-06,E09000024,Merton,All categories,1933.00,SAMPLE
+2026-05,W06000012,Neath Port Talbot,One bedroom,534.60,SAMPLE
+2026-05,W06000012,Neath Port Talbot,Two bedrooms,673.20,SAMPLE
+2026-05,W06000012,Neath Port Talbot,Three bedrooms,792.00,SAMPLE
+2026-05,W06000012,Neath Port Talbot,Four or more bedrooms,1029.60,SAMPLE
+2026-05,W06000012,Neath Port Talbot,All categories,666.27,SAMPLE
+2026-06,W06000012,Neath Port Talbot,One bedroom,540.00,SAMPLE
+2026-06,W06000012,Neath Port Talbot,Two bedrooms,680.00,SAMPLE
+2026-06,W06000012,Neath Port Talbot,Three bedrooms,800.00,SAMPLE
+2026-06,W06000012,Neath Port Talbot,Four or more bedrooms,1040.00,SAMPLE
+2026-06,W06000012,Neath Port Talbot,All categories,673.00,SAMPLE
+2026-05,E06000024,North Somerset,One bedroom,841.50,SAMPLE
+2026-05,E06000024,North Somerset,Two bedrooms,1039.50,SAMPLE
+2026-05,E06000024,North Somerset,Three bedrooms,1287.00,SAMPLE
+2026-05,E06000024,North Somerset,Four or more bedrooms,1673.10,SAMPLE
+2026-05,E06000024,North Somerset,All categories,1056.33,SAMPLE
+2026-06,E06000024,North Somerset,One bedroom,850.00,SAMPLE
+2026-06,E06000024,North Somerset,Two bedrooms,1050.00,SAMPLE
+2026-06,E06000024,North Somerset,Three bedrooms,1300.00,SAMPLE
+2026-06,E06000024,North Somerset,Four or more bedrooms,1690.00,SAMPLE
+2026-06,E06000024,North Somerset,All categories,1067.00,SAMPLE
+2026-05,E09000026,Redbridge,One bedroom,1237.50,SAMPLE
+2026-05,E09000026,Redbridge,Two bedrooms,1584.00,SAMPLE
+2026-05,E09000026,Redbridge,Three bedrooms,1930.50,SAMPLE
+2026-05,E09000026,Redbridge,Four or more bedrooms,2509.65,SAMPLE
+2026-05,E09000026,Redbridge,All categories,1584.00,SAMPLE
+2026-06,E09000026,Redbridge,One bedroom,1250.00,SAMPLE
+2026-06,E09000026,Redbridge,Two bedrooms,1600.00,SAMPLE
+2026-06,E09000026,Redbridge,Three bedrooms,1950.00,SAMPLE
+2026-06,E09000026,Redbridge,Four or more bedrooms,2535.00,SAMPLE
+2026-06,E09000026,Redbridge,All categories,1600.00,SAMPLE
+2026-05,E09000027,Richmond upon Thames,One bedroom,1534.50,SAMPLE
+2026-05,E09000027,Richmond upon Thames,Two bedrooms,1980.00,SAMPLE
+2026-05,E09000027,Richmond upon Thames,Three bedrooms,2574.00,SAMPLE
+2026-05,E09000027,Richmond upon Thames,Four or more bedrooms,3346.20,SAMPLE
+2026-05,E09000027,Richmond upon Thames,All categories,2029.50,SAMPLE
+2026-06,E09000027,Richmond upon Thames,One bedroom,1550.00,SAMPLE
+2026-06,E09000027,Richmond upon Thames,Two bedrooms,2000.00,SAMPLE
+2026-06,E09000027,Richmond upon Thames,Three bedrooms,2600.00,SAMPLE
+2026-06,E09000027,Richmond upon Thames,Four or more bedrooms,3380.00,SAMPLE
+2026-06,E09000027,Richmond upon Thames,All categories,2050.00,SAMPLE
+2026-05,E06000066,Somerset,One bedroom,742.50,SAMPLE
+2026-05,E06000066,Somerset,Two bedrooms,940.50,SAMPLE
+2026-05,E06000066,Somerset,Three bedrooms,1138.50,SAMPLE
+2026-05,E06000066,Somerset,Four or more bedrooms,1480.05,SAMPLE
+2026-05,E06000066,Somerset,All categories,940.50,SAMPLE
+2026-06,E06000066,Somerset,One bedroom,750.00,SAMPLE
+2026-06,E06000066,Somerset,Two bedrooms,950.00,SAMPLE
+2026-06,E06000066,Somerset,Three bedrooms,1150.00,SAMPLE
+2026-06,E06000066,Somerset,Four or more bedrooms,1495.00,SAMPLE
+2026-06,E06000066,Somerset,All categories,950.00,SAMPLE
+2026-05,E09000028,Southwark,One bedroom,1732.50,SAMPLE
+2026-05,E09000028,Southwark,Two bedrooms,2178.00,SAMPLE
+2026-05,E09000028,Southwark,Three bedrooms,2673.00,SAMPLE
+2026-05,E09000028,Southwark,Four or more bedrooms,3474.90,SAMPLE
+2026-05,E09000028,Southwark,All categories,2194.83,SAMPLE
+2026-06,E09000028,Southwark,One bedroom,1750.00,SAMPLE
+2026-06,E09000028,Southwark,Two bedrooms,2200.00,SAMPLE
+2026-06,E09000028,Southwark,Three bedrooms,2700.00,SAMPLE
+2026-06,E09000028,Southwark,Four or more bedrooms,3510.00,SAMPLE
+2026-06,E09000028,Southwark,All categories,2217.00,SAMPLE
+2026-05,E07000213,Spelthorne,One bedroom,1188.00,SAMPLE
+2026-05,E07000213,Spelthorne,Two bedrooms,1485.00,SAMPLE
+2026-05,E07000213,Spelthorne,Three bedrooms,1831.50,SAMPLE
+2026-05,E07000213,Spelthorne,Four or more bedrooms,2380.95,SAMPLE
+2026-05,E07000213,Spelthorne,All categories,1501.83,SAMPLE
+2026-06,E07000213,Spelthorne,One bedroom,1200.00,SAMPLE
+2026-06,E07000213,Spelthorne,Two bedrooms,1500.00,SAMPLE
+2026-06,E07000213,Spelthorne,Three bedrooms,1850.00,SAMPLE
+2026-06,E07000213,Spelthorne,Four or more bedrooms,2405.00,SAMPLE
+2026-06,E07000213,Spelthorne,All categories,1517.00,SAMPLE
+2026-05,E08000024,Sunderland,One bedroom,534.60,SAMPLE
+2026-05,E08000024,Sunderland,Two bedrooms,673.20,SAMPLE
+2026-05,E08000024,Sunderland,Three bedrooms,782.10,SAMPLE
+2026-05,E08000024,Sunderland,Four or more bedrooms,1016.73,SAMPLE
+2026-05,E08000024,Sunderland,All categories,663.30,SAMPLE
+2026-06,E08000024,Sunderland,One bedroom,540.00,SAMPLE
+2026-06,E08000024,Sunderland,Two bedrooms,680.00,SAMPLE
+2026-06,E08000024,Sunderland,Three bedrooms,790.00,SAMPLE
+2026-06,E08000024,Sunderland,Four or more bedrooms,1027.00,SAMPLE
+2026-06,E08000024,Sunderland,All categories,670.00,SAMPLE
+2026-05,E09000029,Sutton,One bedroom,1188.00,SAMPLE
+2026-05,E09000029,Sutton,Two bedrooms,1485.00,SAMPLE
+2026-05,E09000029,Sutton,Three bedrooms,1831.50,SAMPLE
+2026-05,E09000029,Sutton,Four or more bedrooms,2380.95,SAMPLE
+2026-05,E09000029,Sutton,All categories,1501.83,SAMPLE
+2026-06,E09000029,Sutton,One bedroom,1200.00,SAMPLE
+2026-06,E09000029,Sutton,Two bedrooms,1500.00,SAMPLE
+2026-06,E09000029,Sutton,Three bedrooms,1850.00,SAMPLE
+2026-06,E09000029,Sutton,Four or more bedrooms,2405.00,SAMPLE
+2026-06,E09000029,Sutton,All categories,1517.00,SAMPLE
+2026-05,W06000011,Swansea,One bedroom,613.80,SAMPLE
+2026-05,W06000011,Swansea,Two bedrooms,767.25,SAMPLE
+2026-05,W06000011,Swansea,Three bedrooms,891.00,SAMPLE
+2026-05,W06000011,Swansea,Four or more bedrooms,1158.30,SAMPLE
+2026-05,W06000011,Swansea,All categories,757.35,SAMPLE
+2026-06,W06000011,Swansea,One bedroom,620.00,SAMPLE
+2026-06,W06000011,Swansea,Two bedrooms,775.00,SAMPLE
+2026-06,W06000011,Swansea,Three bedrooms,900.00,SAMPLE
+2026-06,W06000011,Swansea,Four or more bedrooms,1170.00,SAMPLE
+2026-06,W06000011,Swansea,All categories,765.00,SAMPLE
+2026-05,E07000093,Test Valley,One bedroom,940.50,SAMPLE
+2026-05,E07000093,Test Valley,Two bedrooms,1123.65,SAMPLE
+2026-05,E07000093,Test Valley,Three bedrooms,1386.00,SAMPLE
+2026-05,E07000093,Test Valley,Four or more bedrooms,1801.80,SAMPLE
+2026-05,E07000093,Test Valley,All categories,1150.38,SAMPLE
+2026-06,E07000093,Test Valley,One bedroom,950.00,SAMPLE
+2026-06,E07000093,Test Valley,Two bedrooms,1135.00,SAMPLE
+2026-06,E07000093,Test Valley,Three bedrooms,1400.00,SAMPLE
+2026-06,E07000093,Test Valley,Four or more bedrooms,1820.00,SAMPLE
+2026-06,E07000093,Test Valley,All categories,1162.00,SAMPLE
+2026-05,E09000030,Tower Hamlets,One bedroom,1881.00,SAMPLE
+2026-05,E09000030,Tower Hamlets,Two bedrooms,2326.50,SAMPLE
+2026-05,E09000030,Tower Hamlets,Three bedrooms,2871.00,SAMPLE
+2026-05,E09000030,Tower Hamlets,Four or more bedrooms,3732.30,SAMPLE
+2026-05,E09000030,Tower Hamlets,All categories,2359.17,SAMPLE
+2026-06,E09000030,Tower Hamlets,One bedroom,1900.00,SAMPLE
+2026-06,E09000030,Tower Hamlets,Two bedrooms,2350.00,SAMPLE
+2026-06,E09000030,Tower Hamlets,Three bedrooms,2900.00,SAMPLE
+2026-06,E09000030,Tower Hamlets,Four or more bedrooms,3770.00,SAMPLE
+2026-06,E09000030,Tower Hamlets,All categories,2383.00,SAMPLE
+2026-05,E09000033,Westminster,One bedroom,2376.00,SAMPLE
+2026-05,E09000033,Westminster,Two bedrooms,3168.00,SAMPLE
+2026-05,E09000033,Westminster,Three bedrooms,4158.00,SAMPLE
+2026-05,E09000033,Westminster,Four or more bedrooms,5405.40,SAMPLE
+2026-05,E09000033,Westminster,All categories,3234.33,SAMPLE
+2026-06,E09000033,Westminster,One bedroom,2400.00,SAMPLE
+2026-06,E09000033,Westminster,Two bedrooms,3200.00,SAMPLE
+2026-06,E09000033,Westminster,Three bedrooms,4200.00,SAMPLE
+2026-06,E09000033,Westminster,Four or more bedrooms,5460.00,SAMPLE
+2026-06,E09000033,Westminster,All categories,3267.00,SAMPLE
+2026-05,E06000054,Wiltshire,One bedroom,841.50,SAMPLE
+2026-05,E06000054,Wiltshire,Two bedrooms,1039.50,SAMPLE
+2026-05,E06000054,Wiltshire,Three bedrooms,1287.00,SAMPLE
+2026-05,E06000054,Wiltshire,Four or more bedrooms,1673.10,SAMPLE
+2026-05,E06000054,Wiltshire,All categories,1056.33,SAMPLE
+2026-06,E06000054,Wiltshire,One bedroom,850.00,SAMPLE
+2026-06,E06000054,Wiltshire,Two bedrooms,1050.00,SAMPLE
+2026-06,E06000054,Wiltshire,Three bedrooms,1300.00,SAMPLE
+2026-06,E06000054,Wiltshire,Four or more bedrooms,1690.00,SAMPLE
+2026-06,E06000054,Wiltshire,All categories,1067.00,SAMPLE

@@ -1,0 +1,69 @@
+{% extends "app_base.html" %}
+{% import "sellers/_shared.html" as sl %}
+{% import "_fields.html" as f %}
+{% set title = "Statement " ~ period_label ~ " for " ~ seller.code ~ " | Group HQ" %}
+{% block head %}{{ sl.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Statement #{{ statement.id }} · {{ period_label }}</span>
+  <h1>{{ seller.person.name or seller.person.person_key }} <code>{{ seller.code }}</code> {% if statement.paid_at %}<span class="status status-active">paid</span>{% elif statement.total_pence <= 0 %}<span class="status status-ended">carries forward</span>{% else %}<span class="status status-pending">unpaid</span>{% endif %}</h1>
+  <p class="muted">Generated {{ statement.generated_at | uk }} for {{ statement.period_start | date }} to {{ statement.period_end | date }}. Pay by {{ payment_due | date }}.</p>
+  <div class="actions">
+    <a class="btn btn-primary btn-sm" href="/sellers/statements/{{ statement.id }}/print">Print or save as PDF</a>
+    <a class="btn btn-ghost btn-sm" href="/sellers/{{ seller.id }}">Seller</a>
+    <a class="btn btn-ghost btn-sm" href="/sellers/statements">All statements</a>
+    <a class="btn btn-ghost btn-sm" href="/audit?q=statement:{{ statement.id }}">History</a>
+  </div>
+</div>
+{{ sl.banner(confirmed) }}
+
+<div class="two-col">
+  <section class="panel">
+    <div class="panel-head"><h2>Lines</h2><span class="statement-total{% if statement.total_pence < 0 %} neg{% endif %}">{{ pounds(statement.total_pence) }}{{ sl.badge(confirmed) }}</span></div>
+    {% if entries %}
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Earned</th><th>Opportunity</th><th>Basis</th><th class="num">Fee received</th><th class="num">Rate</th><th class="num">Commission</th></tr></thead>
+      <tbody>{{ sl.entry_rows(entries, pounds, percent, confirmed, reasons, show_statement=False) }}</tbody>
+      <tfoot><tr><th colspan="5">Total</th><th class="num{% if statement.total_pence < 0 %} neg{% endif %}">{{ pounds(statement.total_pence) }}</th></tr></tfoot>
+    </table>
+    </div>
+    {% else %}<p class="muted">No lines on this statement.</p>{% endif %}
+  </section>
+
+  <div>
+    <section class="panel">
+      <div class="panel-head"><h2>Payment</h2></div>
+      {% if statement.paid_at %}
+      <p class="ok-text">Paid on {{ statement.paid_at | uk("%d %b %Y") }}. Every entry on it is stamped with that date.</p>
+      {% elif statement.total_pence <= 0 %}
+      <p class="muted">Nothing to pay: a balance of {{ pounds(statement.total_pence) }} carries forward into the next statement, where it is netted against new entries.</p>
+      {% else %}
+      <dl class="kv">
+        <dt>Pay</dt><dd><strong>{{ pounds(statement.total_pence) }}</strong>{{ sl.badge(confirmed) }}</dd>
+        <dt>To</dt><dd>{{ seller.bank_reference or "no bank reference on file" }}</dd>
+        <dt>By</dt><dd>{{ payment_due | date }}</dd>
+        <dt>Self-billing</dt><dd>{% if seller.self_billing_agreed_at %}agreed {{ seller.self_billing_agreed_at | uk("%d %b %Y") }}{% else %}<span class="bad-text">none on record</span>{% endif %}</dd>
+      </dl>
+      {% if unconfirmed_lines %}
+      <p class="help mt-1"><strong>Not payable yet.</strong> {{ unconfirmed_lines }} line{{ "s" if unconfirmed_lines != 1 else "" }} on this statement {{ "were" if unconfirmed_lines != 1 else "was" }} earned under a commission rule the founder has not confirmed, so it cannot be marked paid: paying it would pay a proposal. Confirm the rules on the <a href="/sellers">Sellers page</a> first.</p>
+      {% else %}
+      <form method="post" action="/sellers/statements/{{ statement.id }}/paid" class="form-inline mt-1" data-confirm="Mark statement #{{ statement.id }} ({{ pounds(statement.total_pence) }} to {{ seller.code }}) as paid? Every entry on it is stamped and cannot go on another statement.">
+        {{ f.text("paid_at", "Paid on", paid_vals.paid_at, type="date", required=True) }}
+        <button class="btn btn-primary btn-sm" type="submit">Mark paid</button>
+      </form>
+      {% endif %}
+      {% endif %}
+    </section>
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Seller</h2></div>
+      <dl class="kv">
+        <dt>Code</dt><dd><a href="/sellers/{{ seller.id }}"><code>{{ seller.code }}</code></a></dd>
+        <dt>Kind</dt><dd>{{ kind_labels[seller.kind] }}</dd>
+        <dt>Email</dt><dd>{{ seller.person.person_key }}</dd>
+        <dt>Bank reference</dt><dd>{{ seller.bank_reference or "none" }}</dd>
+      </dl>
+    </section>
+  </div>
+</div>
+{% endblock %}
