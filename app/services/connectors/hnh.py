@@ -1,14 +1,15 @@
-"""Hello New Home connector: the plan's Phase 2 contract (CONTRACT PENDING, see docs/connectors.md).
+"""Hello New Home connector: the plan's Phase 2 contract, as built on HNH's partner-api branch (docs/connectors.md).
 
     POST {HNH_BASE_URL}/api/partner/partners              {email, name, tier, status, area_slug | postcodes[],
                                                            create_login, franchise: {fee_waived, reason}}
     POST {HNH_BASE_URL}/api/partner/partners/{id}/status  {status, reason}
     GET  {HNH_BASE_URL}/api/partner/partners?email=
 
-Auth: Bearer HNH_PARTNER_TOKEN (an api_clients row with the partners scope on the HNH side) and
-X-Partner-Client: grouphq. A grant creates the partner (with a login that must change its password on
-first use) or sets an existing one back to active; a revoke pauses it, which keeps the record and the
-area assignment. The area (area_slug or postcodes) comes from the programme template item when the
+Auth: Bearer HNH_PARTNER_TOKEN (the grouphq api_clients row with the partners:write scope on the HNH
+side) and X-Partner-Client: grouphq. A grant creates the partner (with a login that must change its
+password on first use; the temporary password comes back once and is handed to the run page through
+ConnectorResult.once, never stored) or sets an existing one back to active; a revoke pauses it, which
+keeps the record and the area assignment. The area (area_slug or postcodes) comes from the programme template item when the
 founder has decided it; without one HNH creates the partner with no area and HQ assigns it by hand.
 
 Hello New Home is a separate company (Hello New Home 2 Ltd): this call moves a name and an email
@@ -57,6 +58,16 @@ class HNHConnector(BaseConnector):
         if refused is not None:
             raise refused
         record = _record(result.data)
+        # HNH returns the login's temporary password exactly once (hashed on its side, must be changed on
+        # first use). It is taken out of the body here so the stored response never carries it, and handed
+        # to the person who pressed the button through `once`. A lost one is re-issued by head office from
+        # the HNH admin partner page (Reset password), never from here.
+        if isinstance(result.data, dict) and "one_time_password" in result.data:
+            password = result.data.pop("one_time_password")
+            if isinstance(password, str) and password:
+                email = record.get("email") or "the partner"
+                result.once = (f"HNH temporary portal password for {email}: {password} (shown once, not stored; "
+                               "head office can reset it from the HNH admin partner page)")
         links = {}
         partner_id = record.get("id")
         if partner_id is not None:
@@ -88,9 +99,15 @@ class HNHConnector(BaseConnector):
             return self._with_partner(self.request("POST", self._status_path(grant.remote_ref),
                                                    json={"status": "active", "reason": reason}))
         extra = extra or {}
+        # HNH prints the partner's name on its public area pages and refuses a blank one (422), which the
+        # outbox would otherwise retry five times. Refuse it here with a reason the grant page can show.
+        name = (person.name or "").strip()
+        if not name:
+            raise ConnectorError("missing_name",
+                                 detail="hnh: the person has no name; add one on the person page before granting a partner seat")
         payload: dict = {
             "email": normalise_email(person.person_key),
-            "name": person.name or "",
+            "name": name,
             "tier": tier,
             "status": "active",
             "create_login": True,
@@ -103,11 +120,19 @@ class HNHConnector(BaseConnector):
         return self._with_partner(self.request("POST", self.PARTNERS, json=payload))
 
     def _partner_id(self, grant: "EntitlementGrant", person: "Person") -> str | None:
+        """HNH's id for the person, or None when it has no partner with that email. HNH answers the lookup
+        200 {found: false, partner: null} today; a 404 is read the same way in case that ever changes."""
         if grant.remote_ref:
             return grant.remote_ref
         if self.dry_run:
             return PLACEHOLDER
-        return self.lookup(person.person_key).remote_ref
+        try:
+            found = self.lookup(person.person_key)
+        except ConnectorError as error:
+            if error.status == 404:
+                return None
+            raise
+        return found.remote_ref
 
     def revoke(self, grant: "EntitlementGrant", person: "Person", *, reason: str = "") -> ConnectorResult:
         if grant.kind != "partner_seat":

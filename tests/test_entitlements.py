@@ -871,3 +871,70 @@ def test_a_full_payer_needs_cleared_payments_that_reach_the_price(db):
     db.commit()
     db.refresh(mentee)
     assert compute_access_end(mentee, [deposit], TODAY) == date(2027, 10, 1), "with no price any cleared payment counts"
+
+
+# ---- a product's credential never reaches the database -------------------------------------------------
+HNH = "https://hnh.example.test"
+HNH_CREATED = {"ok": True, "created": True, "partner_id": 9, "user_id": 31, "one_time_password": "Tq7xK2mN9pLw",
+               "area_slug": None, "area_created": False, "note": "",
+               "partner": {"id": 9, "name": "Amy Archer", "email": "amy@example.test", "tier": "area", "status": "active",
+                           "franchise": {"fee_waived": True, "reason": "Group HQ: test"}, "areas": [], "user_id": 31,
+                           "login": {"user_id": 31, "email": "amy@example.test", "is_active": True,
+                                     "must_change_password": True, "last_login": None},
+                           "created_at": "2026-10-20T17:40:00Z"}}
+
+
+def test_hnh_one_time_password_is_shown_once_and_never_stored(admin_client, db, live):
+    """HNH answers a grant with the login's temporary password. It is shown on the run page to the person who
+    pressed the button and nowhere else: not in connector_calls.response, not in an audit row, not on the grant
+    page and not in the job's output."""
+    person = make_person(db, "amy@example.test", "Amy Archer")
+    pay(db, enrol(db, person, make_programme(db, "test_hnh", [{"product": "hnh", "kind": "partner_seat", "value": "area"}]), "full"))
+    with respx.mock(base_url=HNH) as mock:
+        post = mock.post("/api/partner/partners").mock(return_value=httpx.Response(201, json=HNH_CREATED))
+        page = admin_client.post("/grants/recompute", data={"today": "2026-10-20"})
+    assert page.status_code == 200 and post.call_count == 1
+    assert "Tq7xK2mN9pLw" in page.text and "shown once" in page.text and "not stored" in page.text
+    with session() as fresh:
+        [grant] = fresh.query(EntitlementGrant).filter(EntitlementGrant.person_id == person.id).all()
+        assert grant.state == "active" and grant.remote_ref == "9"
+        [call] = fresh.query(ConnectorCall).filter(ConnectorCall.grant_id == grant.id).all()
+        stored = json.dumps(call.response) + json.dumps(call.payload)
+        assert call.status == "succeeded" and "Tq7xK2mN9pLw" not in stored and "one_time_password" not in stored
+        assert call.response["data"]["partner"]["id"] == 9, "the rest of the answer is kept"
+        trail = " ".join(json.dumps([row.before, row.after]) for row in fresh.query(AuditLog).all())
+        assert "Tq7xK2mN9pLw" not in trail
+        fresh_person = fresh.get(Person, person.id)
+        assert fresh_person.hnh_partner_id == 9 and fresh_person.hnh_user_id == 31
+    detail = admin_client.get(f"/grants/{grant.id}")
+    assert detail.status_code == 200 and "Tq7xK2mN9pLw" not in detail.text
+    # a second person seated by the command-line job: the password is not printed either
+    other = make_person(db, "ben@example.test", "Ben Brook")
+    pay(db, enrol(db, other, make_programme(db, "test_hnh", [{"product": "hnh", "kind": "partner_seat", "value": "area"}]), "full"))
+    out = io.StringIO()
+    with respx.mock(base_url=HNH) as mock:
+        mock.post("/api/partner/partners").mock(return_value=httpx.Response(201, json={
+            **HNH_CREATED, "partner_id": 10, "user_id": 32, "one_time_password": "Zz8pQ4rT1vBn",
+            "partner": {**HNH_CREATED["partner"], "id": 10, "user_id": 32, "email": "ben@example.test"}}))
+        assert job.main([], out=out) == 0
+    assert "Zz8pQ4rT1vBn" not in out.getvalue() and "ben@example.test" in out.getvalue()
+    with session() as fresh:
+        rows = fresh.query(ConnectorCall).all()
+        assert all("Zz8pQ4rT1vBn" not in json.dumps(row.response) for row in rows)
+
+
+def test_a_credential_in_any_product_body_is_redacted_before_it_is_stored(db, live):
+    """The second line: even a product that put a password or token straight into its body (or an error body)
+    cannot get it into connector_calls.response."""
+    person = make_person(db)
+    pay(db, enrol(db, person, make_programme(db), "full"))
+    with respx.mock(base_url=PP) as mock:
+        mock.post("/api/partner/grouphq/comp").mock(return_value=httpx.Response(
+            200, json={**COMP_OK, "temporary_password": "hunter2", "api_token": "abc", "nested": {"secret_key": "xyz"}}))
+        recompute_person(db, person, TODAY, False)
+    [grant] = grants_of(db, person)
+    [call] = calls_of(db, grant)
+    data = call.response["data"]
+    assert data["temporary_password"] == "[redacted]" and data["api_token"] == "[redacted]"
+    assert data["nested"]["secret_key"] == "[redacted]" and data["account_id"] == 77
+    assert "hunter2" not in json.dumps(call.response) and "xyz" not in json.dumps(call.response)

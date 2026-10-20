@@ -57,7 +57,7 @@ from sqlalchemy.orm import Session
 from .. import config
 from ..models import ConnectorCall, EntitlementGrant, Mentee, Payment, Person, Programme, User, utcnow
 from . import settings
-from .audit import audit
+from .audit import _jsonable, audit
 from .connectors import BaseConnector, ConnectorError, ConnectorResult, open_connectors
 from .connectors.pp import PP_TIERS, pp_tier
 
@@ -182,6 +182,7 @@ class Decision:
     detail: str = ""
     plan: dict | None = None
     dry_run: bool = False
+    once: str = ""              # shown on the run page only, never stored or logged (a temporary password HNH issued)
 
     @property
     def label(self) -> str:
@@ -343,6 +344,14 @@ def _json(value):
     return json.loads(json.dumps(value, default=str))
 
 
+def _stored_response(value) -> dict:
+    """A connector's answer as the connector_calls row keeps it: any key naming a password, secret or token is
+    replaced by "[redacted]" first (audit._jsonable), so a product's body can never put a credential into
+    the database or onto the grant page. The HNH connector also removes its one-time password before this,
+    so the redaction is the second line, not the only one."""
+    return _json(_jsonable(value))
+
+
 def _snapshot(grant: EntitlementGrant) -> dict:
     return {"state": grant.state, "ends_at": grant.ends_at.isoformat() if grant.ends_at else None,
             "remote_ref": grant.remote_ref, "last_error": grant.last_error}
@@ -502,10 +511,10 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
         try:
             result = call()
         except ConnectorError as error:   # an unsupported kind, for example: still only a plan
-            row.response = _json(error.as_dict())
+            row.response = _stored_response(error.as_dict())
             decision.outcome, decision.detail = "failed", error.summary()
             return decision
-        row.response = _json(result.as_dict())
+        row.response = _stored_response(result.as_dict())
         if result.plan:
             row.payload = _json({**row.payload, "request": result.plan})
         decision.outcome, decision.plan = "planned", result.plan
@@ -526,7 +535,7 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
     try:
         result = call()
     except ConnectorError as error:
-        row.response = _json(error.as_dict())
+        row.response = _stored_response(error.as_dict())
         if error.plan:
             row.payload = _json({**row.payload, "request": error.plan})
         row.status = "failed"
@@ -551,7 +560,7 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
         return decision
 
     row.status = "succeeded"
-    row.response = _json(result.as_dict())
+    row.response = _stored_response(result.as_dict())
     if result.plan:
         row.payload = _json({**row.payload, "request": result.plan})
     grant.state = "revoked" if action == "revoke" else "active"
@@ -568,6 +577,7 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
     decision.outcome = "sent"
     decision.detail = result.noop or "sent"
     decision.plan = result.plan
+    decision.once = result.once
     audit(db, actor, f"grant.{action}", f"grant:{grant.id}", before=before,
           after={**_snapshot(grant), "noop": result.noop or None, "links": filled or None})
     return decision

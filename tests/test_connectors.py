@@ -263,12 +263,19 @@ def test_ordris_contract():
                                             "reason": "Group HQ: Mentorship", "external_ref": "grouphq:grant:12"}
         assert result.remote_ref == "grouphq:grant:12"
         assert result.links == {"ordris_user_id": "user_xyz", "ordris_org_id": "org_abc"}
-        delete = mock.delete("/api/partner/grouphq/entitlements/grouphq%3Agrant%3A12").mock(return_value=httpx.Response(200, json={"ok": True}))
+        delete = mock.delete("/api/partner/grouphq/entitlements/grouphq%3Agrant%3A12").mock(return_value=httpx.Response(200, json={"ok": True, "revoked": True}))
         assert OrdrisConnector.from_config().revoke(grant, person).ok
         assert delete.call_count == 1
+        # a reference already gone answers 200 {ok: true, revoked: false} (Ordris as built); a 404 is read the same way
+        mock.delete("/api/partner/grouphq/entitlements/grouphq%3Agrant%3A12").mock(return_value=httpx.Response(200, json={"ok": True, "revoked": False}))
+        assert OrdrisConnector.from_config().revoke(grant, person).ok
         mock.delete("/api/partner/grouphq/entitlements/grouphq%3Agrant%3A12").mock(return_value=httpx.Response(404, json={"error": "not_found"}))
         assert OrdrisConnector.from_config().revoke(grant, person).noop == "entitlement already gone"
-        lookup = mock.get("/api/partner/grouphq/lookup").mock(return_value=httpx.Response(200, json={"user_id": "user_xyz", "org_id": "org_abc"}))
+        lookup = mock.get("/api/partner/grouphq/lookup").mock(return_value=httpx.Response(200, json={
+            "ok": True, "user_id": "user_xyz", "org_id": "org_abc", "email": "amy@example.test", "trial_end": None,
+            "subscription_status": None, "entitlement": {"plan": "starter", "until": "2027-10-01T00:00:00.000Z",
+                                                         "external_ref": "grouphq:grant:12"},
+            "plan_active": True, "plan_source": "entitlement"}))
         assert OrdrisConnector.from_config().lookup("amy@example.test").links["ordris_org_id"] == "org_abc"
         assert lookup.calls.last.request.url.params["email"] == "amy@example.test"
     with pytest.raises(ConnectorError):
@@ -278,24 +285,35 @@ def test_ordris_contract():
 def test_kp_contract_creates_then_patches():
     person = fake_person(pp_account_id=77, organisation_links=[SimpleNamespace(organisation=SimpleNamespace(name="Archer Homes Ltd"))])
     grant = fake_grant(product="kp", kind="sourcer_link", value="mentee")
+    # The portal answers a flat row with the id at the top (kpuk-deal-portal src/routes/partner.js, sourcerOut).
+    created = {"ok": True, "id": 41, "email": "amy@example.test", "name": "Amy Archer", "company": "Archer Homes Ltd",
+               "source": "mentee", "pp_account_id": "77", "fee_share_pct": 50, "active": True,
+               "created_at": "2026-10-20T17:32:37.327Z", "last_login": None, "created": True, "linked": False}
     with respx.mock(base_url=KP) as mock:
-        post = mock.post("/api/partner/sourcers").mock(return_value=httpx.Response(201, json={"ok": True, "sourcer": {"id": 41, "email": "amy@example.test"}}))
+        post = mock.post("/api/partner/sourcers").mock(return_value=httpx.Response(201, json=created))
         result = KPConnector.from_config().grant(grant, person, extra={"fee_share_pct": 50})
         assert body_of(post.calls.last) == {"email": "amy@example.test", "name": "Amy Archer", "company": "Archer Homes Ltd",
                                             "pp_account_id": 77, "source": "mentee", "fee_share_pct": 50}
         assert result.remote_ref == "41" and result.links == {"kp_user_id": 41}
         # a second grant with the id known re-activates instead of creating
-        patch = mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(200, json={"id": 41, "active": True}))
+        patch = mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(200, json={**created, "created": False, "linked": True}))
         KPConnector.from_config().grant(fake_grant(product="kp", kind="sourcer_link", value="mentee", remote_ref="41"), person)
         assert body_of(patch.calls.last) == {"active": True}
         KPConnector.from_config().revoke(fake_grant(product="kp", kind="sourcer_link", value="mentee", remote_ref="41"), person)
         assert body_of(patch.calls.last) == {"active": False}
         # no remote ref: look the sourcer up by email first
-        lookup = mock.get("/api/partner/sourcers").mock(return_value=httpx.Response(200, json={"sourcers": [{"id": 41}]}))
+        lookup = mock.get("/api/partner/sourcers").mock(return_value=httpx.Response(200, json=created))
         KPConnector.from_config().revoke(grant, person)
         assert lookup.call_count == 1 and patch.call_count == 3
-        mock.get("/api/partner/sourcers").mock(return_value=httpx.Response(200, json={"sourcers": []}))
+        # no sourcer with that email (or an admin's email): the portal answers 404 not_found, which is "done" here
+        mock.get("/api/partner/sourcers").mock(return_value=httpx.Response(404, json={"ok": False, "error": "not_found", "message": "No sourcer with that email."}))
         assert "nothing to deactivate" in KPConnector.from_config().revoke(grant, person).noop
+        assert patch.call_count == 3, "nothing is patched when there is no sourcer"
+        # any other failure of the lookup is still a failure
+        mock.get("/api/partner/sourcers").mock(return_value=httpx.Response(503, json={"ok": False, "error": "not_configured"}))
+        with pytest.raises(ConnectorError) as raised:
+            KPConnector.from_config().revoke(grant, person)
+        assert raised.value.reason == "not_configured" and raised.value.status == 503
     # fee_share_pct is only sent when the template says so
     with respx.mock(base_url=KP) as mock:
         post = mock.post("/api/partner/sourcers").mock(return_value=httpx.Response(201, json={"id": 42}))
@@ -311,30 +329,72 @@ def test_kp_contract_creates_then_patches():
     assert odd.plan["url"] == f"{KP}/api/partner/sourcers/4%2F1%3Fx"
 
 
+def hnh_partner(**kw) -> dict:
+    """The partner record HNH's partner_record() answers with (hellonewhome/hq app/routers/partner_api.py)."""
+    base = {"id": 9, "name": "Amy Archer", "first_name": None, "email": "amy@example.test", "phone": None, "whatsapp": None,
+            "whatsapp_display": None, "tier": "area", "status": "active",
+            "franchise": {"fee_waived": True, "reason": "Group HQ: Mentorship"},
+            "areas": [{"id": 6, "slug": "swansea", "name": "Swansea", "region": "wales", "status": "active",
+                       "postcodes": ["SA1", "SA2"], "public": True}],
+            "user_id": 31, "login": {"user_id": 31, "email": "amy@example.test", "is_active": True,
+                                     "must_change_password": True, "last_login": None},
+            "created_at": "2026-10-20T17:40:00Z"}
+    base.update(kw)
+    return base
+
+
 def test_hnh_contract_creates_pauses_and_reactivates():
     person, grant = fake_person(), fake_grant(product="hnh", kind="partner_seat", value="area")
+    created = {"ok": True, "created": True, "partner_id": 9, "user_id": 31, "one_time_password": "Tq7xK2mN9pLw",
+               "area_slug": "swansea", "area_created": False, "note": "", "partner": hnh_partner()}
     with respx.mock(base_url=HNH) as mock:
-        post = mock.post("/api/partner/partners").mock(return_value=httpx.Response(201, json={"partner": {"id": 9, "user_id": 31}}))
+        post = mock.post("/api/partner/partners").mock(return_value=httpx.Response(201, json=created))
         result = HNHConnector.from_config().grant(grant, person, reason="Group HQ: Mentorship", extra={"area_slug": "swansea"})
         assert body_of(post.calls.last) == {"email": "amy@example.test", "name": "Amy Archer", "tier": "area", "status": "active",
                                             "create_login": True, "franchise": {"fee_waived": True, "reason": "Group HQ: Mentorship"},
                                             "area_slug": "swansea"}
         assert result.remote_ref == "9" and result.links == {"hnh_partner_id": 9, "hnh_user_id": 31}
-        status = mock.post("/api/partner/partners/9/status").mock(return_value=httpx.Response(200, json={"id": 9, "status": "paused"}))
+        # the temporary password is taken out of the body and handed over once, never through the stored answer
+        assert "one_time_password" not in result.data and "Tq7xK2mN9pLw" not in json.dumps(result.as_dict())
+        assert "Tq7xK2mN9pLw" in result.once and "amy@example.test" in result.once and "shown once" in result.once
+        paused = {"ok": True, "partner_id": 9, "status": "paused", "previous_status": "active", "changed": True,
+                  "partner": hnh_partner(status="paused")}
+        status = mock.post("/api/partner/partners/9/status").mock(return_value=httpx.Response(200, json=paused))
         known = fake_grant(product="hnh", kind="partner_seat", value="area", remote_ref="9")
-        HNHConnector.from_config().revoke(known, person, reason="lapsed")
+        result = HNHConnector.from_config().revoke(known, person, reason="lapsed")
         assert body_of(status.calls.last) == {"status": "paused", "reason": "lapsed"}
+        assert result.remote_ref == "9" and result.once == ""
         HNHConnector.from_config().grant(known, person, reason="back")
         assert body_of(status.calls.last) == {"status": "active", "reason": "back"}
-        lookup = mock.get("/api/partner/partners").mock(return_value=httpx.Response(200, json={"partners": [{"id": 9}]}))
+        # a resend answers 200 with one_time_password null: nothing to hand over
+        mock.post("/api/partner/partners").mock(return_value=httpx.Response(200, json={**created, "created": False, "one_time_password": None}))
+        assert HNHConnector.from_config().grant(grant, person, extra={"area_slug": "swansea"}).once == ""
+        # no remote ref: look the partner up by email first ({ok, found, partner})
+        lookup = mock.get("/api/partner/partners").mock(return_value=httpx.Response(200, json={"ok": True, "found": True, "partner": hnh_partner()}))
         HNHConnector.from_config().revoke(grant, person)
         assert lookup.call_count == 1 and status.call_count == 3
+        mock.get("/api/partner/partners").mock(return_value=httpx.Response(200, json={"ok": True, "found": False, "partner": None}))
+        assert "nothing to pause" in HNHConnector.from_config().revoke(grant, person).noop
+        mock.get("/api/partner/partners").mock(return_value=httpx.Response(404, json={"ok": False, "reason": "no_partner"}))
+        assert "nothing to pause" in HNHConnector.from_config().revoke(grant, person).noop, "a 404 lookup reads as no partner"
+        assert status.call_count == 3
         postcodes = HNHConnector.from_config(dry_run=True).grant(grant, person, extra={"postcodes": ["sa1", "SA2"]})
         assert postcodes.plan["json"]["postcodes"] == ["SA1", "SA2"]
-        mock.post("/api/partner/partners").mock(return_value=httpx.Response(201, json={"partner": {"id": "nine"}}))
+        mock.post("/api/partner/partners").mock(return_value=httpx.Response(201, json={"ok": True, "partner": {"id": "nine"}}))
         with pytest.raises(ConnectorError) as raised:
             HNHConnector.from_config().grant(grant, person)
         assert raised.value.reason == "bad_response"
+    # HNH prints the name on its public pages and refuses a blank one, so a nameless person is refused here, before any call
+    with respx.mock(base_url=HNH, assert_all_called=False) as mock:
+        for name in ("", "   ", None):
+            with pytest.raises(ConnectorError) as raised:
+                HNHConnector.from_config().grant(grant, fake_person(name=name))
+            assert raised.value.reason == "missing_name" and "person page" in raised.value.detail
+        assert mock.calls.call_count == 0
+        # a known partner is re-activated by id, so no name is needed then
+        mock.post("/api/partner/partners/9/status").mock(return_value=httpx.Response(200, json={"ok": True, "partner": hnh_partner()}))
+        assert HNHConnector.from_config().grant(fake_grant(product="hnh", kind="partner_seat", value="area", remote_ref="9"),
+                                                fake_person(name="")).remote_ref == "9"
     odd = HNHConnector.from_config(dry_run=True).revoke(fake_grant(product="hnh", kind="partner_seat", value="area", remote_ref="9/../x"), person)
     assert odd.plan["url"] == f"{HNH}/api/partner/partners/9%2F..%2Fx/status"
     with pytest.raises(ConnectorError):

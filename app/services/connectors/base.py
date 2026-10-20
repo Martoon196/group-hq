@@ -81,7 +81,10 @@ class ConnectorError(Exception):
 class ConnectorResult:
     """What a connector call produced. `remote_ref` is the product's id for the grant (stored on the
     grant row); `links` are person ids the product told us (pp_account_id, kp_user_id, ...) and are
-    filled into the person row when empty; `noop` says why nothing needed sending."""
+    filled into the person row when empty; `noop` says why nothing needed sending. `once` is a message
+    for the person who pressed the button (a temporary password HNH issued, for example): it is shown on
+    the run page once and is never part of as_dict(), so it never reaches a connector_calls row, an audit
+    row or the job's log."""
     ok: bool = True
     status: int | None = None
     data: Any = None
@@ -90,6 +93,7 @@ class ConnectorResult:
     noop: str = ""
     dry_run: bool = False
     plan: dict | None = None
+    once: str = ""
 
     def as_dict(self) -> dict:
         out: dict = {"ok": self.ok}

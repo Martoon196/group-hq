@@ -6,9 +6,9 @@ API looks like, and how far each contract has got. Written 20 October 2026.
 | Product | Module | Contract | Status |
 |---|---|---|---|
 | Property Predator | `app/services/connectors/pp.py` | plan Phase 1, PP branch `feat/grouphq-partner` | **implemented here; the PP side goes through PP's audit lane before anything is live** |
-| Ordris | `app/services/connectors/ordris.py` | plan Phase 2 | **contract pending**: the Ordris endpoints do not exist yet |
-| Key Properties | `app/services/connectors/kp.py` | plan Phase 2 | **contract pending**: the sourcer endpoints do not exist yet |
-| Hello New Home | `app/services/connectors/hnh.py` | plan Phase 2 | **contract pending**: `api_clients` and the partner endpoints do not exist yet |
+| Ordris | `app/services/connectors/ordris.py` | plan Phase 2, Ordris branch `grouphq-connector` | **built on the product branch**, verified against the fixtures here; not yet live |
+| Key Properties | `app/services/connectors/kp.py` | plan Phase 2, portal branch `grouphq-connector` | **built on the product branch**, verified against the fixtures here; not yet live |
+| Hello New Home | `app/services/connectors/hnh.py` | plan Phase 2, HNH branch `partner-api` | **built on the product branch**, verified against the fixtures here; stays in dry run until the data sharing agreement exists |
 
 All four work in dry run today: a call returns the recorded plan (method, URL, query, body, redacted
 headers) and sends nothing, so the recompute can be rehearsed end to end before any product is ready.
@@ -29,6 +29,11 @@ headers) and sends nothing, so the recompute can be rehearsed end to end before 
   `{"ok": false, "reason": ...}` is an error with that reason.
 - **Tokens** are never logged, never stored in a `connector_calls` row and never shown on a page: a
   recorded plan carries `"Authorization": "Bearer [redacted]"`.
+- **A product's answer is redacted before it is stored**: `connector_calls.response` goes through the
+  audit redaction (`audit._jsonable`), so any key naming a password, secret or token in a body, an error
+  body included, is stored as `[redacted]`. HNH's one-time password is taken out of the answer before that
+  (below) and shown once on the run page through `ConnectorResult.once`, which is never part of a stored
+  row, an audit row or the job's output.
 - **Dry run**: `CONNECTORS_DRY_RUN=1` in the environment makes every run a dry run whatever the
   caller asks; a list of products (`CONNECTORS_DRY_RUN=ordris,kp,hnh`, the shipped value) keeps only
   those in dry run while the others go live; `0` sends to every product. The `--dry-run` flag and the
@@ -108,58 +113,86 @@ the free tier, never on a tier they were not paying for. `account_id` in any ans
 prose, and keep the hourly `expire_comps` reverting on its own so a Group HQ outage never makes a
 gift permanent.
 
-## Ordris (contract pending)
+## Ordris (built on branch `grouphq-connector`)
 
 Base URL `ORDRIS_BASE_URL` (no default: set it when the Render move lands). Token
 `ORDRIS_PARTNER_TOKEN`, which on the Ordris side is `ORDRIS_PARTNER_TOKEN_GROUPHQ` compared with
-`crypto.timingSafeEqual`.
+`crypto.timingSafeEqual`; 503 `not_configured` while it is unset, 403 `unknown_client` without
+`X-Partner-Client: grouphq`, 401 `bad_token` on a mismatch, 403 `origin_refused` for any `Origin`.
 
-| Group HQ grant | Call |
-|---|---|
-| `org_plan` with value `starter`, `pro` or `enterprise` | `POST /api/partner/grouphq/entitlements` `{email, plan, until, reason, external_ref: "grouphq:grant:<id>"}`; the answer may carry `user_id` and `org_id`, stored on the person |
-| revoke | `DELETE /api/partner/grouphq/entitlements/grouphq%3Agrant%3A<id>`; a 404 is treated as done |
-| lookup | `GET /api/partner/grouphq/lookup?email=` |
+| Group HQ grant | Call | Answer |
+|---|---|---|
+| `org_plan` with value `starter`, `pro` or `enterprise` | `POST /api/partner/grouphq/entitlements` `{email, plan, until, reason, external_ref: "grouphq:grant:<id>"}` | `{ok: true, org_id, user_id, plan, until, external_ref}`; `user_id` and `org_id` fill `people.ordris_user_id` and `people.ordris_org_id`; `404 {ok: false, reason: "no_account"}`; `400 invalid_request` |
+| revoke | `DELETE /api/partner/grouphq/entitlements/grouphq%3Agrant%3A<id>` | `{ok: true, revoked: true}`; a reference already gone answers `{ok: true, revoked: false}` (a 404 is read the same way) |
+| lookup | `GET /api/partner/grouphq/lookup?email=` | `{ok: true, user_id, org_id, email, trial_end, subscription_status, entitlement: {plan, until, external_ref} or null, plan_active, plan_source}`; `404 no_account` |
 
 Ordris resolves the Clerk user by email and applies the plan to the organisation `requireAuth` would
-pick (`orgId ?? userId`). `external_ref` is unique on their side, so a repeated POST updates rather
-than duplicates. The plan's `requireActivePlan` must treat an active entitlement like a paid
-subscription, which also closes the browser-only gate.
+give that user's session (`users.org_id`, the value the last session produced; the user id for a solo
+account). `external_ref` is unique on their side, so a repeated POST updates rather than duplicates. An
+entitlement whose window covers now makes Ordris's server-side plan check (`getPlanStatus`) true, which
+`GET /api/users/me/plan` and the web app's subscription gate read; no write route is closed by that
+check yet, so the browser-only gate stays as it was until Ordris mounts `requireActivePlan`.
 
-## Key Properties (contract pending)
+## Key Properties (built on branch `grouphq-connector`)
 
 Base URL `KP_BASE_URL` (live: `https://portal.keypropertiesuk.co.uk`). Token `KP_PARTNER_TOKEN`,
-which on the portal side is `GROUPHQ_PARTNER_TOKEN` once `src/routes/partner.js` keys tokens by
-client.
+which on the portal side is `GROUPHQ_PARTNER_TOKEN` (`src/routes/partner.js` keys tokens by client:
+503 `not_configured` while it is unset, 403 `unknown_client`, 401 `unauthorised`, 403 `browser_origin`
+for any `Origin`, and 403 `wrong_client` when a credential calls the other client's routes).
 
-| Group HQ grant | Call |
-|---|---|
-| `sourcer_link` with value `mentee` (the portal's `users.source`) | `POST /api/partner/sourcers` `{email, name, company, pp_account_id, fee_share_pct?, source: "mentee"}`: creates the sourcer, or links the invite-only user with that email to the PP account; the answer's `id` becomes `remote_ref` and `people.kp_user_id` |
-| grant when `remote_ref` is known | `PATCH /api/partner/sourcers/{id}` `{active: true}` |
-| revoke | `PATCH /api/partner/sourcers/{id}` `{active: false}`; without a `remote_ref` the id is looked up by email first; no match is treated as done |
-| lookup | `GET /api/partner/sourcers?email=` |
+Every answer is a flat row, with `id` at the top: `{ok: true, id, email, name, company, source,
+pp_account_id, fee_share_pct, active, created_at, last_login}` (the POST adds `created` and `linked`).
+`pp_account_id` comes back as a string.
+
+| Group HQ grant | Call | Answer |
+|---|---|---|
+| `sourcer_link` with value `mentee` (the portal's `users.source`) | `POST /api/partner/sourcers` `{email, name, company, pp_account_id, fee_share_pct?, source: "mentee"}`: creates the sourcer, or links the user with that email to the PP account | `201` created or `200` linked, the row; `id` becomes `remote_ref` and `people.kp_user_id`; `409 email_is_admin`, `409 linked_elsewhere`, `409 pp_account_in_use`; `422 invalid` |
+| grant when `remote_ref` is known | `PATCH /api/partner/sourcers/{id}` `{active: true}` | the row; `404 not_found` for an id that is not a sourcer |
+| revoke | `PATCH /api/partner/sourcers/{id}` `{active: false}`; without a `remote_ref` the id is looked up by email first | the row; `404 not_found` is treated as already gone |
+| lookup | `GET /api/partner/sourcers?email=` | the row, or `404 {ok: false, error: "not_found"}` when no sourcer has that email (also the answer for an admin's email); the connector reads that 404 as "no sourcer", so a revoke with nothing to revoke is done, not failed |
 
 `fee_share_pct` is sent only when the programme template item carries it (`{"product": "kp", "kind":
 "sourcer_link", "value": "mentee", "fee_share_pct": 50}`, validated 0 to 100 on the programme screen);
 until Martin signs the mentee figure off the portal's own default (50) applies. `company` is the first organisation linked to
 the person in Group HQ, or blank.
 
-## Hello New Home (contract pending)
+## Hello New Home (built on branch `partner-api`)
 
 Base URL `HNH_BASE_URL` (live: `https://hellonewhome.co.uk`). Token `HNH_PARTNER_TOKEN`, which on
-the HNH side is an `api_clients` row (hashed token, scope `partners`) checked by
-`require_api_client` with `hmac.compare_digest`; any `Origin` is rejected.
+the HNH side is the `grouphq` row of `api_clients` (SHA-256 of the secret, scopes `partners:read` and
+`partners:write`; `partners:write` also covers the lookup) checked by `require_api_client` with
+`hmac.compare_digest`. HNH reads the secret from `X-Service-Token` or from `Authorization: Bearer`;
+the connector sends the bearer form. Any `Origin` is refused (403 `origin_not_allowed`); a missing or
+wrong secret or client name is 401 (`missing_token`, `missing_client`, `invalid_client`,
+`client_inactive`); a missing scope is 403 `scope_missing`.
 
-| Group HQ grant | Call |
-|---|---|
-| `partner_seat` with value `area` or `introducer` | `POST /api/partner/partners` `{email, name, tier, status: "active", create_login: true, franchise: {fee_waived: true, reason}, area_slug | postcodes[]}`; the answer's `id` (and `user_id`) become `remote_ref`, `people.hnh_partner_id` and `people.hnh_user_id` |
-| grant when `remote_ref` is known | `POST /api/partner/partners/{id}/status` `{status: "active", reason}` |
-| revoke | `POST /api/partner/partners/{id}/status` `{status: "paused", reason}`: the partner and their area stay on record; without a `remote_ref` the id is looked up by email first |
-| lookup | `GET /api/partner/partners?email=` |
+| Group HQ grant | Call | Answer |
+|---|---|---|
+| `partner_seat` with value `area` or `introducer` | `POST /api/partner/partners` `{email, name, tier, status: "active", create_login: true, franchise: {fee_waived: true, reason}, area_slug | postcodes[]}` | `201` created or `200` updated: `{ok: true, created, partner_id, user_id, one_time_password, area_slug, area_created, note, partner: {id, name, email, tier, status, franchise, areas[], user_id, login, created_at}}`; `partner.id` and `partner.user_id` become `remote_ref`, `people.hnh_partner_id` and `people.hnh_user_id`; `409 email_in_use`, `409 area_assigned`, `409 postcode_clash`, `409 slug_taken`; `422 invalid_request` |
+| grant when `remote_ref` is known | `POST /api/partner/partners/{id}/status` `{status: "active", reason}` | `{ok: true, partner_id, status, previous_status, changed, partner}`; `404 no_partner` |
+| revoke | `POST /api/partner/partners/{id}/status` `{status: "paused", reason}`: the partner and their area stay on record; without a `remote_ref` the id is looked up by email first | as above; `404 no_partner` is treated as already gone |
+| lookup | `GET /api/partner/partners?email=` | `{ok: true, found: true, partner: {...}}` or `{ok: true, found: false, partner: null}` (a 404 would be read as not found too) |
+
+`name` is required by HNH (it is printed on the public area pages), so the connector refuses to send a
+grant for a person with no name (`missing_name`, shown on the grant page) rather than let HNH's 422 be
+retried five times: add the name on the person page and press Retry.
+
+**The one-time password.** `create_login: true` makes HNH create the partner's portal login and return
+its temporary password once (`one_time_password`; hashed on HNH's side, must be changed on first use,
+null on a resend). The connector removes it from the answer before anything is stored and shows it once
+on the run page, to the person who pressed **Run nightly now** or **Retry**, as "HNH temporary portal
+password for <email>: ..."; pass it on there and then. It is not in `connector_calls`, not in the audit
+trail and not in the nightly job's output, so a grant sent by the cron shows no password at all. A lost
+or unseen temporary password is re-issued by head office from the HNH admin partner page (Partners,
+the partner, **Reset password**), never from Group HQ.
 
 `area_slug` or `postcodes` (a list of outward codes) and `fee_waived` come from the programme
 template item (`{"product": "hnh", "kind": "partner_seat", "value": "area", "area_slug": "swansea"}`,
 validated on the programme screen) when the territory has been decided;
-without one HNH creates the partner with no area and head office assigns it by hand. Hello New Home
+without one HNH creates the partner with no area and head office assigns it by hand. A slug that
+already exists on HNH with the same postcodes is assigned; with different postcodes HNH answers
+`409 slug_taken` naming the postcodes it holds, so a changed template never silently leaves the old
+territory in place. Hello New Home
 is a separate company (Hello New Home 2 Ltd): this call moves a name and an email between two data
 controllers, so it stays in dry run until the intra-group data sharing agreement and consent wording
 exist (plan, Phase 3).
@@ -177,5 +210,7 @@ exist (plan, Phase 3).
    taken the access away and the grant reads revoked.
 5. Only then point the base URL at the live product.
 
-The recorded fixtures in `tests/test_connectors.py` are the contract as Group HQ understands it; when a
-product's endpoint lands, run its own tests against the same payloads and change both sides together.
+The recorded fixtures in `tests/test_connectors.py` are the contract as Group HQ understands it, and
+since 20 October 2026 they are the bodies the three product branches send (a flat row for KP,
+`{ok, found, partner}` and the `partner` object for HNH, `{ok, revoked}` for an Ordris revoke). When a
+product changes an endpoint, run its own tests against the same payloads and change both sides together.

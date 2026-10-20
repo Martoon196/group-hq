@@ -47,7 +47,7 @@
       <td><a href="/people/{{ d.person_id }}">{{ d.person_key }}</a></td>
       <td>{% if d.grant_id %}<a href="/grants/{{ d.grant_id }}">{{ product_name(d.product) }} {{ d.kind|replace("_", " ") }} <code>{{ d.value }}</code></a>{% else %}{{ product_name(d.product) }} {{ d.kind|replace("_", " ") }} <code>{{ d.value }}</code>{% endif %}</td>
       <td class="nowrap">{% if d.ends_at %}{{ d.ends_at | date }}{% else %}<span class="muted">-</span>{% endif %}</td>
-      <td class="detail">{{ d.detail }}{% if d.key %}<br><span class="small muted"><code>{{ d.key }}</code></span>{% endif %}
+      <td class="detail">{{ d.detail }}{% if d.once %}<br><strong class="once">{{ d.once }}</strong><br><span class="small muted">Pass this on now: it is not stored anywhere in Group HQ.</span>{% endif %}{% if d.key %}<br><span class="small muted"><code>{{ d.key }}</code></span>{% endif %}
         {% if d.plan %}<details class="plan"><summary>{{ d.plan.method }} {{ d.plan.url }}</summary><pre>{{ d.plan | tojson(indent=2) }}</pre></details>{% endif %}</td>
     </tr>
     {% endfor %}

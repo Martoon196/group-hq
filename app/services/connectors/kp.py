@@ -1,9 +1,9 @@
-"""Key Properties connector: the plan's Phase 2 contract (CONTRACT PENDING, see docs/connectors.md).
+"""Key Properties connector: the plan's Phase 2 contract, as built on the portal's grouphq-connector branch (docs/connectors.md).
 
     POST  {KP_BASE_URL}/api/partner/sourcers        {email, name, company, pp_account_id, fee_share_pct, source: "mentee"}
           creates a sourcer, or links the existing invite-only user with that email to the PP account
     PATCH {KP_BASE_URL}/api/partner/sourcers/{id}   {fee_share_pct, active}
-    GET   {KP_BASE_URL}/api/partner/sourcers?email=
+    GET   {KP_BASE_URL}/api/partner/sourcers?email=  the flat row, or 404 not_found when there is no sourcer
 
 Auth: Bearer KP_PARTNER_TOKEN (GROUPHQ_PARTNER_TOKEN on the portal side, keyed by client) and
 X-Partner-Client: grouphq. A grant creates or re-activates the sourcer; a revoke deactivates it
@@ -104,11 +104,19 @@ class KPConnector(BaseConnector):
         return self._with_sourcer(self.request("POST", self.SOURCERS, json=payload))
 
     def _sourcer_id(self, grant: "EntitlementGrant", person: "Person") -> str | None:
+        """The portal's id for the person, or None when it has no sourcer with that email. The portal answers
+        the lookup with 404 not_found in that case (and for an admin's email), which is "nothing to do"
+        here, not a failure."""
         if grant.remote_ref:
             return grant.remote_ref
         if self.dry_run:
             return PLACEHOLDER
-        found = self.lookup(person.person_key)
+        try:
+            found = self.lookup(person.person_key)
+        except ConnectorError as error:
+            if error.status == 404:
+                return None
+            raise
         return found.remote_ref
 
     def revoke(self, grant: "EntitlementGrant", person: "Person", *, reason: str = "") -> ConnectorResult:
