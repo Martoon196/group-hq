@@ -1,0 +1,35 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = "Programmes | Group HQ" %}
+{% block head %}{{ f.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Catalogue</span>
+  <h1>Programmes</h1>
+</div>
+<section class="panel">
+  <p class="help">The packages from the plan. Each carries a grant template: the rights a mentee receives in each product while their access runs. Programmes are seeded once and edited here; the codes are fixed.</p>
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Programme</th><th>Code</th><th>Template</th><th class="num">Active mentees</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for p in programmes %}
+    <tr>
+      <td><a href="/programmes/{{ p.id }}"><strong>{{ p.name }}</strong></a>{% if p.description %}<br><span class="small muted">{{ p.description[:140] }}{% if p.description|length > 140 %}...{% endif %}</span>{% endif %}</td>
+      <td><code>{{ p.code }}</code></td>
+      <td>
+        {% if p.grant_template %}
+        <div class="chips">{% for item in p.grant_template %}<span class="chip" title="{{ item.kind }}">{{ product_name(item.product) }}: {{ item.value }}{% if item.months %} ({{ item.months }} mo){% endif %}</span>{% endfor %}</div>
+        {% else %}<span class="muted">Grants nothing</span>{% endif %}
+      </td>
+      <td class="num">{{ active_counts.get(p.id, 0) }}</td>
+      <td><span class="status status-{{ 'active' if p.active else 'ended' }}">{{ "active" if p.active else "inactive" }}</span></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">No programmes have been seeded. Restart the app to seed them.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

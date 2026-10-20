@@ -1,0 +1,40 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = "Enrol a mentee | Group HQ" %}
+{% block head %}{{ f.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Register</span>
+  <h1>Enrol a mentee</h1>
+  <div class="actions"><a class="btn btn-ghost btn-sm" href="/mentees">All mentees</a><a class="btn btn-ghost btn-sm" href="/people/new">Add a person first</a></div>
+</div>
+
+<form method="post" action="/mentees/new" class="form">
+  <div class="form-grid">
+    <div class="field">
+      <label for="person_id">Person</label>
+      <select id="person_id" name="person_id" required>
+        <option value="">Choose a person</option>
+        {% for p in people %}<option value="{{ p.id }}"{% if vals.person_id == p.id|string %} selected{% endif %}>{{ p.person_key }}{% if p.name %} ({{ p.name }}){% endif %}</option>{% endfor %}
+      </select>
+      <span class="hint">Not listed? <a href="/people/new">Add them to the register</a> and come back.</span>
+    </div>
+    <div class="field">
+      <label for="programme_id">Programme</label>
+      <select id="programme_id" name="programme_id" required>
+        {% for p in programmes %}<option value="{{ p.id }}"{% if vals.programme_id == p.id|string %} selected{% endif %}{% if not p.active %} disabled{% endif %}>{{ p.name }}{% if not p.active %} (inactive){% endif %}</option>{% endfor %}
+      </select>
+      <span class="hint">What they get in each product comes from the programme's grant template.</span>
+    </div>
+    {{ f.select("payment_mode", "How they pay", modes, vals.payment_mode, hint="Paid in full gives 12 months from the start date once a cleared payment exists. Monthly runs while payments keep clearing, with 7 days of grace.") }}
+    {{ f.text("start_date", "Start date", vals.start_date, type="date", required=True) }}
+    {{ f.text("cohort", "Cohort", vals.cohort, hint="Optional label, for example Autumn 2026.") }}
+    {{ f.textarea("notes", "Notes", vals.notes, rows=4, hint="Private to Group HQ.") }}
+  </div>
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">Enrol</button>
+    <a class="btn btn-ghost" href="/mentees">Cancel</a>
+  </div>
+  <p class="form-note">Nothing is granted in a product until a payment is recorded and cleared. The nightly recompute at 03:10, or Recompute now on the mentee's Grants tab, does the granting.</p>
+</form>
+{% endblock %}

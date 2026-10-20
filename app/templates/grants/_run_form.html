@@ -1,0 +1,17 @@
+{# The "Run nightly now" form. action: where to post; scope: "everyone" or a person's email. #}
+{% macro run_form(action, scope="everyone", today=None) -%}
+<form method="post" action="{{ action }}" class="run-form" data-confirm="Run the recompute now for {{ scope }}? With dry run unticked, calls are sent to the products.">
+  <div class="field field-check">
+    <label><input type="checkbox" name="dry_run" value="1" checked> Dry run: record and show the calls, send nothing</label>
+  </div>
+  <div class="field">
+    <label for="run-today">As of date</label>
+    <input id="run-today" name="today" type="date" value="{{ today.isoformat() if today else '' }}">
+    <span class="hint">Leave as today. Another date is accepted in a dry run only, to see what the rule would do then; a live run is always as of today.</span>
+  </div>
+  <div class="form-actions">
+    <button class="btn btn-primary btn-sm" type="submit">Run nightly now</button>
+    {% if env_dry_run %}<span class="help">Connectors are in dry run in this environment (CONNECTORS_DRY_RUN=1): every run is a dry run, whatever the box says.</span>{% endif %}
+  </div>
+</form>
+{%- endmacro %}

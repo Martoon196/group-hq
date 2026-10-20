@@ -1,0 +1,61 @@
+{% extends "app_base.html" %}
+{% set title = ("Dry run" if summary.dry_run else "Recompute") ~ " | Group HQ" %}
+{% block head %}
+<style>
+  .status-sent, .status-succeeded { background: #E3F5EA; color: #17814A; }
+  .status-planned { background: #E8EEFF; color: #2B4A9B; }
+  .status-skipped { background: #EEE; color: #666; }
+  .status-blocked { background: #FFE2C2; color: #7A3E00; }
+  details.plan { margin-top: .3rem; }
+  details.plan summary { cursor: pointer; font-size: .82rem; color: var(--muted); }
+  details.plan pre { margin: .3rem 0 0; font-size: .78rem; background: var(--mist); padding: .6rem; border-radius: 8px; overflow-x: auto; max-width: 60ch; white-space: pre-wrap; word-break: break-word; }
+  .run-banner { border-radius: 10px; padding: .8rem 1rem; margin-bottom: 1.2rem; font-weight: 700; }
+  .run-banner.is-dry { background: #E8EEFF; color: #2B4A9B; }
+  .run-banner.is-live { background: #E3F5EA; color: #17814A; }
+  .run-banner.is-bad { background: #FDE8EE; color: #9B1C4B; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Access</span>
+  <h1>{{ "Dry run" if summary.dry_run else "Recompute" }} for {{ scope }}</h1>
+  <div class="actions"><a class="btn btn-ghost btn-sm" href="{{ back }}">Back</a><a class="btn btn-ghost btn-sm" href="/grants/calls">Connector calls</a></div>
+</div>
+
+<div class="run-banner {% if summary.failed %}is-bad{% elif summary.dry_run %}is-dry{% else %}is-live{% endif %}">
+  {% if summary.dry_run %}Dry run as of {{ summary.today | date }}: nothing was sent to a product. The calls below are recorded as pending and will go on the next live run.{% else %}Run as of {{ summary.today | date }}: {{ summary.outcomes.get("sent", 0) }} call{{ "s" if summary.outcomes.get("sent", 0) != 1 else "" }} sent{% if summary.failed %}, {{ summary.failed }} failed{% endif %}.{% endif %}
+</div>
+
+<div class="stats stats-4">
+  <div class="stat"><strong>{{ summary.people }}</strong><span>{{ "person" if summary.people == 1 else "people" }} considered</span></div>
+  <div class="stat"><strong>{{ summary.actions.get("grant", 0) + summary.actions.get("extend", 0) }}</strong><span>granted or extended</span></div>
+  <div class="stat"><strong>{{ summary.actions.get("revoke", 0) }}</strong><span>revoked</span></div>
+  <div class="stat{% if summary.failed or summary.actions.get("blocked", 0) %} is-bad{% endif %}"><strong>{{ summary.failed + summary.actions.get("blocked", 0) }}</strong><span>failed or blocked · {{ summary.actions.get("noop", 0) + summary.actions.get("not_started", 0) }} unchanged · {{ summary.actions.get("gave_up", 0) }} given up</span></div>
+</div>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>{{ decisions|length }} decision{{ "s" if decisions|length != 1 else "" }}</h2><span class="help">Every grant the rule looked at, including the ones it left alone.</span></div>
+  {% if decisions %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Outcome</th><th>Action</th><th>Person</th><th>Grant</th><th>Until</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for d in decisions %}
+    <tr>
+      <td><span class="status status-{{ d.outcome }}">{{ d.outcome }}</span></td>
+      <td class="action">{{ d.action }}</td>
+      <td><a href="/people/{{ d.person_id }}">{{ d.person_key }}</a></td>
+      <td>{% if d.grant_id %}<a href="/grants/{{ d.grant_id }}">{{ product_name(d.product) }} {{ d.kind|replace("_", " ") }} <code>{{ d.value }}</code></a>{% else %}{{ product_name(d.product) }} {{ d.kind|replace("_", " ") }} <code>{{ d.value }}</code>{% endif %}</td>
+      <td class="nowrap">{% if d.ends_at %}{{ d.ends_at | date }}{% else %}<span class="muted">-</span>{% endif %}</td>
+      <td class="detail">{{ d.detail }}{% if d.key %}<br><span class="small muted"><code>{{ d.key }}</code></span>{% endif %}
+        {% if d.plan %}<details class="plan"><summary>{{ d.plan.method }} {{ d.plan.url }}</summary><pre>{{ d.plan | tojson(indent=2) }}</pre></details>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">Nothing to decide: nobody is enrolled on a programme yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

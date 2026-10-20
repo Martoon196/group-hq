@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% set title = "Log in | Group HQ" %}
+{% block body_class %}app-body login-body{% endblock %}
+{% block body %}
+<main class="login-card">
+  <a class="app-brand" href="/"><span class="wordmark">Group <em>HQ</em></span><small>{{ s.company_name }}</small></a>
+  <h1>Log in</h1>
+  <p class="help">Your password first, then the six-digit code from your authenticator app.</p>
+  {% if flash %}<div class="flash flash-{{ flash_kind or 'ok' }}">{{ flash }}</div>{% endif %}
+  {% if error %}<div class="flash flash-err">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="form">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" required autocomplete="username" autofocus></div>
+    <div class="field mt-1"><label for="password">Password</label><input id="password" name="password" type="password" required autocomplete="current-password"></div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Continue</button></div>
+  </form>
+</main>
+{% endblock %}

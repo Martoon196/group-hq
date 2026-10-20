@@ -1,0 +1,95 @@
+{% extends "app_base.html" %}
+{% import "grants/_run_form.html" as rf %}
+{% set title = "Grant " ~ grant.id ~ " | Group HQ" %}
+{% block head %}
+<style>
+  .status-blocked { background: #FFE2C2; color: #7A3E00; }
+  .run-form { display: grid; grid-template-columns: 1fr; gap: .8rem; }
+  pre.json { margin: 0; font-size: .78rem; background: var(--mist); padding: .6rem; border-radius: 8px; overflow-x: auto; max-width: 56ch; white-space: pre-wrap; word-break: break-word; }
+  details summary { cursor: pointer; font-size: .85rem; color: var(--muted); }
+</style>
+{% endblock %}
+{% block content %}
+{% set shown = display_state(grant) %}
+<div class="page-title">
+  <span class="eyebrow">Access</span>
+  <h1>{{ product_name(grant.product) }}: {{ grant.kind|replace("_", " ") }} <code>{{ grant.value }}</code></h1>
+  <div class="actions">
+    <a class="btn btn-ghost btn-sm" href="/grants">All grants</a>
+    <a class="btn btn-ghost btn-sm" href="/people/{{ person.id }}">{{ person.name or person.person_key }}</a>
+    {% if grant.state == "failed" or grant.last_error %}
+    <form method="post" action="/grants/{{ grant.id }}/retry" data-confirm="Retry this grant now?{% if shown == 'blocked' %} The person was on a paid subscription last time; only retry if that has changed.{% endif %}"><label class="small"><input type="checkbox" name="dry_run" value="1"> dry run</label> <button class="btn btn-primary btn-sm" type="submit">Retry</button></form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="two-col">
+  <section class="panel">
+    <h2>Grant {{ grant.id }} <span class="status status-{{ shown }}">{{ shown }}</span></h2>
+    <dl class="kv">
+      <dt>Person</dt><dd><a href="/people/{{ person.id }}">{{ person.person_key }}</a>{% if person.name %} ({{ person.name }}){% endif %}</dd>
+      <dt>Programme</dt><dd>{% if mentee %}<a href="/mentees/{{ mentee.id }}">{{ mentee.programme.name }}</a>, {{ "paid in full" if mentee.payment_mode == "full" else "paying monthly" }}, started {{ mentee.start_date | date }}, mentee {{ mentee.status }}{% else %}<span class="muted">none (source {{ grant.source or "manual" }})</span>{% endif %}</dd>
+      <dt>Reason</dt><dd>{{ grant.reason or "" }}</dd>
+      <dt>Starts</dt><dd>{{ grant.starts_at | date }}</dd>
+      <dt>Ends</dt><dd>{% if grant.ends_at %}{{ grant.ends_at | date }} (access through the day before){% if grant.ends_at.date() <= today and grant.state == "active" %} <strong>due for revoke</strong>{% endif %}{% else %}<span class="muted">not set: nothing cleared supports access yet</span>{% endif %}</dd>
+      <dt>Remote ref</dt><dd>{{ grant.remote_ref or "" }}</dd>
+      <dt>Last sync</dt><dd>{{ grant.last_sync_at | uk }}</dd>
+      {% if grant.last_error %}<dt>Last error</dt><dd class="status-lapsed" style="display:inline-block">{{ grant.last_error }}</dd>{% endif %}
+      <dt>Source</dt><dd>{{ grant.source }}</dd>
+    </dl>
+    {% if shown == "blocked" %}<p class="help mt-1">Blocked: the product refused because the person has a live paid subscription. Group HQ never retries this on its own. If their subscription has since ended, press Retry.</p>{% endif %}
+  </section>
+  <section class="panel">
+    <h2>Recompute this person</h2>
+    <p class="help">Applies the rule to every grant {{ person.person_key }} holds, not only this one.</p>
+    {{ rf.run_form("/grants/" ~ grant.id ~ "/recompute", person.person_key, today) }}
+  </section>
+</div>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>Connector calls</h2><span class="help">Newest first. The idempotency key is what stops a re-run sending the same call twice.</span></div>
+  {% if calls %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>When</th><th>Action</th><th>Key</th><th>Status</th><th>Attempts</th><th>Last attempt</th><th>Request</th><th>Response</th></tr></thead>
+    <tbody>
+    {% for c in calls %}
+    <tr>
+      <td class="nowrap">{{ c.created_at | uk("%d %b %H:%M") }}</td>
+      <td class="action">{{ c.action }}</td>
+      <td class="small"><code>{{ c.idempotency_key }}</code></td>
+      <td><span class="status status-{{ c.status }}">{{ c.status }}</span></td>
+      <td>{{ c.attempts }}/{{ max_attempts }}</td>
+      <td class="nowrap small">{{ c.last_attempt_at | uk("%d %b %H:%M") }}</td>
+      <td><details><summary>payload</summary><pre class="json">{{ c.payload | tojson(indent=2) }}</pre></details></td>
+      <td>{% if c.response is not none %}<details><summary>{% if c.response.error %}{{ c.response.error }}{% elif c.response.dry_run %}planned{% elif c.response.noop %}{{ c.response.noop }}{% else %}response{% endif %}</summary><pre class="json">{{ c.response | tojson(indent=2) }}</pre></details>{% else %}<span class="muted">-</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="muted">No calls yet.</p>{% endif %}
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>Audit trail</h2><a class="btn btn-ghost btn-sm" href="/audit?entity=grant:{{ grant.id }}">Full audit log</a></div>
+  {% if trail %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+    {% for row in trail %}
+    <tr>
+      <td class="nowrap">{{ row.created_at | uk("%d %b %H:%M") }}</td>
+      <td>{{ row.actor }}</td>
+      <td class="action">{{ row.action }}</td>
+      <td>{% if row.before %}<details><summary>before</summary><pre class="json">{{ row.before | tojson(indent=2) }}</pre></details>{% endif %}</td>
+      <td>{% if row.after %}<details><summary>after</summary><pre class="json">{{ row.after | tojson(indent=2) }}</pre></details>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="muted">Nothing recorded yet.</p>{% endif %}
+</section>
+{% endblock %}

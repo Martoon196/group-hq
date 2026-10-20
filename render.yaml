@@ -1,0 +1,120 @@
+services:
+  - type: web
+    name: group-hq
+    runtime: python
+    region: frankfurt
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    preDeployCommand: alembic upgrade head
+    # No --proxy-headers / --forwarded-allow-ips: trusting X-Forwarded-For from any address would let a caller
+    # choose the address the login throttle keys on. app.auth.client_ip reads the RIGHT-most X-Forwarded-For
+    # entry, the one Render's proxy appended, and the throttle also has a per-account key that no address can
+    # reset. Confirm against a staging deploy that Render appends rather than overwrites the header.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: BASE_URL
+        value: https://group-hq.onrender.com
+      - key: SECURE_COOKIES
+        value: "1"
+      - key: ADMIN_EMAIL
+        sync: false
+      # Used once, at the first boot, to create the admin; the first login must change it. Clear it from the
+      # dashboard after that boot so the working password never lives in the environment.
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: PP_BASE_URL
+        value: https://propertypredator.com
+      - key: PP_SERVICE_TOKEN
+        sync: false
+      - key: ORDRIS_BASE_URL
+        sync: false
+      - key: ORDRIS_PARTNER_TOKEN
+        sync: false
+      - key: KP_BASE_URL
+        value: https://portal.keypropertiesuk.co.uk
+      - key: KP_PARTNER_TOKEN
+        sync: false
+      - key: HNH_BASE_URL
+        value: https://hellonewhome.co.uk
+      - key: HNH_PARTNER_TOKEN
+        sync: false
+      # "1" keeps every product in dry run; "0" sends to every product; a list keeps only those products in
+      # dry run. Ordris, KP and HNH stay listed until each contract is live (HNH also until the data sharing
+      # agreement exists), so PP can go live without the others burning their retry attempts every night.
+      - key: CONNECTORS_DRY_RUN
+        value: "ordris,kp,hnh"
+
+  - type: cron
+    name: group-hq-recompute
+    runtime: python
+    region: frankfurt
+    plan: starter
+    schedule: "10 3 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.jobs.recompute
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: DATABASE_URL
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: SECRET_KEY
+      - key: BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: BASE_URL
+      - key: PP_BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: PP_BASE_URL
+      - key: PP_SERVICE_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: PP_SERVICE_TOKEN
+      - key: ORDRIS_BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: ORDRIS_BASE_URL
+      - key: ORDRIS_PARTNER_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: ORDRIS_PARTNER_TOKEN
+      - key: KP_BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: KP_BASE_URL
+      - key: KP_PARTNER_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: KP_PARTNER_TOKEN
+      - key: HNH_BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: HNH_BASE_URL
+      - key: HNH_PARTNER_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: HNH_PARTNER_TOKEN
+      - key: CONNECTORS_DRY_RUN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: CONNECTORS_DRY_RUN

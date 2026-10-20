@@ -1,0 +1,66 @@
+{# Form field macros and the few extra styles (tabs, pager, filters) shared by the register screens. #}
+{% macro styles() -%}
+<style>
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .8rem; align-items: end; }
+  .filters .field input, .filters .field select { padding: .55rem .7rem; }
+  .filters .form-actions { margin: 0; }
+  .pager { display: flex; gap: .8rem; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 1rem; }
+  .pager .btn[aria-disabled="true"] { opacity: .4; pointer-events: none; }
+  .tabs { display: flex; gap: .3rem; flex-wrap: wrap; border-bottom: 2px solid var(--line); margin: 0 0 1.2rem; padding: 0; list-style: none; }
+  .tabs a { display: inline-block; padding: .55rem 1rem; font-weight: 700; text-decoration: none; color: var(--ink); border-bottom: 3px solid transparent; margin-bottom: -2px; }
+  .tabs a:hover { color: var(--pink-deep); }
+  .tabs a.is-active { color: var(--pink-deep); border-bottom-color: var(--pink); }
+  .tabs .count { font-size: .78rem; color: var(--muted); margin-left: .3rem; }
+  .json { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .8rem; white-space: pre-wrap; word-break: break-word; margin: 0; }
+  table.data td.k { color: var(--muted); font-weight: 700; width: 32%; }
+  .link-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem 1rem; }
+  @media (max-width: 620px) { .link-grid { grid-template-columns: 1fr; } }
+  .link-grid h3 { grid-column: 1 / -1; font-size: .78rem; letter-spacing: .14em; text-transform: uppercase; color: var(--pink); margin: .6rem 0 0; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; transform: none; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ok-text { color: var(--green-deep); font-weight: 700; }
+  .bad-text { color: #9B1C4B; font-weight: 700; }
+</style>
+{%- endmacro %}
+
+{% macro text(name, label, value='', hint='', type='text', required=False, id=None, attrs='') -%}
+<div class="field">
+  <label for="{{ id or name }}">{{ label }}</label>
+  <input id="{{ id or name }}" name="{{ name }}" type="{{ type }}" value="{{ value if value is not none else '' }}"{% if required %} required{% endif %}{% if attrs %} {{ attrs|safe }}{% endif %}>
+  {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro select(name, label, options, value='', hint='', id=None) -%}
+<div class="field">
+  <label for="{{ id or name }}">{{ label }}</label>
+  <select id="{{ id or name }}" name="{{ name }}">
+    {% for opt in options %}{% if opt is string %}{% set v = opt %}{% set l = opt %}{% else %}{% set v = opt[0] %}{% set l = opt[1] %}{% endif %}<option value="{{ v }}"{% if v|string == value|string %} selected{% endif %}>{{ l }}</option>
+    {% endfor %}
+  </select>
+  {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro textarea(name, label, value='', hint='', rows=4, cls='', full=True) -%}
+<div class="field{% if full %} full{% endif %}">
+  <label for="{{ name }}">{{ label }}</label>
+  <textarea id="{{ name }}" name="{{ name }}" rows="{{ rows }}"{% if cls %} class="{{ cls }}"{% endif %}>{{ value if value is not none else '' }}</textarea>
+  {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro checkbox(name, label, checked=False, hint='') -%}
+<div class="field field-check">
+  <label><input type="checkbox" name="{{ name }}" value="1"{% if checked %} checked{% endif %}> {{ label }}</label>
+  {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro pager(base, qs_prev, qs_next, page, pages) -%}
+<div class="pager">
+  <a class="btn btn-ghost btn-sm" href="{{ base }}?{{ qs_prev }}"{% if page <= 1 %} aria-disabled="true"{% endif %}>Newer</a>
+  <span class="help">Page {{ page }} of {{ pages }}</span>
+  <a class="btn btn-ghost btn-sm" href="{{ base }}?{{ qs_next }}"{% if page >= pages %} aria-disabled="true"{% endif %}>Older</a>
+</div>
+{%- endmacro %}

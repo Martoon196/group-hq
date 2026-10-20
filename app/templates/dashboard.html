@@ -1,0 +1,42 @@
+{% extends "app_base.html" %}
+{% set title = "Dashboard | Group HQ" %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">{{ s.company_name }}</span><h1>Dashboard</h1></div>
+{% if stats.grants_failed or stats.calls_failed %}
+<div class="flash flash-err">{{ stats.grants_failed }} grant{{ "s" if stats.grants_failed != 1 else "" }} and {{ stats.calls_failed }} connector call{{ "s" if stats.calls_failed != 1 else "" }} failed. <a href="/grants?state=failed">See them</a>.</div>
+{% endif %}
+<div class="stats stats-4">
+  <div class="stat"><strong>{{ stats.people }}</strong><span><a href="/people">people</a> on the register</span></div>
+  <div class="stat"><strong>{{ stats.mentees_active }}</strong><span><a href="/mentees">active mentees</a> · {{ stats.mentees_lapsed }} lapsed</span></div>
+  <div class="stat{% if stats.grants_failed %} is-bad{% endif %}"><strong>{{ stats.grants_active }}</strong><span><a href="/grants">active grants</a> · {{ stats.grants_pending }} pending · {{ stats.grants_failed }} failed</span></div>
+  <div class="stat{% if stats.calls_failed %} is-bad{% endif %}"><strong>{{ stats.calls_pending }}</strong><span>connector calls waiting · {{ stats.calls_failed }} failed</span></div>
+</div>
+<div class="two-col mt-2">
+  <section class="panel">
+    <div class="panel-head"><h2>Latest activity</h2><a class="btn btn-ghost btn-sm" href="/audit">Audit log</a></div>
+    {% if recent %}
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Entity</th></tr></thead>
+      <tbody>
+      {% for row in recent %}
+      <tr><td class="nowrap">{{ row.created_at | uk("%d %b %H:%M") }}</td><td>{{ row.actor }}</td><td class="action">{{ row.action }}</td><td>{{ row.entity }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}<p class="muted">Nothing recorded yet.</p>{% endif %}
+  </section>
+  <section class="panel">
+    <h2>Next steps</h2>
+    <ul class="tick-list">
+      <li><a href="/people">Add a person</a> with the email they use across the products</li>
+      <li><a href="/mentees">Enrol them on a programme</a> and record what they have paid</li>
+      <li><a href="/grants">Grant access now</a>, or let the nightly recompute do it at 03:10</li>
+      <li><a href="/programmes">Check the {{ stats.programmes }} programme templates</a> before the first real grant</li>
+      <li><a href="/audit">Review the audit log</a> after any change that touched a product</li>
+    </ul>
+    {% if s.connectors_dry_run %}<p class="help mt-1">Connectors are in dry run: calls are recorded here and printed, not sent.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = "Audit log | Group HQ" %}
+{% block head %}{{ f.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">History</span><h1>Audit log</h1></div>
+
+<section class="panel">
+  <form method="get" action="/audit" class="filters">
+    <div class="field">
+      <label for="q">Entity or actor</label>
+      <input id="q" name="q" type="search" value="{{ filters.q }}" placeholder="mentee:12, person:3, an email">
+    </div>
+    <div class="field">
+      <label for="action">Action</label>
+      <select id="action" name="action">
+        <option value="">Any action</option>
+        {% for a in actions %}<option value="{{ a }}"{% if filters.action == a %} selected{% endif %}>{{ a }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary btn-sm" type="submit">Filter</button>
+      {% if qs %}<a class="btn btn-ghost btn-sm" href="/audit">Clear</a>{% endif %}
+    </div>
+  </form>
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head">
+    <h2>{{ total }} entr{{ "y" if total == 1 else "ies" }}{% if qs %} matching{% endif %}</h2>
+    <span class="help">Newest first, {{ page_size }} a page. Before and after hold only the fields that changed.</span>
+  </div>
+  {% if rows %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Entity</th><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+    {% for entry, before, after in rows %}
+    <tr>
+      <td class="nowrap">{{ entry.created_at | uk("%d %b %Y %H:%M:%S") }}</td>
+      <td>{{ entry.actor }}</td>
+      <td class="action">{{ entry.action }}</td>
+      <td class="nowrap">{{ entry.entity }}</td>
+      <td class="detail"><pre class="json">{{ before }}</pre></td>
+      <td class="detail"><pre class="json">{{ after }}</pre></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ f.pager("/audit", qs_prev, qs_next, page, pages) }}
+  {% else %}
+  <p class="muted">{% if qs %}Nothing matches.{% else %}Nothing recorded yet.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

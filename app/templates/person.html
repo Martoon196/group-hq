@@ -1,0 +1,108 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = person.person_key ~ " | Group HQ" %}
+{% block head %}{{ f.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Person #{{ person.id }}</span>
+  <h1>{{ person.name or person.person_key }}</h1>
+  {% if person.name %}<p class="muted">{{ person.person_key }}</p>{% endif %}
+  <div class="actions">
+    <a class="btn btn-primary btn-sm" href="/mentees/new?person_id={{ person.id }}">Enrol on a programme</a>
+    <a class="btn btn-ghost btn-sm" href="/people">All people</a>
+    <a class="btn btn-ghost btn-sm" href="/audit?q=person:{{ person.id }}">History</a>
+  </div>
+</div>
+
+<div class="two-col">
+  <div>
+    <form method="post" action="/people/{{ person.id }}" class="form">
+      <h2 class="mt-0" style="border:0;padding:0">Details</h2>
+      <div class="form-grid">
+        {{ f.text("email", "Email (person key)", vals.email, type="email", required=True, hint="Changing it moves every product link and mentee row with it. It stays unique.") }}
+        {{ f.text("name", "Name", vals.name) }}
+        {{ f.text("phone", "Phone", vals.phone) }}
+        {{ f.textarea("notes", "Notes", vals.notes, rows=4, hint="Private to Group HQ.") }}
+      </div>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Save details</button></div>
+    </form>
+
+    <form method="post" action="/people/{{ person.id }}/links" class="form mt-2">
+      <h2 class="mt-0" style="border:0;padding:0">Linked product ids</h2>
+      <p class="help">Each product's own id for this person. Leave a box blank to clear it. The connectors' lookups will fill these in time; until then they are set by hand.</p>
+      <div class="link-grid">
+        {% for group in link_groups %}
+        <h3>{{ group.name }}</h3>
+        {% for field in group.fields %}
+        {{ f.text(field.name, field.label, field.value, attrs=('inputmode="numeric" pattern="[0-9]*" autocomplete="off"' if field.numeric else 'autocomplete="off"')) }}
+        {% endfor %}
+        {% endfor %}
+      </div>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Save linked ids</button></div>
+    </form>
+  </div>
+
+  <div>
+    <section class="panel">
+      <div class="panel-head"><h2>Programmes</h2><a class="btn btn-ghost btn-sm" href="/mentees/new?person_id={{ person.id }}">Enrol</a></div>
+      {% if mentees %}
+      <div class="table-scroll">
+      <table class="data">
+        <thead><tr><th>Programme</th><th>Mode</th><th>Start</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for m in mentees %}
+        <tr>
+          <td><a href="/mentees/{{ m.id }}"><strong>{{ m.programme.name }}</strong></a>{% if m.cohort %}<br><span class="small muted">{{ m.cohort }}</span>{% endif %}</td>
+          <td>{{ "Paid in full" if m.payment_mode == "full" else "Monthly" }}</td>
+          <td class="nowrap">{{ m.start_date | date }}</td>
+          <td><span class="status status-{{ m.status }}">{{ m.status }}</span></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}<p class="muted">Not enrolled on anything yet.</p>{% endif %}
+    </section>
+
+    <section class="panel mt-2">
+      <div class="panel-head"><h2>Grants</h2>{% if mentees %}<a class="btn btn-ghost btn-sm" href="/mentees/{{ mentees[0].id }}?tab=grants">Manage</a>{% endif %}</div>
+      {% if grants %}
+      <div class="table-scroll">
+      <table class="data">
+        <thead><tr><th>Product</th><th>Right</th><th>State</th><th>Ends</th></tr></thead>
+        <tbody>
+        {% for g in grants %}
+        <tr>
+          <td>{{ product_name(g.product) }}</td>
+          <td>{{ g.kind|replace("_", " ") }}: <code>{{ g.value }}</code></td>
+          <td><span class="status status-{{ g.state }}">{{ g.state }}</span></td>
+          <td class="nowrap">{{ g.ends_at | uk("%d %b %Y") or "open" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}<p class="muted">No grants recorded for this person.</p>{% endif %}
+    </section>
+
+    {% if org_links %}
+    <section class="panel mt-2">
+      <h2>Organisations</h2>
+      <dl class="kv">
+        {% for link in org_links %}
+        <dt>{{ link.role or "member" }}</dt><dd>{{ link.organisation.name }}{% if link.organisation.companies_house_number %} <span class="small muted">({{ link.organisation.companies_house_number }})</span>{% endif %}</dd>
+        {% endfor %}
+      </dl>
+    </section>
+    {% endif %}
+
+    <section class="panel mt-2">
+      <h2>Record</h2>
+      <dl class="kv">
+        <dt>Added</dt><dd>{{ person.created_at | uk }}</dd>
+        <dt>Updated</dt><dd>{{ person.updated_at | uk }}</dd>
+      </dl>
+    </section>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,138 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = (mentee.person.name or mentee.person.person_key) ~ " on " ~ mentee.programme.name ~ " | Group HQ" %}
+{% block head %}{{ f.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Mentee #{{ mentee.id }} · {{ mentee.programme.name }}</span>
+  <h1>{{ mentee.person.name or mentee.person.person_key }} <span class="status status-{{ mentee.status }}">{{ mentee.status }}</span></h1>
+  <p class="muted">{{ mentee.person.person_key }}{% if mentee.cohort %} · {{ mentee.cohort }}{% endif %}</p>
+  <div class="actions">
+    <a class="btn btn-ghost btn-sm" href="/people/{{ mentee.person.id }}">Person record</a>
+    <a class="btn btn-ghost btn-sm" href="/mentees">All mentees</a>
+    <a class="btn btn-ghost btn-sm" href="/audit?q=mentee:{{ mentee.id }}">History</a>
+  </div>
+</div>
+
+<div class="stats stats-4">
+  <div class="stat"><strong>{{ "Full" if mentee.payment_mode == "full" else "Monthly" }}</strong><span>{{ mode_labels[mentee.payment_mode] }}</span></div>
+  <div class="stat"><strong>{{ mentee.start_date | date("%d %b %Y") }}</strong><span>start date</span></div>
+  <div class="stat{% if access.tone == 'bad' %} is-bad{% endif %}"><strong>{% if access.end %}{{ access.end | date("%d %b %Y") }}{% else %}None{% endif %}</strong><span>{% if access.end %}access runs to this date{% else %}{{ access.label|lower }}{% endif %}</span></div>
+  <div class="stat"><strong>{{ money(cleared_total) }}</strong><span>cleared{% if pending_total %} · {{ money(pending_total) }} awaiting clearance{% endif %}</span></div>
+</div>
+
+<ul class="tabs mt-2">
+  <li><a href="/mentees/{{ mentee.id }}?tab=payments"{% if tab == "payments" %} class="is-active" aria-current="page"{% endif %}>Payments<span class="count">{{ payments|length }}</span></a></li>
+  <li><a href="/mentees/{{ mentee.id }}?tab=grants"{% if tab == "grants" %} class="is-active" aria-current="page"{% endif %}>Grants<span class="count">{{ grants|length }}</span></a></li>
+  <li><a href="/mentees/{{ mentee.id }}?tab=notes"{% if tab == "notes" %} class="is-active" aria-current="page"{% endif %}>Notes</a></li>
+</ul>
+
+{% if tab == "payments" %}
+<div class="two-col">
+  <section class="panel">
+    <div class="panel-head"><h2>Payments</h2><span class="help">Only cleared payments count towards access.</span></div>
+    {% if shortfall is not none %}<div class="flash flash-err">{{ money(shortfall) }} more must clear before the term starts: the programme costs {{ money(price) }} and {{ money(cleared_total) }} has cleared.</div>{% endif %}
+    <p class="help">Paid in full: access runs {{ full_term_months }} months from the start date{% if price %} once the cleared payments reach {{ money(price) }}{% else %} from the first cleared payment, whatever its amount (no price is set on the programme){% endif %}; a payment that clears late still counts from the start date, so a late payer gets a shorter term. Monthly: access runs to the latest cleared period end plus {{ grace_days }} days; a gap between periods is not deducted.</p>
+    {% if payments %}
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Paid</th><th class="num">Amount</th><th>How</th><th>Period</th><th>Reference</th><th>Cleared</th></tr></thead>
+      <tbody>
+      {% for p in payments %}
+      <tr>
+        <td class="nowrap">{{ p.paid_at | uk("%d %b %Y") }}</td>
+        <td class="num">{{ money(p.amount) }}</td>
+        <td>{{ {"manual": "By hand", "stripe_link": "Stripe link", "invoice": "Invoice"}.get(p.method, p.method) }}</td>
+        <td class="nowrap">{% if p.period_start or p.period_end %}{{ p.period_start | date("%d %b %Y") }} to {{ p.period_end | date("%d %b %Y") or "open" }}{% else %}<span class="muted">none</span>{% endif %}</td>
+        <td>{{ p.reference }}{% if p.notes %}<br><span class="small muted">{{ p.notes }}</span>{% endif %}</td>
+        <td class="nowrap">
+          {% if p.cleared_at %}<span class="ok-text">{{ p.cleared_at | uk("%d %b %Y") }}</span>
+          {% else %}
+          <form method="post" action="/mentees/{{ mentee.id }}/payments/{{ p.id }}/clear" class="row-actions" data-confirm="Mark {{ money(p.amount) }} as cleared today? This extends their access.">
+            <button class="btn btn-primary btn-sm" type="submit">Mark cleared</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}<p class="muted">No payments recorded yet. Add the first one on the right.</p>{% endif %}
+  </section>
+
+  <form method="post" action="/mentees/{{ mentee.id }}/payments" class="form">
+    <h2 class="mt-0" style="border:0;padding:0">Add a payment</h2>
+    <div class="form-grid">
+      {{ f.text("amount", "Amount in pounds", payment_vals.amount, required=True, attrs='inputmode="decimal" placeholder="1250.00"', hint="Pounds and pence. Stored to the penny.") }}
+      {{ f.select("method", "How it arrived", methods, payment_vals.method) }}
+      {{ f.text("paid_at", "Paid on", payment_vals.paid_at, type="date", required=True) }}
+      {{ f.text("cleared_at", "Cleared on", payment_vals.cleared_at, type="date", hint="Leave blank until the money has arrived, then mark it cleared.") }}
+      {{ f.text("period_start", "Period start", payment_vals.period_start, type="date") }}
+      {{ f.text("period_end", "Period end", payment_vals.period_end, type="date", hint=("Required for monthly payers: access runs to this date plus " ~ s.grace_days ~ " days.") if mentee.payment_mode == "monthly" else "Optional for a full payment.") }}
+      {{ f.text("reference", "Reference", payment_vals.reference, hint="Bank reference, Stripe id or invoice number.") }}
+      {{ f.textarea("notes", "Notes", payment_vals.notes, rows=2) }}
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Record payment</button></div>
+  </form>
+</div>
+
+{% elif tab == "grants" %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Grants for {{ mentee.person.person_key }}</h2>
+    <div class="row-actions">
+      <form method="post" action="/mentees/{{ mentee.id }}/recompute"><button class="btn btn-primary btn-sm" type="submit"{% if not engine_available %} disabled{% endif %}>Recompute now</button></form>
+      <form method="post" action="/mentees/{{ mentee.id }}/revoke" data-confirm="Revoke every grant this person holds across all four products? They lose access straight away."><button class="btn btn-danger btn-sm" type="submit"{% if not engine_available %} disabled{% endif %}>Revoke all</button></form>
+    </div>
+  </div>
+  {% if not engine_available %}<div class="flash flash-err">{{ engine_missing }}</div>{% endif %}
+  <p class="help">Every right this person holds, across every programme they are on. Recompute applies the programme templates against the cleared payments and extends or revokes in each product; the nightly job does the same at 03:10.</p>
+  {% if grants %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Product</th><th>Right</th><th>State</th><th>Starts</th><th>Ends</th><th>Last synced</th><th>Source</th><th>Last error</th></tr></thead>
+    <tbody>
+    {% for g in grants %}
+    <tr>
+      <td>{{ product_name(g.product) }}</td>
+      <td>{{ g.kind|replace("_", " ") }}: <code>{{ g.value }}</code>{% if g.remote_ref %}<br><span class="small muted">ref {{ g.remote_ref }}</span>{% endif %}</td>
+      <td><span class="status status-{{ g.state }}">{{ g.state }}</span></td>
+      <td class="nowrap">{{ g.starts_at | uk("%d %b %Y") }}</td>
+      <td class="nowrap">{{ g.ends_at | uk("%d %b %Y") or "open" }}</td>
+      <td class="nowrap">{{ g.last_sync_at | uk("%d %b %H:%M") or "never" }}</td>
+      <td class="small">{{ g.source }}{% if g.mentee_id and g.mentee_id != mentee.id %}<br><a href="/mentees/{{ g.mentee_id }}">mentee #{{ g.mentee_id }}</a>{% endif %}</td>
+      <td class="detail">{% if g.last_error %}<span class="bad-text">{{ g.last_error }}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="muted">No grants yet. Record a cleared payment, then press Recompute now.</p>{% endif %}
+</section>
+
+{% else %}
+<div class="two-col">
+  <form method="post" action="/mentees/{{ mentee.id }}/details" class="form">
+    <h2 class="mt-0" style="border:0;padding:0">Notes and status</h2>
+    <div class="form-grid">
+      {{ f.select("status", "Status", status_choices + ([("lapsed", "Lapsed (set by the rule)")] if mentee.status == "lapsed" else []), detail_vals.status, hint="Lapsed is worked out from the payments by the nightly rule and clears itself when a payment arrives. Ended stops access for good; run Revoke all when it should stop at once.") }}
+      {{ f.text("cohort", "Cohort", detail_vals.cohort) }}
+      {{ f.select("payment_mode", "How they pay", modes, detail_vals.payment_mode) }}
+      {{ f.text("start_date", "Start date", detail_vals.start_date, type="date", required=True) }}
+      {{ f.textarea("notes", "Notes", detail_vals.notes, rows=8, hint="Private to Group HQ. Calls, agreements, anything the next person needs to know.") }}
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save</button></div>
+  </form>
+  <section class="panel">
+    <h2>Record</h2>
+    <dl class="kv">
+      <dt>Person</dt><dd><a href="/people/{{ mentee.person.id }}">{{ mentee.person.person_key }}</a></dd>
+      <dt>Programme</dt><dd><a href="/programmes/{{ mentee.programme.id }}">{{ mentee.programme.name }}</a></dd>
+      <dt>Enrolled</dt><dd>{{ mentee.created_at | uk }}</dd>
+      <dt>Updated</dt><dd>{{ mentee.updated_at | uk }}</dd>
+    </dl>
+  </section>
+</div>
+{% endif %}
+{% endblock %}

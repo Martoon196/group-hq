@@ -1,0 +1,56 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = "People | Group HQ" %}
+{% block head %}{{ f.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Register</span>
+  <h1>People</h1>
+  <div class="actions"><a class="btn btn-primary btn-sm" href="/people/new">Add a person</a></div>
+</div>
+
+<section class="panel">
+  <form method="get" action="/people" class="filters">
+    <div class="field">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="search" value="{{ filters.q }}" placeholder="Email, name or phone">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary btn-sm" type="submit">Search</button>
+      {% if qs %}<a class="btn btn-ghost btn-sm" href="/people">Clear</a>{% endif %}
+    </div>
+  </form>
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head">
+    <h2>{{ total }} {{ "person" if total == 1 else "people" }}{% if filters.q %} matching{% endif %}</h2>
+    <span class="help">By email, {{ page_size }} a page. A tick means the product id is linked.</span>
+  </div>
+  {% if people %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Email</th><th>Name</th><th>Phone</th><th>PP</th><th>Ordris</th><th>KP</th><th>HNH</th><th>Mentee rows</th><th>Added</th></tr></thead>
+    <tbody>
+    {% for p in people %}
+    <tr>
+      <td><a href="/people/{{ p.id }}"><strong>{{ p.person_key }}</strong></a></td>
+      <td>{{ p.name or "" }}</td>
+      <td>{{ p.phone or "" }}</td>
+      <td>{% if p.pp_account_id %}<span class="ok-text" title="Account {{ p.pp_account_id }}">Yes</span>{% else %}<span class="muted">No</span>{% endif %}</td>
+      <td>{% if p.ordris_user_id or p.ordris_org_id %}<span class="ok-text">Yes</span>{% else %}<span class="muted">No</span>{% endif %}</td>
+      <td>{% if p.kp_user_id or p.kp_investor_id %}<span class="ok-text">Yes</span>{% else %}<span class="muted">No</span>{% endif %}</td>
+      <td>{% if p.hnh_partner_id or p.hnh_user_id %}<span class="ok-text">Yes</span>{% else %}<span class="muted">No</span>{% endif %}</td>
+      <td class="num">{{ p.mentees|length }}</td>
+      <td class="nowrap">{{ p.created_at | uk("%d %b %Y") }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ f.pager("/people", qs_prev, qs_next, page, pages) }}
+  {% else %}
+  <p class="muted">{% if filters.q %}Nobody matches.{% else %}Nobody on the register yet. <a href="/people/new">Add the first person</a>.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

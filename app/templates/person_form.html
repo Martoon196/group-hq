@@ -1,0 +1,24 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = "Add a person | Group HQ" %}
+{% block head %}{{ f.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Register</span>
+  <h1>Add a person</h1>
+  <div class="actions"><a class="btn btn-ghost btn-sm" href="/people">All people</a></div>
+</div>
+
+<form method="post" action="/people/new" class="form form-narrow">
+  {{ f.text("email", "Email", vals.email, type="email", required=True, attrs='autocomplete="off" autofocus',
+            hint="The address they use across the products. It is lower-cased and trimmed, and it must be unique.") }}
+  <div class="mt-1">{{ f.text("name", "Name", vals.name) }}</div>
+  <div class="mt-1">{{ f.text("phone", "Phone", vals.phone) }}</div>
+  <div class="mt-1">{{ f.textarea("notes", "Notes", vals.notes, rows=4, full=False, hint="Private to Group HQ.") }}</div>
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">Add to the register</button>
+    <a class="btn btn-ghost" href="/people">Cancel</a>
+  </div>
+  <p class="form-note">Product ids (Property Predator account, Ordris, Key Properties, Hello New Home) are linked on the person's page once they exist.</p>
+</form>
+{% endblock %}

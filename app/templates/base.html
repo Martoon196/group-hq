@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title or app_name }}</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="/assets/app.css">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+{% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}app-body{% endblock %}">
+{% block body %}{% endblock %}
+<script src="/assets/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

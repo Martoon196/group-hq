@@ -1,0 +1,68 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = "Mentees | Group HQ" %}
+{% block head %}{{ f.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Register</span>
+  <h1>Mentees</h1>
+  <div class="actions"><a class="btn btn-primary btn-sm" href="/mentees/new">Enrol a mentee</a></div>
+</div>
+
+<section class="panel">
+  <form method="get" action="/mentees" class="filters">
+    <div class="field">
+      <label for="status">Status</label>
+      <select id="status" name="status">
+        <option value="">Any status</option>
+        {% for st in statuses %}<option value="{{ st }}"{% if filters.status == st %} selected{% endif %}>{{ st|capitalize }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="programme">Programme</label>
+      <select id="programme" name="programme">
+        <option value="">Any programme</option>
+        {% for p in programmes %}<option value="{{ p.id }}"{% if filters.programme == p.id|string %} selected{% endif %}>{{ p.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="search" value="{{ filters.q }}" placeholder="Email, name or cohort">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary btn-sm" type="submit">Filter</button>
+      {% if qs %}<a class="btn btn-ghost btn-sm" href="/mentees">Clear</a>{% endif %}
+    </div>
+  </form>
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head">
+    <h2>{{ total }} mentee{{ "s" if total != 1 else "" }}{% if qs %} matching{% endif %}</h2>
+    <span class="help">Newest first. Access runs to start date plus 12 months when paid in full, or the last cleared period end plus {{ s.grace_days }} days of grace when monthly.</span>
+  </div>
+  {% if rows %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Who</th><th>Programme</th><th>Pays</th><th>Started</th><th>Access</th><th>Cleared</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for m, access in rows %}
+    <tr>
+      <td><a href="/mentees/{{ m.id }}"><strong>{{ m.person.name or m.person.person_key }}</strong></a>{% if m.person.name %}<br><span class="small muted">{{ m.person.person_key }}</span>{% endif %}</td>
+      <td>{{ m.programme.name }}{% if m.cohort %}<br><span class="small muted">{{ m.cohort }}</span>{% endif %}</td>
+      <td>{{ "In full" if m.payment_mode == "full" else "Monthly" }}</td>
+      <td class="nowrap">{{ m.start_date | date }}</td>
+      <td class="nowrap"><span class="{{ 'ok-text' if access.tone == 'ok' else ('bad-text' if access.tone == 'bad' else 'muted') }}">{{ access.label }}</span></td>
+      <td class="num">{{ m.payments|selectattr("cleared_at")|list|length }} of {{ m.payments|length }}</td>
+      <td><span class="status status-{{ m.status }}">{{ m.status }}</span></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ f.pager("/mentees", qs_prev, qs_next, page, pages) }}
+  {% else %}
+  <p class="muted">{% if qs %}No mentees match.{% else %}Nobody enrolled yet. <a href="/mentees/new">Enrol the first mentee</a>.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

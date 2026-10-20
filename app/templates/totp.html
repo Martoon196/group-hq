@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% set title = ("Set up your authenticator" if enrol else "Authenticator code") ~ " | Group HQ" %}
+{% block body_class %}app-body login-body{% endblock %}
+{% block body %}
+<main class="login-card{% if enrol %} login-card-wide{% endif %}">
+  <a class="app-brand" href="/"><span class="wordmark">Group <em>HQ</em></span><small>{{ s.company_name }}</small></a>
+  {% if enrol %}
+  <h1>Set up your authenticator</h1>
+  <p class="help">This is the first login for <strong>{{ email }}</strong>. Scan the code with an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy), then enter the six digits it shows. The secret is saved only once a code has been accepted.</p>
+  <div class="enrol">
+    <div class="qr" aria-label="QR code for the authenticator secret">{{ qr }}</div>
+    <div class="enrol-text">
+      <p class="small"><strong>Cannot scan?</strong> Add the account by hand with this key:</p>
+      <p><code id="totp-secret" class="secret">{{ secret }}</code></p>
+      <details><summary class="small">Full setup link</summary><p><code class="uri">{{ uri }}</code></p></details>
+    </div>
+  </div>
+  {% else %}
+  <h1>Authenticator code</h1>
+  <p class="help">Enter the six-digit code your authenticator app shows for <strong>{{ email }}</strong>.</p>
+  {% endif %}
+  {% if error %}<div class="flash flash-err">{{ error }}</div>{% endif %}
+  <form method="post" action="/login/code" class="form">
+    <div class="field"><label for="code">Six-digit code</label><input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" required autocomplete="one-time-code" autofocus></div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">{{ "Finish setup and log in" if enrol else "Log in" }}</button><a class="small" href="/login">Start again</a></div>
+  </form>
+</main>
+{% endblock %}

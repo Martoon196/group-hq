@@ -1,0 +1,49 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = programme.name ~ " | Group HQ" %}
+{% block head %}{{ f.styles() }}
+<style>
+  textarea.code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .88rem; min-height: 260px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Programme · <code>{{ programme.code }}</code></span>
+  <h1>{{ programme.name }}</h1>
+  <div class="actions"><a class="btn btn-ghost btn-sm" href="/programmes">All programmes</a><a class="btn btn-ghost btn-sm" href="/mentees?programme={{ programme.id }}">Mentees on it</a><a class="btn btn-ghost btn-sm" href="/audit?q=programme:{{ programme.id }}">History</a></div>
+</div>
+
+<div class="two-col">
+  <form method="post" action="/programmes/{{ programme.id }}" class="form">
+    <div class="form-grid">
+      {{ f.text("name", "Name", vals.name, required=True) }}
+      {{ f.checkbox("active", "Active: can be chosen when enrolling", vals.active) }}
+      {{ f.text("price", "Price in pounds", vals.price, attrs='inputmode="decimal" placeholder="4995.00"', hint="What the programme costs. A mentee paying in full gets the term once their cleared payments reach it. Leave blank and any cleared payment starts the term.") }}
+      {{ f.textarea("description", "Description", vals.description, rows=3, hint="What the package includes, in plain words. Shown here and on the catalogue.") }}
+      {{ f.textarea("grant_template", "Grant template (JSON)", vals.grant_template, rows=14, cls="code", hint="A list of items. Each needs product, kind and value; months is optional and fixes the term instead of following the mentee's end date.") }}
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <a class="btn btn-ghost" href="/programmes">Cancel</a>
+    </div>
+    <p class="form-note">Changing the template does not touch anyone's access until their next recompute.</p>
+  </form>
+
+  <section class="panel">
+    <h2>Item shape</h2>
+    <dl class="kv">
+      <dt>product</dt><dd>{% for p in products %}<code>{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</dd>
+      <dt>kind</dt><dd>{% for k in kinds %}<code>{{ k }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</dd>
+      <dt>value</dt><dd>The product's own name for the right: <code>pro_buyer</code> (PP Hunter), <code>starter</code> (Ordris plan), <code>area</code> (HNH seat), <code>mentee</code> (KP sourcer source), <code>kpuk.submit</code> (PP flag).</dd>
+      <dt>months</dt><dd>Optional whole number from 1 to 13. With it the item runs that many months from the start date; without it the item follows the mentee's computed access end.</dd>
+      <dt>extras</dt><dd><code>fee_share_pct</code> (0 to 100) on a <code>kp sourcer_link</code>; <code>area_slug</code> or <code>postcodes</code> (a list of outward codes) and <code>fee_waived</code> (true or false) on an <code>hnh partner_seat</code>. A template may give one <code>pp comp_tier</code> only.</dd>
+    </dl>
+    <h2 class="mt-2">Example</h2>
+<pre class="json">[
+  {"product": "pp", "kind": "comp_tier", "value": "pro_buyer"},
+  {"product": "ordris", "kind": "org_plan", "value": "starter", "months": 3},
+  {"product": "hnh", "kind": "partner_seat", "value": "area", "area_slug": "swansea"}
+]</pre>
+  </section>
+</div>
+{% endblock %}
