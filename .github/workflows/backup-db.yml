@@ -1,21 +1,16 @@
-# Weekly off-site backup of this app's Postgres database, plus a restore drill.
+# Weekly off-site backups of several apps' Postgres databases from ONE repository, plus a monthly restore drill.
 #
-# Copy this file to .github/workflows/backup-db.yml in each repo and set APP_NAME.
-# Repository secrets needed (Settings -> Secrets and variables -> Actions):
-#   BACKUP_DATABASE_URL     the DIRECT (non-pooled) Neon connection string
-#   R2_ACCOUNT_ID           Cloudflare account id
-#   R2_ACCESS_KEY_ID        R2 API token with Object Read & Write on the backups bucket only
-#   R2_SECRET_ACCESS_KEY
-#   R2_BUCKET               e.g. mh196-db-backups
-#   BACKUP_AGE_RECIPIENT    optional: an age public key (age1...). When set, dumps are
-#                           encrypted before upload and only the matching private key
-#                           (kept in the password manager, never in GitHub) can read them.
-#
+# This copy lives in Group HQ and covers every MH196 2026 Ltd database whose secret is set, so the Cloudflare
+# R2 details are entered once. Repository secrets (Settings -> Secrets and variables -> Actions):
+#   BACKUP_DATABASE_URL_GROUPHQ   Group HQ's DIRECT (non-pooled) Neon connection string
+#   BACKUP_DATABASE_URL_KP        Key Properties' direct Neon string ("kpuk-portal")
+#   BACKUP_DATABASE_URL_PP        Property Predator's direct Neon string (optional; skipped until set)
+#   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET   the mh196-db-backups bucket and its token
+#   BACKUP_AGE_RECIPIENT / BACKUP_AGE_IDENTITY   optional encryption, as in the single-app version
+# An app whose database secret is not set is skipped with a notice, never a failure. Hello New Home (a different
+# company) keeps its own copy of this job in its own repository.
 # Retention is a lifecycle rule on the bucket (delete after 120 days), not this file.
 # Client tools are PostgreSQL 18: pg_dump must be at least the server's major version, and Neon offers 14 to 18.
-# GitHub pauses scheduled workflows on a repo with no commits for 60 days; the
-# monthly restore drill below also keeps the schedule alive, but check the Actions
-# tab now and then.
 
 name: Database backup
 
@@ -35,11 +30,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: database-backup
+  group: database-backup-${{ github.workflow }}
   cancel-in-progress: false
 
 env:
-  APP_NAME: grouphq                     # pp | kp | hnh | ordris | grouphq
   AWS_DEFAULT_REGION: auto
   AWS_REQUEST_CHECKSUM_CALCULATION: when_required     # R2 compatibility with AWS CLI >= 2.23
   AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
@@ -49,10 +43,33 @@ jobs:
     if: >-
       (github.event_name == 'schedule' && github.event.schedule == '17 3 * * 1')
       || (github.event_name == 'workflow_dispatch' && inputs.job == 'dump')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { app: grouphq, secret: BACKUP_DATABASE_URL_GROUPHQ }
+          - { app: kp, secret: BACKUP_DATABASE_URL_KP }
+          - { app: pp, secret: BACKUP_DATABASE_URL_PP }
+    env:
+      APP_NAME: ${{ matrix.app }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Is this app configured
+        id: cfg
+        env:
+          DATABASE_URL: ${{ secrets[matrix.secret] }}
+          SECRET_NAME: ${{ matrix.secret }}
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${APP_NAME}: no ${SECRET_NAME} secret, so this app is skipped"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install PostgreSQL 18 client tools
+        if: steps.cfg.outputs.skip != 'true'
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -66,11 +83,12 @@ jobs:
           /usr/lib/postgresql/18/bin/pg_dump --version
 
       - name: Dump
+        if: steps.cfg.outputs.skip != 'true'
         env:
-          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets[matrix.secret] }}
         run: |
           set -euo pipefail
-          test -n "$DATABASE_URL" || { echo "BACKUP_DATABASE_URL secret is not set"; exit 1; }
+          test -n "$DATABASE_URL" || { echo "database secret is not set"; exit 1; }
           stamp="$(date -u +%Y-%m-%d)"
           out="${APP_NAME}-${stamp}.dump"
           pg_dump --version
@@ -81,6 +99,7 @@ jobs:
           echo "OUT=$out" >> "$GITHUB_ENV"
 
       - name: Encrypt when a recipient key is configured
+        if: steps.cfg.outputs.skip != 'true'
         env:
           AGE_RECIPIENT: ${{ secrets.BACKUP_AGE_RECIPIENT }}
         run: |
@@ -92,6 +111,7 @@ jobs:
           echo "OUT=${OUT}.age" >> "$GITHUB_ENV"
 
       - name: Upload to R2
+        if: steps.cfg.outputs.skip != 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -120,6 +140,15 @@ jobs:
     if: >-
       (github.event_name == 'schedule' && github.event.schedule == '41 4 1 * *')
       || (github.event_name == 'workflow_dispatch' && inputs.job == 'drill')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { app: grouphq, secret: BACKUP_DATABASE_URL_GROUPHQ }
+          - { app: kp, secret: BACKUP_DATABASE_URL_KP }
+          - { app: pp, secret: BACKUP_DATABASE_URL_PP }
+    env:
+      APP_NAME: ${{ matrix.app }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -132,7 +161,21 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
+      - name: Is this app configured
+        id: cfg
+        env:
+          DATABASE_URL: ${{ secrets[matrix.secret] }}
+          SECRET_NAME: ${{ matrix.secret }}
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${APP_NAME}: no ${SECRET_NAME} secret, so this app is skipped"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install PostgreSQL 18 client tools
+        if: steps.cfg.outputs.skip != 'true'
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -144,6 +187,7 @@ jobs:
           /usr/lib/postgresql/18/bin/pg_restore --version
 
       - name: Fetch the newest dump
+        if: steps.cfg.outputs.skip != 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -172,6 +216,7 @@ jobs:
           echo "KEY=$key" >> "$GITHUB_ENV"
 
       - name: Decrypt when needed
+        if: steps.cfg.outputs.skip != 'true'
         env:
           AGE_IDENTITY: ${{ secrets.BACKUP_AGE_IDENTITY }}
         run: |
@@ -186,6 +231,7 @@ jobs:
           esac
 
       - name: Restore into a scratch server and count rows
+        if: steps.cfg.outputs.skip != 'true'
         env:
           PGPASSWORD: drill
         run: |
