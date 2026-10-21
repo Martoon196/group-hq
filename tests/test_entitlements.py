@@ -22,6 +22,7 @@ from app import config
 from app.jobs import recompute as job
 from app.models import AuditLog, ConnectorCall, EntitlementGrant, Mentee, Payment, Person, Programme
 from app.services import entitlements as ent
+from app.services.entitlements import utc_today
 from app.services.entitlements import (BLOCKED_ERROR, LOCK_RUN, MAX_ATTEMPTS, MAX_GRANT_DAYS, RUN_IN_PROGRESS, add_months,
                                        compute_access_end, display_state, full_term_months, grant_key, is_blocked,
                                        recompute_all, recompute_person, reset_for_retry, revoke_key, revoke_person)
@@ -584,7 +585,7 @@ def test_run_now_dry_run_shows_the_plan_and_sends_nothing(admin_client, db):
     person = make_person(db, "run@example.test", "Run Person")
     pay(db, enrol(db, person, make_programme(db), "full"))
     with respx.mock(assert_all_called=False) as mock:
-        page = admin_client.post("/grants/recompute", data={"dry_run": "1", "today": "2026-10-20"})
+        page = admin_client.post("/grants/recompute", data={"dry_run": "1", "today": utc_today().isoformat()})
         assert page.status_code == 200
         assert mock.calls.call_count == 0
     assert "Dry run for everyone" in page.text and "nothing was sent" in page.text
@@ -604,7 +605,7 @@ def test_run_now_live_sends_and_reports(admin_client, db, live):
         comp = mock.post("/api/partner/grouphq/comp").mock(return_value=httpx.Response(200, json=COMP_OK))
         assert admin_client.post("/grants/recompute", data={"today": "2026-05-15"}).status_code == 400, "no live run as of another day"
         assert comp.call_count == 0
-        page = admin_client.post("/grants/recompute", data={"today": "2026-10-20"})
+        page = admin_client.post("/grants/recompute", data={"today": utc_today().isoformat()})
     assert page.status_code == 200 and comp.call_count == 1
     assert "Recompute for everyone" in page.text and "1 call sent" in page.text and "status-sent" in page.text
     with session() as fresh:
@@ -892,7 +893,7 @@ def test_hnh_one_time_password_is_shown_once_and_never_stored(admin_client, db, 
     pay(db, enrol(db, person, make_programme(db, "test_hnh", [{"product": "hnh", "kind": "partner_seat", "value": "area"}]), "full"))
     with respx.mock(base_url=HNH) as mock:
         post = mock.post("/api/partner/partners").mock(return_value=httpx.Response(201, json=HNH_CREATED))
-        page = admin_client.post("/grants/recompute", data={"today": "2026-10-20"})
+        page = admin_client.post("/grants/recompute", data={"today": utc_today().isoformat()})
     assert page.status_code == 200 and post.call_count == 1
     assert "Tq7xK2mN9pLw" in page.text and "shown once" in page.text and "not stored" in page.text
     with session() as fresh:

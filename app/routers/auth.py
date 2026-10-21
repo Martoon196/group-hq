@@ -10,6 +10,7 @@ from ..auth import (THROTTLED_MESSAGE, _DUMMY_HASH, check_origin, clear_pending,
                     find_user_by_email, hash_password, login_allowed, password_needs_rehash, password_problem,
                     pending_secret, provisioning_uri, qr_svg, read_pending, record_failure, require_admin, safe_next,
                     set_pending, set_session, touch_login, verify_password, verify_totp)
+from .. import config
 from ..db import get_db
 from ..models import User
 from ..services.audit import audit
@@ -118,14 +119,15 @@ def logout():
 # ---- password change ---------------------------------------------------------------
 @router.get("/password", response_class=HTMLResponse)
 def password_form(request: Request, first: str = "", user: User = Depends(require_admin)):
-    return render(request, "password.html", {"user": user, "section": "password", "first": bool(first), "error": ""})
+    return render(request, "password.html", {"user": user, "section": "password", "first": bool(first) and user.must_change_password,
+                                             "error": "", "min_len": config.MIN_PASSWORD_LENGTH})
 
 
 @router.post("/password", response_class=HTMLResponse)
 def password_change(request: Request, current_password: str = Form(""), new_password: str = Form(""),
                     confirm_password: str = Form(""), db: Session = Depends(get_db),
                     user: User = Depends(require_admin)):
-    ctx = {"user": user, "section": "password", "first": user.must_change_password}
+    ctx = {"user": user, "section": "password", "first": user.must_change_password, "min_len": config.MIN_PASSWORD_LENGTH}
     if not verify_password(current_password, user.password_hash):
         return render(request, "password.html", {**ctx, "error": "Your current password was not recognised."}, 401)
     problem = password_problem(new_password, confirm_password, current_password)
@@ -139,3 +141,21 @@ def password_change(request: Request, current_password: str = Form(""), new_pass
     resp = go("/", ok="Password changed. Other devices have been signed out.")
     set_session(resp, user)       # the old cookie died with the old hash; keep this browser signed in
     return resp
+
+
+@router.post("/password/keep", response_class=HTMLResponse)
+def password_keep(request: Request, current_password: str = Form(""), db: Session = Depends(get_db),
+                  user: User = Depends(require_admin)):
+    """First login only: the admin chose ADMIN_PASSWORD themselves and keeps it. The password is checked again,
+    the forced-change flag is cleared and the choice is audited; the reminder to delete ADMIN_PASSWORD from the
+    environment is the page's job."""
+    ctx = {"user": user, "section": "password", "first": user.must_change_password, "min_len": config.MIN_PASSWORD_LENGTH}
+    if not user.must_change_password:
+        return go("/password")
+    if not verify_password(current_password, user.password_hash):
+        return render(request, "password.html", {**ctx, "error": "Your current password was not recognised."}, 401)
+    user.must_change_password = False
+    db.add(user)
+    audit(db, user, "password.keep", f"user:{user.id}")
+    db.commit()
+    return go("/", ok="Password kept. Now delete ADMIN_PASSWORD from the service's Environment page in Render.")

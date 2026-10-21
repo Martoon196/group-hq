@@ -5,6 +5,14 @@
     var f = e.target;
     if (f.dataset.confirm && !window.confirm(f.dataset.confirm)) e.preventDefault();
   });
+  document.addEventListener("change", function (e) {
+    var box = e.target;
+    if (!box.matches || !box.matches("[data-show-password]")) return;
+    box.getAttribute("data-show-password").split(",").forEach(function (sel) {
+      var field = document.querySelector(sel.trim());
+      if (field) field.type = box.checked ? "text" : "password";
+    });
+  });
   document.addEventListener("click", function (e) {
     var btn = e.target.closest("[data-copy-target]");
     if (!btn) return;

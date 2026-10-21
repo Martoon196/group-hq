@@ -335,3 +335,39 @@ def test_generated_password_must_be_changed_before_anything_else(admin_client):
     c = TestClient(app, follow_redirects=False)
     assert c.post("/login", data={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}).status_code == 401
     login(c, password=new)
+
+
+# ---- keeping the password chosen in Render on the first login ---------------------------------------
+def test_first_login_can_keep_the_password_set_in_render(admin_client):
+    with session() as db:
+        user = _admin(db)
+        user.must_change_password = True
+        before = user.password_hash
+        db.commit()
+    page = admin_client.get("/password", params={"first": "1"})
+    assert page.status_code == 200 and "Keep this password" in page.text and 'action="/password/keep"' in page.text
+    assert 'data-show-password="#keep_password"' in page.text and "At least 8 characters" in page.text
+
+    r = admin_client.post("/password/keep", data={"current_password": "wrong"})
+    assert r.status_code == 401
+    with session() as db:
+        assert _admin(db).must_change_password is True
+
+    r = admin_client.post("/password/keep", data={"current_password": ADMIN_PASSWORD})
+    assert r.status_code == 303 and r.headers["location"].startswith("/?ok=")
+    assert admin_client.get("/").status_code == 200, "the session survives: the hash did not change"
+    with session() as db:
+        user = _admin(db)
+        assert user.must_change_password is False and user.password_hash == before
+        assert "password.keep" in [row.action for row in db.query(AuditLog).all()]
+    later = admin_client.get("/password")
+    assert "Keep this password" not in later.text, "the keep option is for the first login only"
+    assert admin_client.post("/password/keep", data={"current_password": ADMIN_PASSWORD}).status_code == 303
+
+
+def test_minimum_length_is_eight_and_toggles_are_on_the_login_and_password_pages(client, admin_client):
+    assert config.MIN_PASSWORD_LENGTH == 8
+    assert auth.password_problem("seven77", "seven77", "old") != ""
+    assert auth.password_problem("eight888", "eight888", "old") == ""
+    assert 'data-show-password="#password"' in client.get("/login").text
+    assert 'data-show-password="#current_password,#new_password,#confirm_password"' in admin_client.get("/password").text

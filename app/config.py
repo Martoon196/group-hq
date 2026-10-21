@@ -53,7 +53,6 @@ SESSION_MAX_AGE = int(os.environ.get("SESSION_MAX_AGE", 60 * 60 * 24 * 14))   # 
 PENDING_MAX_AGE = int(os.environ.get("PENDING_MAX_AGE", 5 * 60))              # 5 minutes to type the code
 SECURE_COOKIES = _bool("SECURE_COOKIES", BASE_URL.startswith("https"))
 TOTP_ISSUER = os.environ.get("TOTP_ISSUER", "Group HQ")
-MIN_PASSWORD_LENGTH = 12
 
 # Product connectors. Tokens are secrets and never have defaults; base URLs are the live hosts.
 PP_BASE_URL = os.environ.get("PP_BASE_URL", "https://propertypredator.com").rstrip("/")
@@ -72,6 +71,10 @@ def _int(name: str, default: int) -> int:
         return int(raw) if raw else default
     except ValueError:
         return default
+
+# Eight is the floor NIST SP 800-63B sets for a memorised secret; every login here also needs the authenticator
+# code, which carries most of the protection. Raise it with MIN_PASSWORD_LENGTH if the policy changes.
+MIN_PASSWORD_LENGTH = max(8, _int("MIN_PASSWORD_LENGTH", 8))
 
 
 # Outbound email for the franchise follow-ups (app.services.followups). With SMTP_HOST unset the emails are
