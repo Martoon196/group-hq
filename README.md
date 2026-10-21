@@ -63,5 +63,12 @@ agreement exists. `ORDRIS_BASE_URL` is `https://ordris.io`, which stays true aft
   refused on the form.
 - A programme may carry a price; a mentee paying in full gets the term once cleared payments reach it.
 - A person's email cannot be changed while they hold an active or pending grant: revoke first.
+- **Existing users to mentees** (`/mentees/import`, linked from Mentees and the side navigation) enrols up to 25
+  people at once: Key Properties sourcers ticked from a live list, plus pasted lines (`email` or `name, email`) for
+  anyone else, such as people who only have an Ordris login. One programme, payment mode, start date and optional
+  payment apply to the whole batch. A line that cannot be read stops the batch before anything is written. Each
+  person is looked up in every live product and only empty product ids are filled; anyone already a mentee on the
+  programme (whatever the status) is skipped and named; with Grant access now ticked and a cleared payment, the
+  mentee's Recompute runs. Every write is audited, and the batch itself is a `mentee.import` audit row.
 - Login throttling lives in the `login_attempts` table (per address, per address and email, and per
   account), so it survives deploys and cannot be reset by a forged `X-Forwarded-For`.

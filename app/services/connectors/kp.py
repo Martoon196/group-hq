@@ -4,6 +4,9 @@
           creates a sourcer, or links the existing invite-only user with that email to the PP account
     PATCH {KP_BASE_URL}/api/partner/sourcers/{id}   {fee_share_pct, active}
     GET   {KP_BASE_URL}/api/partner/sourcers?email=  the flat row, or 404 not_found when there is no sourcer
+    GET   {KP_BASE_URL}/api/partner/sourcers?limit=&offset=   (no email) one page of sourcers, newest first, for
+          the existing-users import: {ok, sourcers: [{id, email, name, company, source, pp_account_id, active,
+          created_at, deals}], total, limit, offset}; admins are never listed
 
 Auth: Bearer KP_PARTNER_TOKEN (GROUPHQ_PARTNER_TOKEN on the portal side, keyed by client) and
 X-Partner-Client: grouphq. A grant creates or re-activates the sourcer; a revoke deactivates it
@@ -50,6 +53,43 @@ def _company(person: "Person") -> str:
 
 
 PLACEHOLDER = "{sourcer_id}"       # stands in for the id in a dry-run plan when none is known yet
+LIST_MAX = 200                     # the most rows one list call asks for
+_LIST_KEYS = ("sourcers", "users", "results", "items", "rows")
+
+
+def _count(value: Any) -> int | None:
+    """A deal count however the portal spells it: a number, a list of deals, or {total|count: n}."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, dict):
+        return _count(value.get("total", value.get("count")))
+    return _int_or_none(value)
+
+
+def sourcer_row(raw: Any) -> dict | None:
+    """One listed sourcer as the import page shows it, or None when it carries no usable email (such a row
+    cannot be ticked: the register keys people on their email)."""
+    if not isinstance(raw, dict):
+        return None
+    email = normalise_email(raw.get("email") if isinstance(raw.get("email"), str) else "")
+    if not email or len(email) > 254:   # never cut an address short: a cut one could be someone else's
+        return None
+    sourcer_id = raw.get("id")
+    deals = next((raw[k] for k in ("deals", "deal_count", "deals_count") if k in raw), None)
+    active = raw.get("active")
+    return {
+        "id": None if isinstance(sourcer_id, bool) else _int_or_none(sourcer_id),
+        "email": email,
+        "name": str(raw.get("name") or "").strip()[:120],
+        "company": str(raw.get("company") or "").strip()[:200],
+        "source": str(raw.get("source") or "").strip()[:40],
+        "active": active if isinstance(active, bool) else None,
+        "deals": _count(deals),
+        "pp_account_id": _int_or_none(raw.get("pp_account_id")),
+        "created_at": str(raw.get("created_at") or "")[:40] or None,
+    }
 
 
 class KPConnector(BaseConnector):
@@ -134,3 +174,29 @@ class KPConnector(BaseConnector):
 
     def lookup(self, email: str) -> ConnectorResult:
         return self._with_sourcer(self.request("GET", self.SOURCERS, params={"email": normalise_email(email)}))
+
+    def list_sourcers(self, limit: int = 100, offset: int = 0) -> ConnectorResult:
+        """One page of the portal's sourcers, newest first: GET /api/partner/sourcers?limit=&offset= with no email
+        (the portal answers at most 500 a page; this asks for at most LIST_MAX). In dry run
+        the result carries the planned call and no rows, and nothing is sent. Live, result.data is
+        {"sourcers": [sourcer_row, ...], "total": int or None, "limit": int, "offset": int}; a row without an
+        email is left out. A body with no list in it is a bad_response, never an empty page."""
+        limit = max(1, min(_int_or_none(limit) or 1, LIST_MAX))
+        offset = max(0, _int_or_none(offset) or 0)
+        result = self.request("GET", self.SOURCERS, params={"limit": limit, "offset": offset})
+        if result.dry_run:
+            return result
+        refused = self.refused(result)
+        if refused is not None:
+            raise refused
+        body = result.data
+        raw_rows = body if isinstance(body, list) else None
+        if isinstance(body, dict):
+            raw_rows = next((body[k] for k in _LIST_KEYS if isinstance(body.get(k), list)), None)
+        if raw_rows is None:
+            raise ConnectorError("bad_response", status=result.status, detail="kp: the sourcer list is not a list",
+                                 body=body, plan=result.plan)
+        rows = [row for row in (sourcer_row(raw) for raw in raw_rows) if row is not None]
+        total = _int_or_none(body.get("total", body.get("count"))) if isinstance(body, dict) else None
+        result.data = {"sourcers": rows, "total": total, "limit": limit, "offset": offset}
+        return result

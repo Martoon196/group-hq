@@ -1,0 +1,128 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = title_text ~ " | Group HQ" %}
+{% block head %}{{ f.styles() }}
+<style>
+  .chip-ok { background: #E3F5EA; border-color: #BFE3CD; color: #17814A; }
+  .chip-warn { background: #FFF1C9; border-color: #F0DC9B; color: #7A5200; }
+  .chip-off { background: #EEE; color: #666; }
+  .chip-dry { background: #E8EEFF; border-color: #C9D5F5; color: #2B4A9B; }
+  .notice { border-radius: 10px; padding: .8rem 1rem; margin: 0 0 1rem; font-weight: 700; }
+  .notice-dry { background: #E8EEFF; color: #2B4A9B; }
+  .notice-bad { background: #FDE8EE; color: #9B1C4B; }
+  table.data td.tick, table.data th.tick { width: 2.2rem; }
+  table.data td.tick input, table.data th.tick input { width: auto; margin: 0; accent-color: var(--pink); }
+  .paid-block { grid-column: 1 / -1; border: 1px dashed var(--line); border-radius: 10px; padding: 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 620px) { .paid-block { grid-template-columns: 1fr; } }
+  .paid-block legend { font-weight: 700; padding: 0 .3rem; }
+  details.plan summary { cursor: pointer; font-size: .85rem; color: var(--muted); }
+  details.plan pre { font-size: .78rem; background: var(--mist); padding: .6rem; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Register</span>
+  <h1>{{ title_text }}</h1>
+  <p class="muted">Tick people who already have a Key Properties or Ordris login, choose the programme once, and enrol them together. Up to {{ max_batch }} people in a batch.</p>
+  <div class="actions"><a class="btn btn-ghost btn-sm" href="/mentees">All mentees</a><a class="btn btn-ghost btn-sm" href="/mentees/new">Enrol one person by hand</a></div>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h2>What a batch does in each product now</h2></div>
+  <div class="chips">
+    {% for m in product_modes %}
+    <span class="chip {{ 'chip-ok' if m.state == 'live' else ('chip-dry' if m.state == 'dry_run' else 'chip-off') }}">{{ m.name }}: {{ {"live": "live", "dry_run": "dry run", "not_configured": "not configured"}[m.state] }}</span>
+    {% endfor %}
+  </div>
+  <p class="help">Each person's email is looked up in every live product and only the product ids still empty on their record are filled, so an id you set by hand is never overwritten. A product in dry run is not asked, and its grants are planned rather than sent. A lookup that fails is reported for that person and the batch carries on.</p>
+</section>
+
+<form method="post" action="/mentees/import" class="form mt-2" data-submit-once>
+  <input type="hidden" name="offset" value="{{ listing.offset }}">
+  <h2 class="mt-0" style="border:0;padding:0">Key Properties sourcers</h2>
+  {% if listing.state == "ok" %}
+    {% if listing.rows %}
+    <p class="help">Fetched live from Key Properties, newest first{% if listing.total is not none %}: {{ listing.offset + 1 }} to {{ listing.offset + listing.rows|length }} of {{ listing.total }}{% endif %}. Ticks are kept on this page only, so import one page before moving to the next. Deals counts what each person has sent for review. Granting a Key Properties sourcer link opens an account that is closed there again.</p>
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr>
+        <th class="tick"><input type="checkbox" data-check-all="input[name=pick]" aria-label="Tick every row on this page"></th>
+        <th>Name</th><th>Email</th><th>Company</th><th>Source</th><th class="num">Deals</th><th>On the register</th>
+      </tr></thead>
+      <tbody>
+      {% for row in listing.rows %}
+      {% set known = badges.get(row.email) %}
+      <tr>
+        <td class="tick">
+          <input type="checkbox" name="pick" value="{{ loop.index0 }}" id="pick-{{ loop.index0 }}"{% if row.email in picked %} checked{% endif %}>
+          <input type="hidden" name="kp_email" value="{{ row.email }}">
+          <input type="hidden" name="kp_name" value="{{ row.name }}">
+        </td>
+        <td><label for="pick-{{ loop.index0 }}"><strong>{{ row.name or "(no name)" }}</strong></label></td>
+        <td>{{ row.email }}</td>
+        <td>{{ row.company }}</td>
+        <td>{{ row.source }}{% if row.active is sameas false %}<br><span class="chip chip-off">closed on Key Properties</span>{% endif %}</td>
+        <td class="num">{{ row.deals if row.deals is not none else "" }}</td>
+        <td>
+          {% if known %}
+          <div class="chips">
+            <a class="chip chip-warn" href="/people/{{ known.person.id }}">already on the register</a>
+            {% for m in known.mentees %}<a class="chip {{ 'chip-ok' if m.status == 'active' else 'chip-off' }}" href="/mentees/{{ m.id }}">already a mentee on {{ m.programme.name }}{% if m.status != "active" %} ({{ m.status }}){% endif %}</a>{% endfor %}
+          </div>
+          {% else %}<span class="muted small">new</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">Key Properties answered with no sourcers{% if listing.offset %} on this page{% endif %}.</p>
+    {% endif %}
+    {% if prev_offset is not none or next_offset is not none %}
+    <div class="pager">
+      <a class="btn btn-ghost btn-sm" href="/mentees/import?offset={{ prev_offset or 0 }}"{% if prev_offset is none %} aria-disabled="true"{% endif %}>Previous {{ listing.limit }}</a>
+      <a class="btn btn-ghost btn-sm" href="/mentees/import?offset={{ next_offset or 0 }}"{% if next_offset is none %} aria-disabled="true"{% endif %}>Next {{ listing.limit }}</a>
+    </div>
+    {% endif %}
+  {% elif listing.state == "dry_run" %}
+    <div class="notice notice-dry">Key Properties is in dry run here, so its sourcers are not fetched and nothing is sent to it. Paste anyone with a Key Properties login in the box below instead; their Key Properties grant will be planned, not sent.</div>
+    {% if listing.plan %}<details class="plan"><summary>The call that would list them: {{ listing.plan.method }} {{ listing.plan.url }}</summary><pre>{{ listing.plan | tojson(indent=2) }}</pre></details>{% endif %}
+  {% elif listing.state == "not_configured" %}
+    <div class="notice notice-bad">Key Properties has no base URL or token on this server, so its sourcers cannot be listed. Paste them in the box below instead; the rest of the page works as normal.</div>
+  {% else %}
+    <div class="notice notice-bad">Key Properties could not list its sourcers just now ({{ listing.detail }}). Paste them in the box below instead, or reload the page to try again; the rest of the page works as normal.</div>
+  {% endif %}
+
+  <h2>Anyone else</h2>
+  <div class="form-grid">
+    {{ f.textarea("lines", "Other existing users, one per line", vals.lines, rows=6, hint="Write each line as an email on its own, or as name, comma, email: Jo Bloggs, jo@example.com. Use this for people who only have an Ordris login, or anyone not listed above. A line that cannot be read stops the batch and is named, so nothing is half done.") }}
+  </div>
+
+  <h2>Programme and payment, the same for everyone in this batch</h2>
+  <div class="form-grid">
+    <div class="field">
+      <label for="programme_id">Programme</label>
+      <select id="programme_id" name="programme_id" required>
+        {% for p in programmes %}<option value="{{ p.id }}"{% if vals.programme_id == p.id|string %} selected{% endif %}{% if not p.active %} disabled{% endif %}>{{ p.name }}{% if not p.active %} (inactive){% endif %}</option>{% endfor %}
+      </select>
+      <span class="hint">Anyone who already has a mentee row on this programme is left as they are and named in the results.</span>
+    </div>
+    {{ f.select("payment_mode", "How they pay", modes, vals.payment_mode, hint="Paid in full gives 12 months from the start date once the payments clear. Monthly runs while payments keep clearing, with " ~ s.grace_days ~ " days of grace.") }}
+    {{ f.text("start_date", "Start date", vals.start_date, type="date", required=True) }}
+    <fieldset class="paid-block">
+      <legend>Already paid (optional)</legend>
+      {{ f.text("amount", "Amount in pounds", vals.amount, attrs='inputmode="decimal" placeholder="1250.00"', hint="Recorded for each person enrolled in this batch. Leave blank if nothing has been paid yet.") }}
+      {{ f.text("paid_on", "Paid on", vals.paid_on, type="date") }}
+      {{ f.text("period_end", "Period end (monthly only)", vals.period_end, type="date", hint="Monthly payers: the period runs from the start date to this date; access runs to it plus " ~ s.grace_days ~ " days. Ignored when paid in full.") }}
+      {{ f.checkbox("cleared", "Cleared: the money has arrived", vals.cleared == "1", hint="Only a cleared payment counts towards access. Untick it if the money is still on its way.") }}
+    </fieldset>
+    {{ f.checkbox("grant_now", "Grant access now", vals.grant_now == "1", hint=("Runs the same recompute as a mentee's Recompute now button for everyone enrolled with a cleared payment: live products are sent the grant, products in dry run have it planned. Unticked, the nightly run at 03:10 does it." if engine_available else "The entitlement engine is not available on this server, so grants are left to the nightly run.")) }}
+  </div>
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">Import and enrol</button>
+    <a class="btn btn-ghost" href="/mentees">Cancel</a>
+  </div>
+  <p class="form-note">A batch of {{ max_batch }} people can take a few minutes: each one is looked up in every live product and, with Grant access now ticked, granted there too. Every change is in the audit log.</p>
+</form>
+{% endblock %}

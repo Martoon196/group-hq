@@ -1,0 +1,87 @@
+{% extends "app_base.html" %}
+{% import "_fields.html" as f %}
+{% set title = "Import results | Group HQ" %}
+{% block head %}{{ f.styles() }}
+<style>
+  .status-created, .status-sent, .status-run { background: #E3F5EA; color: #17814A; }
+  .status-existing, .status-skipped, .status-not_run { background: #EEE; color: #666; }
+  .status-planned { background: #E8EEFF; color: #2B4A9B; }
+  .status-blocked { background: #FFE2C2; color: #7A3E00; }
+  ul.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; font-size: .88rem; }
+  ul.lines li { word-break: break-word; }
+  .once { display: block; margin-top: .2rem; }
+  .run-banner { border-radius: 10px; padding: .8rem 1rem; margin-bottom: 1.2rem; font-weight: 700; }
+  .run-banner.is-ok { background: #E3F5EA; color: #17814A; }
+  .run-banner.is-bad { background: #FDE8EE; color: #9B1C4B; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Register</span>
+  <h1>Import results</h1>
+  <p class="muted">{{ shared.programme.name }}, {{ mode_labels[shared.payment_mode]|lower }}, starting {{ shared.start | date }}{% if amount_text %}; {{ amount_text }} paid {{ shared.paid_on | date }}{{ ", cleared" if shared.cleared else ", not yet cleared" }}{% endif %}.</p>
+  <div class="actions"><a class="btn btn-primary btn-sm" href="/mentees/import">Import more</a><a class="btn btn-ghost btn-sm" href="/mentees">All mentees</a><a class="btn btn-ghost btn-sm" href="/audit?action=mentee.import">History</a></div>
+</div>
+
+{% set problems = counts.failed + counts.grant_failures + counts.lookup_failures %}
+<div class="run-banner {{ 'is-bad' if problems else 'is-ok' }}">
+  {{ counts.people }} {{ "person" if counts.people == 1 else "people" }} processed: {{ counts.mentees }} enrolled, {{ counts.skipped }} already on the programme{% if counts.failed %}, {{ counts.failed }} not imported{% endif %}.
+  {% if problems %}Read the rows marked in red: each one says what went wrong for that person.{% endif %}
+</div>
+
+<div class="stats stats-4">
+  <div class="stat"><strong>{{ counts.created }}</strong><span>new on the register · {{ counts.existing }} already there</span></div>
+  <div class="stat"><strong>{{ counts.mentees }}</strong><span>enrolled · {{ counts.skipped }} skipped</span></div>
+  <div class="stat"><strong>{{ counts.payments }}</strong><span>payment{{ "s" if counts.payments != 1 else "" }} recorded</span></div>
+  <div class="stat{% if counts.grant_failures %} is-bad{% endif %}"><strong>{{ counts.sent }}</strong><span>grants sent · {{ counts.planned }} planned (dry run) · {{ counts.grant_failures }} failed</span></div>
+</div>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>One row per person</h2><span class="help">Products in dry run were not asked: {% for m in product_modes if m.state != "live" %}{{ m.name }}{{ ", " if not loop.last }}{% else %}none{% endfor %}.</span></div>
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Person</th><th>Register</th><th>Found on</th><th>Mentee</th><th>Payment</th><th>Grants</th></tr></thead>
+    <tbody>
+    {% for o in outcomes %}
+    <tr>
+      <td>
+        {% if o.person_id %}<a href="/people/{{ o.person_id }}"><strong>{{ o.entry.name or o.entry.email }}</strong></a>{% else %}<strong>{{ o.entry.name or o.entry.email }}</strong>{% endif %}
+        {% if o.entry.name %}<br><span class="small muted">{{ o.entry.email }}</span>{% endif %}
+        <br><span class="small muted">from {{ o.entry.origin }}</span>
+      </td>
+      <td>
+        <span class="status status-{{ o.person }}">{{ {"created": "created", "existing": "existing", "failed": "not imported"}.get(o.person, o.person) }}</span>
+        {% if o.error %}<br><span class="bad-text small">{{ o.error }}</span>{% endif %}
+        {% if o.person_notes %}<ul class="lines">{% for n in o.person_notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+      </td>
+      <td>
+        {% if o.found_on %}{{ o.found_on | join(", ") }}{% else %}<span class="muted">none of the live products</span>{% endif %}
+        {% if o.filled %}<br><span class="small muted">ids filled: {% for k, v in o.filled.items() %}{{ link_labels.get(k, k) }} {{ v }}{{ ", " if not loop.last }}{% endfor %}</span>{% endif %}
+        {% if o.lookup_problems %}<ul class="lines">{% for p in o.lookup_problems %}<li class="bad-text">{{ p }}</li>{% endfor %}</ul>{% endif %}
+      </td>
+      <td>
+        {% if o.mentee == "created" %}<a href="/mentees/{{ o.mentee_id }}"><span class="status status-created">enrolled</span></a>{% if o.access %}<br><span class="small muted">{{ o.access }}</span>{% endif %}
+        {% elif o.mentee == "skipped" %}<a href="/mentees/{{ o.mentee_id }}"><span class="status status-skipped">skipped</span></a><br><span class="small">{{ o.mentee_note }}</span>
+        {% else %}<span class="muted">-</span>{% endif %}
+      </td>
+      <td class="small">{{ o.payment or ("none entered" if o.mentee == "created" else "-") }}</td>
+      <td class="detail">
+        {% if o.grants == "run" %}
+          {% if o.decisions %}
+          <ul class="lines">
+            {% for d in o.decisions %}
+            <li><span class="status status-{{ d.outcome }}">{{ d.outcome }}</span> {{ d.product_name }} {{ d.right }}{% if d.detail and d.detail not in ("sent", "planned") %}: <span class="{{ 'bad-text' if d.outcome in ('failed', 'blocked') else 'muted' }}">{{ d.detail }}</span>{% endif %}
+              {% if d.once %}<strong class="once">{{ d.once }}</strong><span class="small muted">Pass this on now: it is not stored anywhere in Group HQ.</span>{% endif %}</li>
+            {% endfor %}
+          </ul>
+          {% else %}<span class="muted">{{ o.grants_note or "recompute run" }}</span>{% endif %}
+        {% elif o.grants == "failed" %}<span class="bad-text">{{ o.grants_note }}</span>
+        {% else %}<span class="muted">{{ o.grants_note or "-" }}</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

@@ -429,7 +429,8 @@ def engine_available() -> bool:
 
 
 def _call_engine(fn, db: Session, person: Person, user: User, **extra):
-    """Call the engine with (db, person) and, when its signature takes one, the acting user's email as actor=."""
+    """Call the engine with (db, person) and, when its signature takes one, the acting user's email as actor=.
+    Any other keyword the engine's signature does not name is dropped rather than raised on."""
     kwargs = dict(extra)
     try:
         params = inspect.signature(fn).parameters
@@ -438,7 +439,7 @@ def _call_engine(fn, db: Session, person: Person, user: User, **extra):
     accepts_any = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
     if accepts_any or "actor" in params:
         kwargs["actor"] = user.email
-    else:
+    if not accepts_any:
         kwargs = {k: v for k, v in kwargs.items() if k in params}
     return fn(db, person, **kwargs)
 
@@ -463,21 +464,32 @@ def _summarise(result) -> dict:
     return {"actions": dict(actions), "outcomes": dict(outcomes), "failed": failed or None}
 
 
+def run_recompute(db: Session, mentee: Mentee, user: User, **extra) -> tuple[object, str]:
+    """The Recompute button's work for the mentee's person: the engine, an audit row, a commit. Returns
+    (result, "") or, when the engine or a connector raised, (None, the error): the failure is rolled back,
+    audited as mentee.recompute_failed and handed back, never raised. The existing-users import calls this
+    too (passing its open connectors through `extra`), so both run exactly the same recompute."""
+    try:
+        result = _call_engine(recompute_person, db, mentee.person, user, **extra)
+    except Exception as e:  # noqa: BLE001  (a connector or engine failure must reach the screen, never vanish)
+        db.rollback()
+        audit(db, user, "mentee.recompute_failed", f"mentee:{mentee.id}", after={"error": str(e)[:500]})
+        db.commit()
+        return None, str(e) or type(e).__name__
+    audit(db, user, "mentee.recompute", f"mentee:{mentee.id}", after={"person_id": mentee.person_id, **_summarise(result)})
+    db.commit()
+    return result, ""
+
+
 @router.post("/mentees/{mentee_id}/recompute", response_class=HTMLResponse)
 def mentee_recompute(mentee_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     mentee = _load_mentee(db, mentee_id)
     if not engine_available():
         raise HTTPException(status_code=503, detail=ENGINE_MISSING)
     back = f"/mentees/{mentee.id}?tab=grants"
-    try:
-        result = _call_engine(recompute_person, db, mentee.person, user)
-    except Exception as e:  # noqa: BLE001  (a connector or engine failure must reach the screen, never vanish)
-        db.rollback()
-        audit(db, user, "mentee.recompute_failed", f"mentee:{mentee.id}", after={"error": str(e)[:500]})
-        db.commit()
-        return go(back, err=f"Recompute failed: {str(e)[:300]}")
-    audit(db, user, "mentee.recompute", f"mentee:{mentee.id}", after={"person_id": mentee.person_id, **_summarise(result)})
-    db.commit()
+    result, error = run_recompute(db, mentee, user)
+    if error:
+        return go(back, err=f"Recompute failed: {error[:300]}")
     return go(back, ok=f"Recompute run for {mentee.person.person_key}.{_describe(result)}")
 
 

@@ -6,7 +6,7 @@
 <div class="page-title">
   <span class="eyebrow">Register</span>
   <h1>Mentees</h1>
-  <div class="actions"><a class="btn btn-primary btn-sm" href="/mentees/new">Enrol a mentee</a></div>
+  <div class="actions"><a class="btn btn-primary btn-sm" href="/mentees/new">Enrol a mentee</a><a class="btn btn-ghost btn-sm" href="/mentees/import">Existing users to mentees</a></div>
 </div>
 
 <section class="panel">
@@ -62,7 +62,7 @@
   </div>
   {{ f.pager("/mentees", qs_prev, qs_next, page, pages) }}
   {% else %}
-  <p class="muted">{% if qs %}No mentees match.{% else %}Nobody enrolled yet. <a href="/mentees/new">Enrol the first mentee</a>.{% endif %}</p>
+  <p class="muted">{% if qs %}No mentees match.{% else %}Nobody enrolled yet. <a href="/mentees/new">Enrol the first mentee</a>, or <a href="/mentees/import">tick existing Key Properties and Ordris users</a> to enrol them together.{% endif %}</p>
   {% endif %}
 </section>
 {% endblock %}

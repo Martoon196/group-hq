@@ -83,6 +83,7 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; }
 .app-nav a:hover { background: #26262B; color: #fff; }
 .app-nav a.is-active { background: var(--pink); color: #fff; }
 .app-nav a.is-admin { margin-top: .6rem; border: 1px dashed #555; }
+.app-nav a.is-sub { padding: .35rem .7rem .35rem 1.5rem; font-size: .84rem; font-weight: 400; }
 .app-nav .side-note { margin-top: .8rem; padding: .5rem .7rem; border: 1px dashed var(--amber); border-radius: 8px; color: #F3D9A4; font-size: .8rem; line-height: 1.4; }
 .app-side-foot { margin-top: auto; color: #A9A4AB; display: flex; flex-direction: column; gap: .5rem; }
 .app-side-foot .small { margin: 0; word-break: break-all; }

@@ -150,11 +150,34 @@ pp_account_id, fee_share_pct, active, created_at, last_login}` (the POST adds `c
 | grant when `remote_ref` is known | `PATCH /api/partner/sourcers/{id}` `{active: true}` | the row; `404 not_found` for an id that is not a sourcer |
 | revoke | `PATCH /api/partner/sourcers/{id}` `{active: false}`; without a `remote_ref` the id is looked up by email first | the row; `404 not_found` is treated as already gone |
 | lookup | `GET /api/partner/sourcers?email=` | the row, or `404 {ok: false, error: "not_found"}` when no sourcer has that email (also the answer for an admin's email); the connector reads that 404 as "no sourcer", so a revoke with nothing to revoke is done, not failed |
+| list (the existing-users import, `KPConnector.list_sourcers(limit, offset)`) | `GET /api/partner/sourcers?limit=&offset=` with no `email` | `{ok: true, sourcers: [{id, email, name, company, source, pp_account_id, active, created_at, deals}], total, limit, offset}`, newest first, never an admin, `deals` the deals each one has sent for review; `422 invalid` for a paging value out of range (and from a portal without the list yet). Group HQ asks for 100 a page (the connector caps a request at 200, the portal at 500). In dry run the call is only planned and the import page says Key Properties is not listed |
 
 `fee_share_pct` is sent only when the programme template item carries it (`{"product": "kp", "kind":
 "sourcer_link", "value": "mentee", "fee_share_pct": 50}`, validated 0 to 100 on the programme screen);
 until Martin signs the mentee figure off the portal's own default (50) applies. `company` is the first organisation linked to
 the person in Group HQ, or blank.
+
+## The existing-users import
+
+`/mentees/import` (Mentees, **Existing users to mentees**) enrols people who already have a login in one
+batch of up to 25. It reads; it never creates anyone in a product except through the grants that follow.
+For each person it asks every product that is not in dry run whether it knows the email, with the lookup
+rows above: Ordris `GET .../lookup?email=`, Key Properties `GET /api/partner/sourcers?email=`, Hello New
+Home `GET /api/partner/partners?email=` and Property Predator `GET .../account?email=`. A 404 (or HNH's
+`found: false`) is "not on that product". The ids they answer fill only the person's EMPTY link fields
+(`ordris_user_id`, `ordris_org_id`, `kp_user_id`, `hnh_partner_id`, `hnh_user_id`, `pp_account_id`); a
+different value already recorded is kept and reported, and an id already linked to another person is not
+linked twice (except `ordris_org_id`, which people in one Ordris organisation share). An existing person's
+row is locked until their commit, so a double submit of the same batch enrols and records the payment once:
+the second waits and then skips them. A lookup that fails is reported on that person's row and the batch
+goes on; a product that fails for three people running is not asked again in that batch. With **Grant
+access now** ticked and a cleared payment entered, each new mentee gets the same recompute as the mentee
+page's **Recompute now**, so grants are sent to live products and planned for products in dry run, and an
+HNH temporary password is shown once on the results page and stored nowhere. Once a product a person's
+programmes grant has failed for three people running, their recompute is not run in that batch and the
+nightly recompute at 03:10 grants instead, so a product that is down cannot hold the page past a proxy's
+timeout (the results page is the only place those passwords are shown). The submit button is disabled
+after the first press.
 
 ## Hello New Home (built on branch `partner-api`)
 
