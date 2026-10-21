@@ -44,12 +44,12 @@ services:
       - key: HNH_PARTNER_TOKEN
         sync: false
       # "1" keeps every product in dry run; "0" sends to every product; a list keeps only those products in
-      # dry run. Ordris went live on 21 October 2026 (lookup answered ok with the shared token); the others stay
-      # listed until their partner branches are deployed and their tokens set. Shipped as "1" before that;
+      # dry run. Ordris, Key Properties and Hello New Home went live on 21 October 2026 (each lookup answered ok
+      # with its shared token); Property Predator stays listed until its branch clears the audit lane. Shipped as "1";
       # (for example "ordris,kp,hnh" while PP goes live; HNH stays listed until the data sharing agreement
       # exists), so a product without a token never burns its retry attempts every night.
       - key: CONNECTORS_DRY_RUN
-        value: "pp,kp,hnh"
+        value: "pp"
       # Franchise follow-up emails. With SMTP_HOST unset the emails are shown for copying and nothing is sent.
       - key: SMTP_HOST
         sync: false
@@ -115,11 +115,21 @@ services:
           type: web
           name: group-hq
           envVarKey: KP_BASE_URL
+      - key: KP_PARTNER_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: KP_PARTNER_TOKEN
       - key: HNH_BASE_URL
         fromService:
           type: web
           name: group-hq
           envVarKey: HNH_BASE_URL
+      - key: HNH_PARTNER_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: HNH_PARTNER_TOKEN
       - key: CONNECTORS_DRY_RUN
         fromService:
           type: web
