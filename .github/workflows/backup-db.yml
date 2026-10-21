@@ -1,7 +1,7 @@
 # Weekly off-site backups of several apps' Postgres databases from ONE repository, plus a monthly restore drill.
 #
 # This copy lives in Group HQ and covers every MH196 2026 Ltd database whose secret is set, so the Cloudflare
-# R2 details are entered once. Repository secrets (Settings -> Secrets and variables -> Actions):
+# R2 details are entered once. Secrets, in the "Group HQ" environment or at repository level:
 #   BACKUP_DATABASE_URL_GROUPHQ   Group HQ's DIRECT (non-pooled) Neon connection string
 #   BACKUP_DATABASE_URL_KP        Key Properties' direct Neon string ("kpuk-portal")
 #   BACKUP_DATABASE_URL_PP        Property Predator's direct Neon string (optional; skipped until set)
@@ -52,6 +52,9 @@ jobs:
           - { app: pp, secret: BACKUP_DATABASE_URL_PP }
     env:
       APP_NAME: ${{ matrix.app }}
+    # The secrets live in the repository's "Group HQ" environment (Settings -> Environments), so the job
+    # runs in that environment to read them; repository-level secrets with the same names would work too.
+    environment: Group HQ
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -149,6 +152,9 @@ jobs:
           - { app: pp, secret: BACKUP_DATABASE_URL_PP }
     env:
       APP_NAME: ${{ matrix.app }}
+    # The secrets live in the repository's "Group HQ" environment (Settings -> Environments), so the job
+    # runs in that environment to read them; repository-level secrets with the same names would work too.
+    environment: Group HQ
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
