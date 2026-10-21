@@ -43,12 +43,15 @@ with their grant templates and never overwritten; edit them in the app.
 
 ## Deploy
 
-`render.yaml` describes the web service (Frankfurt, starter) and the nightly `group-hq-recompute`
-cron at 03:10 UTC. Set the secrets marked `sync: false` in the Render dashboard. `CONNECTORS_DRY_RUN`
+`render.yaml` describes the web service (Frankfurt, starter), the nightly `group-hq-recompute`
+cron at 03:10 UTC and the `group-hq-statements` cron at 03:40 UTC. Set the secrets marked `sync: false`
+in the Render dashboard. The crons copy their settings from the web service, and Render can only copy a
+variable the web service actually holds, so the product tokens are not copied yet: when a product goes
+live, set its token on the web service first, then add its `fromService` entry to the recompute cron and sync. `CONNECTORS_DRY_RUN`
 takes `1` (everything in dry run), `0` (everything live) or a list of products to keep in dry run
 (`ordris,kp,hnh`, the shipped value) while the others go live; take a product off the list only once
 its connector has been rehearsed with a test account and, for Hello New Home, the data sharing
-agreement exists. `ORDRIS_BASE_URL` has no default and must be set before Ordris leaves the list.
+agreement exists. `ORDRIS_BASE_URL` is `https://ordris.io`, which stays true after Ordris moves to Render.
 
 ## Guards worth knowing about
 

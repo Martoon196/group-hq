@@ -32,7 +32,7 @@ services:
       - key: PP_SERVICE_TOKEN
         sync: false
       - key: ORDRIS_BASE_URL
-        sync: false
+        value: https://ordris.io
       - key: ORDRIS_PARTNER_TOKEN
         sync: false
       - key: KP_BASE_URL
@@ -73,6 +73,10 @@ services:
     schedule: "10 3 * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python -m app.jobs.recompute
+    # Product tokens are not copied here yet. Render can only copy a variable the web service actually holds,
+    # and every token is blank until its product is switched on (CONNECTORS_DRY_RUN). When a product goes
+    # live: set its token on the web service first, then add the matching fromService entry below and sync.
+    # Until then the nightly job records that product's grants as not configured and sends nothing.
     envVars:
       - key: DATABASE_URL
         fromService:
@@ -94,41 +98,21 @@ services:
           type: web
           name: group-hq
           envVarKey: PP_BASE_URL
-      - key: PP_SERVICE_TOKEN
-        fromService:
-          type: web
-          name: group-hq
-          envVarKey: PP_SERVICE_TOKEN
       - key: ORDRIS_BASE_URL
         fromService:
           type: web
           name: group-hq
           envVarKey: ORDRIS_BASE_URL
-      - key: ORDRIS_PARTNER_TOKEN
-        fromService:
-          type: web
-          name: group-hq
-          envVarKey: ORDRIS_PARTNER_TOKEN
       - key: KP_BASE_URL
         fromService:
           type: web
           name: group-hq
           envVarKey: KP_BASE_URL
-      - key: KP_PARTNER_TOKEN
-        fromService:
-          type: web
-          name: group-hq
-          envVarKey: KP_PARTNER_TOKEN
       - key: HNH_BASE_URL
         fromService:
           type: web
           name: group-hq
           envVarKey: HNH_BASE_URL
-      - key: HNH_PARTNER_TOKEN
-        fromService:
-          type: web
-          name: group-hq
-          envVarKey: HNH_PARTNER_TOKEN
       - key: CONNECTORS_DRY_RUN
         fromService:
           type: web
