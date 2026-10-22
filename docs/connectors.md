@@ -35,10 +35,16 @@ headers) and sends nothing, so the recompute can be rehearsed end to end before 
   (below) and shown once on the run page through `ConnectorResult.once`, which is never part of a stored
   row, an audit row or the job's output.
 - **Dry run**: `CONNECTORS_DRY_RUN=1` in the environment makes every run a dry run whatever the
-  caller asks; a list of products (`CONNECTORS_DRY_RUN=ordris,kp,hnh`, the shipped value) keeps only
-  those in dry run while the others go live; `0` sends to every product. The `--dry-run` flag and the
-  page toggle make one run a dry run. Take a product off the list only once it has been rehearsed with
-  a test account. A product with no base URL or token is skipped without counting an attempt.
+  caller asks, and no switch can lift it. Otherwise each product follows its Live / Dry run switch on the
+  Settings screen (the `app_settings` table, `product_switch.<product>`) once that has been set; a product
+  never switched follows the environment list (`CONNECTORS_DRY_RUN=pp`, the shipped value, keeps only PP in
+  dry run; `0` sends to every product). The web service and the nightly job read the same switches
+  (`connectors.product_dry_run`, with `settings.product_switches(db)` passed in). The `--dry-run` flag and the
+  page toggle make one run a dry run. A run reads the switches as it starts and again before each person, so a
+  product switched to Dry run stops being sent anything by a run already under way; a switch to Live waits for
+  the next run. Switch a product live only once it has been rehearsed with a test account. A product with no base
+  URL or token is skipped without counting an attempt and shows as not configured, whatever its switch says; in
+  the nightly job that also makes the run exit 1, so a token never copied to the cron shows as a failed run.
 
 ## The outbox and the idempotency key
 
@@ -50,6 +56,11 @@ wire is touched:
 | `grant:<grant_id>:<ends_at>` | grant or extend to that end, for example `grant:12:2027-10-01T00:00:00` |
 | `grant:<grant_id>:<ends_at>:after:<call_id>` | the same, once a revoke of the grant has succeeded (`call_id` is that revoke's row), so an undone Revoke all is sent again rather than matched to the row sent before the revoke |
 | `grant:<grant_id>:revoke:<ends_at>` | revoke after that end passed, for example `grant:12:revoke:2027-10-01T00:00:00` |
+| `grant:<grant_id>:revoke:<ends_at>:after:<call_id>` | the same, once the grant has been revoked and granted again (`call_id` is that re-grant's row), so pause, resume and pause again on one day is three calls, not a match of the first revoke |
+
+A held grant (Pause on the grant, or Pause all access for the person) is revoked at midnight on the day the hold
+began, so a revoke that fails is retried under the same key on the following nights; a held grant that is not
+active is left alone (`held` on the run page) and Resume drops any revoke still waiting in the outbox.
 
 The key is unique in the table, so a re-run with the same decision finds the same row: if it has
 succeeded nothing is sent again; if it failed the attempt counter goes up and the call is retried;
@@ -224,8 +235,10 @@ exist (plan, Phase 3).
 
 1. Keep `CONNECTORS_DRY_RUN=1`. Enrol a test person on the programme, record a cleared payment, press
    **Run nightly now** with the dry-run box ticked and read the planned calls on the report page.
-2. Set the product's base URL and token in the Render dashboard, point the base URL at the product's
-   preview branch, and take the product off the `CONNECTORS_DRY_RUN` list.
+2. Set the product's base URL and token on the web service in the Render dashboard and point the base URL at
+   the product's preview branch; then add the token's `fromService` entry to the recompute cron in
+   `render.yaml` and sync; only then switch the product to Live on the Settings screen. After the next nightly
+   run its row on Settings shows the nightly job's token as Set.
 3. Press **Run nightly now** with the box unticked for the test person only (from the grant's page).
    Check the product: the account is comped, the entitlement exists, the sourcer or partner is
    active. Check the grant's page: state active, remote ref filled, the audit row.

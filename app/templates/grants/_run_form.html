@@ -1,6 +1,7 @@
-{# The "Run nightly now" form. action: where to post; scope: "everyone" or a person's email. #}
-{% macro run_form(action, scope="everyone", today=None) -%}
-<form method="post" action="{{ action }}" class="run-form" data-confirm="Run the recompute now for {{ scope }}? With dry run unticked, calls are sent to the products.">
+{# The "Run nightly now" form. action: where to post; scope: "everyone" or a person's email; modes: each product's
+   mode now (settings.product_modes), shown so it is clear where an unticked run sends. #}
+{% macro run_form(action, scope="everyone", today=None, modes=None) -%}
+<form method="post" action="{{ action }}" class="run-form" data-confirm="Run the recompute now for {{ scope }}? With dry run unticked, calls are sent to the products that are live.">
   <div class="field field-check">
     <label><input type="checkbox" name="dry_run" value="1" checked> Dry run: record and show the calls, send nothing</label>
   </div>
@@ -11,7 +12,13 @@
   </div>
   <div class="form-actions">
     <button class="btn btn-primary btn-sm" type="submit">Run nightly now</button>
-    {% if env_dry_run %}<span class="help">Connectors are in dry run in this environment (CONNECTORS_DRY_RUN=1): every run is a dry run, whatever the box says.</span>{% endif %}
+    {% if modes and modes[0].source == "floor" %}<span class="help">Connectors are in dry run in this environment (CONNECTORS_DRY_RUN=1): every run is a dry run, whatever the box says.</span>{% endif %}
   </div>
+  {% if modes %}
+  <div class="run-modes" style="grid-column: 1 / -1">
+    <span class="help">With the box unticked, each product is treated as its switch on <a href="/settings">Settings</a> says:</span>
+    <div class="chips mt-0">{% for m in modes %}<span class="chip chip-{{ m.state }}">{{ m.name }}: {{ {"live": "live", "dry_run": "dry run", "not_configured": "not configured"}[m.state] }}</span>{% endfor %}</div>
+  </div>
+  {% endif %}
 </form>
 {%- endmacro %}

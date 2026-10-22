@@ -87,8 +87,10 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 SMTP_STARTTLS = _bool("SMTP_STARTTLS", True)
 MAIL_FROM = (os.environ.get("MAIL_FROM") or "").strip()
 # CONNECTORS_DRY_RUN: "1" records every outbound connector call instead of sending it (tests and rehearsals
-# run this way); "0" sends to every product; a comma-separated list of products ("ordris,kp,hnh") keeps only
-# those in dry run while the others go live, which is how PP can be live before the other contracts exist.
+# run this way), a hard floor no switch on the Settings screen can lift. Otherwise each product follows its Live /
+# Dry run switch on the Settings screen once that has been set, and this value is only the default for a product
+# never switched: "0" defaults every product to live, and a comma-separated list ("pp") defaults those to dry run.
+# For an emergency stop, use the product's Dry run switch, or "1" for everything.
 _DRY_RAW = (os.environ.get("CONNECTORS_DRY_RUN") or "").strip().lower()
 if _DRY_RAW in ("", "0", "false", "no", "off"):
     CONNECTORS_DRY_RUN = False

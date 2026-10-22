@@ -7,10 +7,14 @@ run on demand with a dry-run toggle.
     GET  /grants/{id}                one grant, its calls and its audit trail
     POST /grants/{id}/recompute      recompute that person only (dry_run=1 as above)
     POST /grants/{id}/retry          clear a failed or blocked grant and recompute the person
+    POST /grants/{id}/pause          hold the grant: revoked in the product now, kept off by the recompute
+    POST /grants/{id}/resume         clear the hold and recompute the person at once
 
 A run renders a report page (grants/run.html) rather than redirecting, because the point of a dry run
-is to read what would have been sent. Same conventions as the rest of the app otherwise: require_admin
-on every route, check_origin on every POST, audit rows written by the service layer.
+is to read what would have been sent; Resume does too, since the re-grant it sends may carry a Hello New Home
+temporary password that is shown once. Pause redirects back to the page it was pressed on with a flash. Same
+conventions as the rest of the app otherwise: require_admin on every route, check_origin on every POST, audit
+rows written by the service layer.
 """
 from __future__ import annotations
 
@@ -27,14 +31,15 @@ from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import GRANT_KINDS, PRODUCTS, AuditLog, ConnectorCall, EntitlementGrant, Person, User
 from ..services import settings
-from ..services.entitlements import (BLOCKED_ERROR, MAX_ATTEMPTS, RunSummary, display_state, is_blocked, recompute_all,
-                                     recompute_person, reset_for_retry, utc_today)
+from ..services.entitlements import (BLOCKED_ERROR, MAX_ATTEMPTS, RunSummary, display_state, hold_of, is_blocked,
+                                     pause_grant, recompute_all, recompute_person, reset_for_retry, resume_grant,
+                                     utc_today)
 from ..templating import go, render
 
 router = APIRouter(prefix="/grants", dependencies=[Depends(check_origin)])
 
 PAGE_SIZE = 50
-STATES = ("pending", "active", "revoked", "failed", "blocked")
+STATES = ("pending", "active", "revoked", "failed", "blocked", "held")
 CALL_STATUSES = ("pending", "succeeded", "failed")
 
 
@@ -80,10 +85,18 @@ def _latest_calls(db: Session, grant_ids: list[int]) -> dict[int, ConnectorCall]
     return latest
 
 
-def _common(user: User) -> dict:
-    return {"user": user, "section": "grants", "env_dry_run": bool(config.CONNECTORS_DRY_RUN),
-            "product_name": settings.product_name, "display_state": display_state, "is_blocked": is_blocked,
-            "max_attempts": MAX_ATTEMPTS}
+def _common(user: User, db: Session | None = None) -> dict:
+    """What every grants page shows; with the session, also each product's mode for the run form."""
+    out = {"user": user, "section": "grants", "env_dry_run": bool(config.CONNECTORS_DRY_RUN),
+           "product_name": settings.product_name, "display_state": display_state, "is_blocked": is_blocked,
+           "hold_of": hold_of, "max_attempts": MAX_ATTEMPTS}
+    if db is not None:
+        out["product_modes"] = settings.product_modes(db)
+    return out
+
+
+def _held_filter():
+    return or_(EntitlementGrant.held_at.isnot(None), Person.access_held_at.isnot(None))
 
 
 # ---- the list ----------------------------------------------------------------------------
@@ -101,6 +114,8 @@ def grants_list(request: Request, product: str = "", kind: str = "", state: str 
         query = query.filter(EntitlementGrant.state == "failed", EntitlementGrant.last_error == BLOCKED_ERROR)
     elif filters["state"] == "failed":
         query = query.filter(EntitlementGrant.state == "failed", EntitlementGrant.last_error != BLOCKED_ERROR)
+    elif filters["state"] == "held":
+        query = query.filter(_held_filter())
     elif filters["state"]:
         query = query.filter(EntitlementGrant.state == filters["state"])
     if filters["q"]:
@@ -115,7 +130,7 @@ def grants_list(request: Request, product: str = "", kind: str = "", state: str 
     active_filters = {k: v for k, v in filters.items() if v}
     qs = urlencode(active_filters)
     ctx = {
-        **_common(user), "grants": grants, "latest": _latest_calls(db, [g.id for g in grants]), "filters": filters,
+        **_common(user, db), "grants": grants, "latest": _latest_calls(db, [g.id for g in grants]), "filters": filters,
         "products": PRODUCTS, "kinds": GRANT_KINDS, "states": STATES, "total": total, "page": current, "pages": pages,
         "page_size": PAGE_SIZE, "qs": qs,
         "qs_prev": urlencode({**active_filters, "page": max(1, current - 1)}),
@@ -132,6 +147,8 @@ def _count_state(db: Session, state: str) -> int:
         return query.filter(EntitlementGrant.state == "failed", EntitlementGrant.last_error == BLOCKED_ERROR).count()
     if state == "failed":
         return query.filter(EntitlementGrant.state == "failed", EntitlementGrant.last_error != BLOCKED_ERROR).count()
+    if state == "held":
+        return query.join(Person, EntitlementGrant.person_id == Person.id).filter(_held_filter()).count()
     return query.filter(EntitlementGrant.state == state).count()
 
 
@@ -185,8 +202,8 @@ def grant_detail(request: Request, grant_id: int, db: Session = Depends(get_db),
     grant = _grant_or_404(db, grant_id)
     calls = db.query(ConnectorCall).filter(ConnectorCall.grant_id == grant.id).order_by(ConnectorCall.id.desc()).all()
     trail = db.query(AuditLog).filter(AuditLog.entity == f"grant:{grant.id}").order_by(AuditLog.id.desc()).limit(50).all()
-    ctx = {**_common(user), "grant": grant, "person": grant.person, "mentee": grant.mentee, "calls": calls,
-           "trail": trail, "today": utc_today()}
+    ctx = {**_common(user, db), "grant": grant, "person": grant.person, "mentee": grant.mentee, "calls": calls,
+           "trail": trail, "today": utc_today(), "hold": hold_of(grant)}
     return render(request, "grants/detail.html", ctx)
 
 
@@ -216,3 +233,63 @@ def retry(request: Request, grant_id: int, dry_run: str = Form(""), db: Session 
     decisions = recompute_person(db, person, day, bool(dry_run), actor=user)
     summary = RunSummary(today=day, dry_run=_dry(dry_run), people=1, decisions=decisions)
     return _run_page(request, user, summary, scope=f"retry for {person.person_key}", back=f"/grants/{grant.id}")
+
+
+# ---- holds: Pause and Resume -------------------------------------------------------------------------------
+def _back(next_path: str, grant: EntitlementGrant) -> str:
+    """Where Pause or Resume returns to: the page it was pressed on when that is a path in this app, else the grant."""
+    path = (next_path or "").strip()
+    if path.startswith("/") and not path.startswith("//") and "\\" not in path and len(path) <= 300:
+        return path
+    return f"/grants/{grant.id}"
+
+
+def _pause_note(grant: EntitlementGrant, decision) -> tuple[str, str]:
+    """(ok, err) for the flash after a pause, from what happened to the revoke. Anything that leaves the product
+    still giving access is an error, so the founder is never told access stopped when it did not."""
+    name = settings.product_name(grant.product)
+    kept = "The nightly recompute keeps it off, whatever is paid, until you resume it."
+    if decision.outcome == "sent":
+        return f"Paused: revoked in {name} now. {kept}", ""
+    if decision.outcome == "planned":
+        return f"Paused. {name} is in dry run, so the revoke is planned, not sent; the next live run sends it. {kept}", ""
+    if decision.outcome == "failed":
+        return "", f"Paused, but the revoke in {name} failed: {decision.detail[:200]}. The nightly recompute tries again."
+    if decision.outcome == "blocked":
+        return "", f"Paused, but {name} refused the revoke ({BLOCKED_ERROR}), so it may still give access. Check the calls below."
+    if decision.action == "gave_up":
+        return "", (f"Paused, but {name} was not asked again: the revoke had already failed {MAX_ATTEMPTS} times, so {name} "
+                    "may still give access. Press Retry on the grant to send it once more.")
+    if decision.detail.startswith("not configured"):
+        return "", (f"Paused, but {name} has no token or base URL here, so the revoke was not sent and {name} may still "
+                    "give access. The recompute sends it once the token is set.")
+    return f"Paused. It was not active in {name}, so there was nothing to revoke. {kept}", ""
+
+
+@router.post("/{grant_id}/pause", response_class=HTMLResponse)
+def pause(grant_id: int, reason: str = Form(""), next: str = Form(""), db: Session = Depends(get_db),
+          user: User = Depends(require_admin)):
+    grant = _grant_or_404(db, grant_id)
+    back = _back(next, grant)
+    if grant.held_at is not None:
+        return go(back, ok="That grant was already paused.")
+    decision = pause_grant(db, grant, actor=user, reason=reason.strip()[:200])
+    ok, err = _pause_note(grant, decision)
+    return go(back, ok=ok, err=err)
+
+
+@router.post("/{grant_id}/resume", response_class=HTMLResponse)
+def resume(request: Request, grant_id: int, next: str = Form(""), db: Session = Depends(get_db),
+           user: User = Depends(require_admin)):
+    grant = _grant_or_404(db, grant_id)
+    back = _back(next, grant)
+    if grant.held_at is None:
+        if grant.person.access_held_at is not None:
+            return go(back, err="This grant is not paused on its own: all access for the person is paused. Resume that "
+                                "on their mentee page.")
+        return go(back, err="That grant is not paused.")
+    person = grant.person
+    day = utc_today()
+    decisions = resume_grant(db, grant, day, actor=user)
+    summary = RunSummary(today=day, dry_run=bool(config.CONNECTORS_DRY_RUN), people=1, decisions=decisions)
+    return _run_page(request, user, summary, scope=f"resume for {person.person_key}", back=back)

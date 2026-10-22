@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
+from .. import config
 from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import (MENTEE_STATUSES, PAYMENT_METHODS, PAYMENT_MODES, EntitlementGrant, Mentee, Payment, Person,
@@ -35,9 +36,13 @@ from ..templating import go, render
 from .people import like_pattern, page_of, parse_date, parse_int, qs
 
 try:
-    from ..services.entitlements import recompute_person, revoke_person
+    from ..services.entitlements import RunSummary, hold_of, pause_person, recompute_person, resume_person, revoke_person
 except ImportError:          # packet B's engine is not in this tree yet; the screens still work without it
+    RunSummary = None        # type: ignore[assignment,misc]
+    hold_of = None           # type: ignore[assignment]
+    pause_person = None      # type: ignore[assignment]
     recompute_person = None  # type: ignore[assignment]
+    resume_person = None     # type: ignore[assignment]
     revoke_person = None     # type: ignore[assignment]
 
 router = APIRouter(dependencies=[Depends(check_origin)])
@@ -304,6 +309,7 @@ def _mentee_page(request: Request, db: Session, user: User, mentee: Mentee, tab:
         "user": user, "section": "mentees", "mentee": mentee, "tab": tab, "tabs": TABS, "money": money,
         "access": access_summary(mentee), "payments": sorted(mentee.payments, key=lambda p: (p.paid_at, p.id), reverse=True),
         "grants": grants, "engine_available": engine_available(), "engine_missing": ENGINE_MISSING,
+        "holds": {g.id: hold_of(g, mentee.person) for g in grants} if callable(hold_of) else {},
         "payment_vals": payment_vals or _payment_defaults(mentee), "methods": [(k, v) for k, v in METHOD_LABELS.items()],
         "detail_vals": detail_vals or {"status": mentee.status, "cohort": mentee.cohort, "payment_mode": mentee.payment_mode,
                                        "start_date": mentee.start_date.isoformat(), "notes": mentee.notes},
@@ -311,7 +317,7 @@ def _mentee_page(request: Request, db: Session, user: User, mentee: Mentee, tab:
         "mode_labels": MODE_LABELS, "cleared_total": cleared_total(mentee),
         "pending_total": sum((p.amount for p in mentee.payments if not p.cleared_at), Decimal("0")),
         "shortfall": shortfall(mentee), "price": programme_price(mentee), "grace_days": _setting_int("grace_days", 7),
-        "full_term_months": min(_setting_int("full_term_months", 12), 13),
+        "full_term_months": min(_setting_int("full_term_months", 12), 13), "holds_available": holds_available(),
     }
     if error:
         ctx.update(flash=error, flash_kind="err")
@@ -428,6 +434,14 @@ def engine_available() -> bool:
     return callable(recompute_person) and callable(revoke_person)
 
 
+# Pause all access counts (entitlements._hold_counts) after which a product may still give access.
+PAUSE_NOT_OFF = ("failed", "gave up", "blocked", "not configured")
+
+
+def holds_available() -> bool:
+    return engine_available() and callable(pause_person) and callable(resume_person) and RunSummary is not None
+
+
 def _call_engine(fn, db: Session, person: Person, user: User, **extra):
     """Call the engine with (db, person) and, when its signature takes one, the acting user's email as actor=.
     Any other keyword the engine's signature does not name is dropped rather than raised on."""
@@ -510,6 +524,62 @@ def mentee_revoke(mentee_id: int, reason: str = Form(""), db: Session = Depends(
     audit(db, user, "mentee.revoke_all", f"mentee:{mentee.id}", after={"person_id": mentee.person_id, "reason": reason, "result": result})
     db.commit()
     return go(back, ok=f"Revoke requested for every grant held by {mentee.person.person_key}.{_describe(result)}")
+
+
+@router.post("/mentees/{mentee_id}/pause", response_class=HTMLResponse)
+def mentee_pause(mentee_id: int, reason: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """Pause all access: every grant the person holds is revoked now and kept off by the recompute, whatever is
+    paid, until Resume. The mentee rows are left as they are (Revoke all ends them)."""
+    mentee = _load_mentee(db, mentee_id)
+    if not holds_available():
+        raise HTTPException(status_code=503, detail=ENGINE_MISSING)
+    back = f"/mentees/{mentee.id}?tab=grants"
+    if mentee.person.access_held_at is not None:
+        return go(back, ok=f"All access for {mentee.person.person_key} was already paused.")
+    reason = reason.strip()[:200]
+    try:
+        result = _call_engine(pause_person, db, mentee.person, user, reason=reason)
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        audit(db, user, "mentee.pause_failed", f"mentee:{mentee.id}", after={"error": str(e)[:500]})
+        db.commit()
+        return go(back, err=f"Pause failed: {str(e)[:300]}")
+    audit(db, user, "mentee.pause_all", f"mentee:{mentee.id}", after={"person_id": mentee.person_id, "reason": reason or None,
+                                                                      "result": result})
+    db.commit()
+    if isinstance(result, dict) and any(result.get(k) for k in PAUSE_NOT_OFF):
+        # a product may still give access: say so as an error, never as done
+        return go(back, err=f"All access paused for {mentee.person.person_key}, but not every revoke went through:"
+                            f"{_describe(result)} A failed revoke, or one not sent for want of a token, is tried again "
+                            "each night; one that gave up needs Retry on its grant page, and a blocked one needs checking "
+                            "by hand.")
+    return go(back, ok=f"All access paused for {mentee.person.person_key}: the recompute keeps every grant off until you "
+                       f"resume it.{_describe(result)}")
+
+
+@router.post("/mentees/{mentee_id}/resume", response_class=HTMLResponse)
+def mentee_resume(mentee_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """Resume all access and recompute at once. Renders the run page, as a recompute from the Grants screen does,
+    because a re-grant to Hello New Home may carry a temporary password that is shown once."""
+    mentee = _load_mentee(db, mentee_id)
+    if not holds_available():
+        raise HTTPException(status_code=503, detail=ENGINE_MISSING)
+    back = f"/mentees/{mentee.id}?tab=grants"
+    if mentee.person.access_held_at is None:
+        return go(back, err=f"Access for {mentee.person.person_key} is not paused.")
+    try:
+        decisions = _call_engine(resume_person, db, mentee.person, user)
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        audit(db, user, "mentee.resume_failed", f"mentee:{mentee.id}", after={"error": str(e)[:500]})
+        db.commit()
+        return go(back, err=f"Resume failed: {str(e)[:300]}")
+    audit(db, user, "mentee.resume_all", f"mentee:{mentee.id}", after={"person_id": mentee.person_id, **_summarise(decisions)})
+    db.commit()
+    summary = RunSummary(today=utcnow().date(), dry_run=bool(config.CONNECTORS_DRY_RUN), people=1, decisions=list(decisions))
+    ctx = {"user": user, "section": "mentees", "summary": summary, "decisions": summary.decisions,
+           "scope": f"resume for {mentee.person.person_key}", "back": back}
+    return render(request, "grants/run.html", ctx)
 
 
 # ---- notes tab ---------------------------------------------------------------------------------

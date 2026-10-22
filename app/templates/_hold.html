@@ -1,0 +1,15 @@
+{# A held grant, shown the same way on the mentee, person, grants list and grant pages. hold is
+   entitlements.hold_of(grant): the grant's own Pause, or the person's Pause all access, or none. #}
+{% macro pill(hold) -%}
+{% if hold %}<br><span class="status status-held">held</span>
+<span class="small muted">{% if hold.scope == "grant" %}paused{% else %}all access paused{% endif %} {{ hold.at | uk("%d %b %Y") }}{% if hold.by %} by {{ hold.by }}{% endif %}{% if hold.reason %}: {{ hold.reason }}{% endif %}</span>{% endif %}
+{%- endmacro %}
+
+{# Pause or Resume for one grant. next: the page to come back to. #}
+{% macro buttons(g, hold, next, disabled=False) -%}
+{% if hold and hold.scope == "grant" %}
+<form method="post" action="/grants/{{ g.id }}/resume" data-confirm="Resume this grant? The recompute runs now for the person and grants it back if the payments support it."><input type="hidden" name="next" value="{{ next }}"><button class="btn btn-ghost btn-sm" type="submit"{% if disabled %} disabled{% endif %}>Resume</button></form>
+{% elif not hold %}
+<form method="post" action="/grants/{{ g.id }}/pause" data-confirm="Pause this grant? It is revoked in {{ product_name(g.product) }} now and stays off, whatever is paid, until you resume it."><input type="hidden" name="next" value="{{ next }}"><button class="btn btn-ghost btn-sm" type="submit"{% if disabled %} disabled{% endif %}>Pause</button></form>
+{% endif %}
+{%- endmacro %}

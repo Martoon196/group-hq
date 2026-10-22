@@ -1,5 +1,6 @@
 {% extends "app_base.html" %}
 {% import "_fields.html" as f %}
+{% import "_hold.html" as hd %}
 {% set title = (mentee.person.name or mentee.person.person_key) ~ " on " ~ mentee.programme.name ~ " | Group HQ" %}
 {% block head %}{{ f.styles() }}{% endblock %}
 {% block content %}
@@ -84,25 +85,35 @@
     <div class="row-actions">
       <form method="post" action="/mentees/{{ mentee.id }}/recompute"><button class="btn btn-primary btn-sm" type="submit"{% if not engine_available %} disabled{% endif %}>Recompute now</button></form>
       <form method="post" action="/mentees/{{ mentee.id }}/revoke" data-confirm="Revoke every grant this person holds across all four products? They lose access straight away."><button class="btn btn-danger btn-sm" type="submit"{% if not engine_available %} disabled{% endif %}>Revoke all</button></form>
+      {% if not mentee.person.access_held_at %}
+      <form method="post" action="/mentees/{{ mentee.id }}/pause" class="row-actions" data-confirm="Pause all access for {{ mentee.person.person_key }}? Every grant is revoked now and stays off, whatever is paid, until you resume it. The mentee record is kept as it is."><input name="reason" maxlength="200" placeholder="Reason (optional, stays in Group HQ)" aria-label="Reason for pausing all access, kept in Group HQ and not sent to the products" style="width:auto"> <button class="btn btn-ghost btn-sm" type="submit"{% if not holds_available %} disabled{% endif %}>Pause all access</button></form>
+      {% endif %}
     </div>
   </div>
   {% if not engine_available %}<div class="flash flash-err">{{ engine_missing }}</div>{% endif %}
-  <p class="help">Every right this person holds, across every programme they are on. Recompute applies the programme templates against the cleared payments and extends or revokes in each product; the nightly job does the same at 03:10.</p>
+  {% if mentee.person.access_held_at %}
+  <div class="hold-banner">
+    <span>All access is paused since {{ mentee.person.access_held_at | uk }}{% if mentee.person.access_held_by %} by {{ mentee.person.access_held_by }}{% endif %}{% if mentee.person.access_held_reason %}: {{ mentee.person.access_held_reason }}{% endif %}. <span class="small">Every grant below is kept revoked, whatever is paid, and the nightly recompute grants nothing back until you resume.</span></span>
+    <form method="post" action="/mentees/{{ mentee.id }}/resume" data-confirm="Resume all access for {{ mentee.person.person_key }}? The recompute runs now and grants back what the payments support; a grant paused on its own stays paused."><button class="btn btn-primary btn-sm" type="submit"{% if not holds_available %} disabled{% endif %}>Resume all access</button></form>
+  </div>
+  {% endif %}
+  <p class="help">Every right this person holds, across every programme they are on. Recompute applies the programme templates against the cleared payments and extends or revokes in each product; the nightly job does the same at 03:10. Pause takes one right away and keeps it off, whatever is paid, until you resume it; Pause all access does that for everything at once and, unlike Revoke all, leaves the mentee record as it is.</p>
   {% if grants %}
   <div class="table-scroll">
   <table class="data">
-    <thead><tr><th>Product</th><th>Right</th><th>State</th><th>Starts</th><th>Ends</th><th>Last synced</th><th>Source</th><th>Last error</th></tr></thead>
+    <thead><tr><th>Product</th><th>Right</th><th>State</th><th>Starts</th><th>Ends</th><th>Last synced</th><th>Source</th><th>Last error</th><th></th></tr></thead>
     <tbody>
     {% for g in grants %}
     <tr>
       <td>{{ product_name(g.product) }}</td>
       <td>{{ g.kind|replace("_", " ") }}: <code>{{ g.value }}</code>{% if g.remote_ref %}<br><span class="small muted">ref {{ g.remote_ref }}</span>{% endif %}</td>
-      <td><span class="status status-{{ g.state }}">{{ g.state }}</span></td>
+      <td><span class="status status-{{ g.state }}">{{ g.state }}</span>{{ hd.pill(holds.get(g.id)) }}</td>
       <td class="nowrap">{{ g.starts_at | uk("%d %b %Y") }}</td>
       <td class="nowrap">{{ g.ends_at | uk("%d %b %Y") or "open" }}</td>
       <td class="nowrap">{{ g.last_sync_at | uk("%d %b %H:%M") or "never" }}</td>
       <td class="small">{{ g.source }}{% if g.mentee_id and g.mentee_id != mentee.id %}<br><a href="/mentees/{{ g.mentee_id }}">mentee #{{ g.mentee_id }}</a>{% endif %}</td>
       <td class="detail">{% if g.last_error %}<span class="bad-text">{{ g.last_error }}</span>{% endif %}</td>
+      <td class="row-actions">{{ hd.buttons(g, holds.get(g.id), "/mentees/" ~ mentee.id ~ "?tab=grants", not holds_available) }}</td>
     </tr>
     {% endfor %}
     </tbody>

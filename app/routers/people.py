@@ -29,6 +29,7 @@ from ..db import get_db
 from ..models import ConnectorCall, EntitlementGrant, Mentee, Person, PersonOrganisation, User
 from ..services import settings
 from ..services.audit import audit, changes
+from ..services.entitlements import hold_of
 from ..templating import go, render
 
 router = APIRouter(dependencies=[Depends(check_origin)])
@@ -221,7 +222,7 @@ def _person_page(request: Request, db: Session, user: User, person: Person, *, v
                  .filter(PersonOrganisation.person_id == person.id).all())
     ctx = {"user": user, "section": "people", "person": person, "mentees": mentees, "grants": grants, "org_links": org_links,
            "vals": vals or {"email": person.person_key, "name": person.name, "phone": person.phone, "notes": person.notes},
-           "link_groups": link_groups(person, link_vals)}
+           "link_groups": link_groups(person, link_vals), "hold_of": hold_of}
     if error:
         ctx.update(flash=error, flash_kind="err")
     return render(request, "person.html", ctx, status)

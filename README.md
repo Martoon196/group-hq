@@ -36,7 +36,8 @@ named `<database>_test` that it drops and recreates, so the named database is ne
 Alembic owns the schema: `alembic upgrade head` runs as Render's pre-deploy command and again at
 boot. Change `app/models.py`, then `alembic revision --autogenerate -m "..."` and review the file.
 The tables are the ones in the plan: people, organisations, person_organisations, programmes,
-mentees, payments, entitlement_grants, connector_calls, audit_log, users.
+mentees, payments, entitlement_grants, connector_calls, audit_log, users, plus app_settings for the switches set
+on the Settings screen (0006).
 
 The four programmes (mentorship, hnh_franchise, kp_mentee, ordris_pro_bundle) are seeded at boot
 with their grant templates and never overwritten; edit them in the app.
@@ -46,12 +47,23 @@ with their grant templates and never overwritten; edit them in the app.
 `render.yaml` describes the web service (Frankfurt, starter), the nightly `group-hq-recompute`
 cron at 03:10 UTC and the `group-hq-statements` cron at 03:40 UTC. Set the secrets marked `sync: false`
 in the Render dashboard. The crons copy their settings from the web service, and Render can only copy a
-variable the web service actually holds, so the product tokens are not copied yet: when a product goes
-live, set its token on the web service first, then add its `fromService` entry to the recompute cron and sync. `CONNECTORS_DRY_RUN`
-takes `1` (everything in dry run), `0` (everything live) or a list of products to keep in dry run
-(`ordris,kp,hnh`, for example) while the others go live; it ships as `1`; take a product off the list only once
-its connector has been rehearsed with a test account and, for Hello New Home, the data sharing
-agreement exists. `ORDRIS_BASE_URL` is `https://ordris.io`, which stays true after Ordris moves to Render.
+variable the web service actually holds, so `PP_SERVICE_TOKEN` is not copied yet (the Ordris, Key Properties and
+Hello New Home tokens are). When a product goes live: set its token on the web service first, then add its
+`fromService` entry to the recompute cron and sync, and only then switch it to Live on Settings. `CONNECTORS_DRY_RUN`
+takes `1` (everything in dry run), `0` (everything live by default) or a list of products that default to dry
+run (`ordris,kp,hnh`, for example) while the others default to live; it ships as `pp`. Since 0006 the list is only the
+default: each product has a Live / Dry run switch on **Settings** (side navigation), stored in the database, and
+once a product's switch has been set it decides for that product, in the web service and the nightly job alike.
+`CONNECTORS_DRY_RUN=1` stays a hard floor that no switch lifts. Switch a product live only once its connector has
+been rehearsed with a test account and, for Hello New Home, the data sharing agreement exists. A product without
+its token or base URL shows as not configured and sends nothing whatever its switch says. The nightly job has its
+own copy of the tokens, so each product's row on Settings also shows whether the job's last real run held its
+token, the Live button and its message say plainly when it did not (or when no run has shown it yet), and the job
+exits 1, a failed run on Render, when a product that is not in dry run has no token or base URL in its environment.
+Deploy `group-hq-recompute` from the same commit as the web service and check its latest build after each deploy:
+the job refuses to run (exit 1, nothing sent) when the database is not at its own Alembic head, but a cron still
+on a build from before 0006 would ignore the switches and every hold, and rolling the database back past 0006
+releases every hold and switch. `ORDRIS_BASE_URL` is `https://ordris.io`, which stays true after Ordris moves to Render.
 
 ## Guards worth knowing about
 
@@ -70,5 +82,20 @@ agreement exists. `ORDRIS_BASE_URL` is `https://ordris.io`, which stays true aft
   person is looked up in every live product and only empty product ids are filled; anyone already a mentee on the
   programme (whatever the status) is skipped and named; with Grant access now ticked and a cleared payment, the
   mentee's Recompute runs. Every write is audited, and the batch itself is a `mentee.import` audit row.
+- **Product switches** (`/settings`): Live, Dry run, or back to the environment default, per product. Every change
+  is a `settings.product_switch` audit row (who, and the switch and state before and after). The mentee import
+  page and the run form show each product's state as the switches leave it. Dry run takes effect at once, a run
+  already under way included (from the next person it reaches); Live waits for the next run.
+- **Pause and Resume.** Revoke all ends every mentee row of the person, so the nightly rule agrees; a grant
+  revoked any other way would simply be granted back by the next recompute while the payments support it. Pause
+  is the switch for that: on a grant (its page or the mentee's Grants tab) or for all of a person's access
+  (Pause all access on the mentee's Grants tab), it revokes in the product now through the outbox and holds the
+  grant, so the recompute leaves it revoked whatever is paid, new grants included for a paused person. The
+  mentee rows are left as they are. Resume clears the hold and recomputes the person at once; the re-grant goes
+  out under a new idempotency key (`...:after:<the pause's revoke call>`), so the product is asked again. Held
+  grants are marked on the mentee, person, grant and Grants pages (filter: held). A grant paused on its own stays
+  paused when all access resumes. The reason typed on Pause stays in Group HQ: the product is told only
+  `Group HQ: paused (grant <id>)`. A pause whose revoke did not reach the product (failed, given up, blocked or not
+  configured) is reported as an error, since the product may still give access; one that gave up needs Retry.
 - Login throttling lives in the `login_attempts` table (per address, per address and email, and per
   account), so it survives deploys and cannot be reset by a forged `X-Forwarded-For`.

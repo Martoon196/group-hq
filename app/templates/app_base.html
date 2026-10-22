@@ -14,6 +14,7 @@
       <a href="/franchise"{% if section == "franchise" %} class="is-active"{% endif %}>Franchise</a>
       <a href="/sellers"{% if section == "sellers" %} class="is-active"{% endif %}>Sellers</a>
       <a href="/audit"{% if section == "audit" %} class="is-active"{% endif %}>Audit</a>
+      <a href="/settings"{% if section == "settings" %} class="is-active"{% endif %}>Settings</a>
       {% block sidenav %}{% endblock %}
       {% if s.connectors_dry_run %}<span class="side-note">Connectors in dry run: nothing is sent to a product.</span>{% endif %}
     </nav>

@@ -60,7 +60,7 @@ from ..auth import check_origin, normalise_email, require_admin
 from ..db import get_db
 from ..models import (FRANCHISE_PAYMENT_BASES, OPPORTUNITY_STAGES, PAYMENT_METHODS, Activity, CommissionEntry, ConnectorCall,
                       FranchiseOpportunity, FranchisePayment, Mentee, Person, PostcodeDistrict, Programme, Seller, Task, User, utcnow)
-from ..services import followups, packs
+from ..services import followups, packs, settings
 from ..services import territory_rules as tr
 from ..services.audit import audit, changes
 from ..services.connectors import ConnectorError, HNHConnector, product_dry_run
@@ -453,7 +453,7 @@ def _page(request: Request, db: Session, user: User, opportunity: FranchiseOppor
         "fee_waived": is_fee_waived(opportunity), "activities": sorted(opportunity.activities, key=lambda a: (a.at, a.id), reverse=True),
         "tasks": tasks, "emails": emails, "payments": _payments(db, opportunity), "entries": entries,
         "smtp_configured": followups.smtp_configured(), "hnh_call": _hnh_call(db, opportunity),
-        "hnh_dry_run": product_dry_run("hnh"), "ledger_available": _ledger_function() is not None,
+        "hnh_dry_run": product_dry_run("hnh", switches=settings.product_switches(db)), "ledger_available": _ledger_function() is not None,
         "activity_choices": ACTIVITY_CHOICES, "methods": [(k, v) for k, v in METHOD_LABELS.items()],
         "payment_vals": payment_vals or {"basis": "upfront", "trail_month": "", "amount": "", "paid_at": today.isoformat(), "cleared_at": "",
                                          "method": "manual", "reference": "", "notes": ""},
@@ -993,7 +993,7 @@ def hnh_handoff(opportunity_id: int, request: Request, dry_run: str = Form(""), 
     if not fee_waived and _cleared_upfront(db, opportunity) is None:
         return go(back, err="The upfront fee has not cleared (or was refunded), so the partner cannot be created yet. Mark the "
                             "payment cleared first.")
-    dry = bool(dry_run) or product_dry_run("hnh")
+    dry = bool(dry_run) or product_dry_run("hnh", switches=settings.product_switches(db))
     stand_in = SimpleNamespace(id=opportunity.id, kind="partner_seat", value="area", remote_ref=None)
     payload = {"email": normalise_email(person.person_key), "tier": "area", "postcodes": [str(c) for c in opportunity.districts],
                "franchise": {"fee_waived": fee_waived}, "opportunity_id": opportunity.id}

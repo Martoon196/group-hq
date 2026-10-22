@@ -43,7 +43,7 @@ from ..routers.people import (LINK_COLUMNS, LINK_FIELDS, find_person_by_key, lin
                               person_key_problem, person_snapshot)
 from . import settings
 from .audit import audit, changes
-from .connectors import CONNECTORS, BaseConnector, ConnectorError, open_connectors, product_dry_run
+from .connectors import BaseConnector, ConnectorError, open_connectors, product_dry_run
 from .connectors.kp import KPConnector
 from .keys import normalise_email
 
@@ -490,7 +490,7 @@ def run_batch(db: Session, user: User, entries: list[Entry], shared: Shared) -> 
     """Import every entry (the caller has already capped the batch at MAX_BATCH), then one audit row for the
     batch as a whole."""
     outcomes: list[Outcome] = []
-    with open_connectors() as connectors:
+    with open_connectors(switches=settings.product_switches(db)) as connectors:
         runner = LookupRunner(connectors)
         for entry in entries:
             outcomes.append(import_one(db, user, entry, shared, runner, connectors))
@@ -513,10 +513,11 @@ def run_batch(db: Session, user: User, entries: list[Entry], shared: Shared) -> 
 
 
 # ---- what the page shows before anything is ticked ---------------------------------------------------------
-def kp_listing(offset: int = 0, limit: int = KP_PAGE) -> dict:
+def kp_listing(offset: int = 0, limit: int = KP_PAGE, *, switches: dict | None = None) -> dict:
     """One page of Key Properties sourcers, fetched live, or why there is none: state is ok, dry_run,
-    not_configured or failed. Never raises, so the rest of the import page always renders."""
-    connector = KPConnector.from_config(dry_run=product_dry_run("kp"))
+    not_configured or failed. Never raises, so the rest of the import page always renders. `switches` are the
+    product switches (settings.product_switches)."""
+    connector = KPConnector.from_config(dry_run=product_dry_run("kp", switches=switches))
     listing: dict = {"state": "", "rows": [], "total": None, "offset": max(0, offset), "limit": limit, "detail": "", "plan": None}
     try:
         if connector.dry_run:
@@ -552,15 +553,10 @@ def register_badges(db: Session, emails: list[str]) -> dict[str, dict]:
     return out
 
 
-def product_modes() -> list[dict]:
-    """How each product will be treated by a batch run now: live, dry run, or not configured."""
-    modes = []
-    for product in LOOKUP_ORDER:
-        dry = product_dry_run(product)
-        connector = CONNECTORS[product].from_config(dry_run=dry)
-        state = "dry_run" if dry else ("live" if connector.configured else "not_configured")
-        modes.append({"product": product, "name": settings.product_name(product), "state": state})
-    return modes
+def product_modes(db: Session) -> list[dict]:
+    """How each product will be treated by a batch run now: live, dry run, or not configured, as the product
+    switches on the Settings screen and the environment decide it (settings.product_modes)."""
+    return settings.product_modes(db, LOOKUP_ORDER)
 
 
 def today() -> date:

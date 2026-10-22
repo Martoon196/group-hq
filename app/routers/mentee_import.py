@@ -21,6 +21,7 @@ from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import Programme, User
 from ..services import mentee_import as imp
+from ..services import settings
 from ..templating import render
 from .mentees import MODE_LABELS, engine_available, money, pence_to_amount
 from .people import parse_int
@@ -39,7 +40,7 @@ def _defaults(db: Session) -> dict:
 
 def _form_page(request: Request, db: Session, user: User, vals: dict, *, offset: int = 0, picked: set[str] | None = None,
                error: str = "", status: int = 200) -> HTMLResponse:
-    listing = imp.kp_listing(offset)
+    listing = imp.kp_listing(offset, switches=settings.product_switches(db))
     badges = imp.register_badges(db, [row["email"] for row in listing["rows"]])
     programmes = db.query(Programme).order_by(Programme.active.desc(), Programme.name).all()
     total = listing["total"]
@@ -47,7 +48,7 @@ def _form_page(request: Request, db: Session, user: User, vals: dict, *, offset:
     ctx = {
         "user": user, "section": "mentees_import", "title_text": TITLE, "vals": vals, "listing": listing, "badges": badges,
         "picked": picked or set(), "programmes": programmes, "modes": list(MODE_LABELS.items()),
-        "product_modes": imp.product_modes(), "max_batch": imp.MAX_BATCH, "engine_available": engine_available(),
+        "product_modes": imp.product_modes(db), "max_batch": imp.MAX_BATCH, "engine_available": engine_available(),
         "prev_offset": max(0, listing["offset"] - listing["limit"]) if listing["offset"] > 0 else None,
         "next_offset": shown_to if (total is not None and shown_to < total) or (total is None and len(listing["rows"]) >= listing["limit"]) else None,
     }
@@ -92,7 +93,7 @@ def import_run(request: Request, pick: list[str] = Form(default=[]), kp_email: l
     ctx = {
         "user": user, "section": "mentees_import", "title_text": TITLE, "outcomes": outcomes, "shared": shared,
         "amount_text": money(pence_to_amount(shared.pence)) if shared.pence else "", "mode_labels": MODE_LABELS,
-        "product_modes": imp.product_modes(), "link_labels": imp.LINK_LABELS,
+        "product_modes": imp.product_modes(db), "link_labels": imp.LINK_LABELS,
         "counts": {
             "people": len(outcomes),
             "created": sum(o.person == "created" for o in outcomes),

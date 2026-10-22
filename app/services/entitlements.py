@@ -39,6 +39,17 @@ confirmed, so a failed or dry-run extension is sent on the next run.
 The database cannot hold a "blocked" state (entitlement_grants.state is checked against
 pending|active|revoked|failed), so a 409 paid_subscription becomes state failed with last_error
 BLOCKED_ERROR; is_blocked() reads that back and the recompute never retries it on its own.
+
+A hold (Pause on a grant, or Pause all access for a person) overrides the rule: a held grant that is active is
+revoked through the outbox like any other revoke, and a held grant that is not active is left alone ("held"),
+whatever the payments say, so the nightly run never grants it back. Resume clears the hold and recomputes the
+person at once. A revoke of a grant that has been revoked and granted again before carries
+:after:<the grant call id>, so pausing, resuming and pausing again on one day asks the product every time.
+
+Which products are sent anything is connectors.product_dry_run with the product switches from the database
+(settings.product_switches): the web service and the nightly job read the same switches. A run reads them as it
+starts, and again before each person so that a product switched to Dry run while a run is under way is sent
+nothing more; a switch to Live waits for the next run.
 """
 from __future__ import annotations
 
@@ -58,7 +69,8 @@ from .. import config
 from ..models import ConnectorCall, EntitlementGrant, Mentee, Payment, Person, Programme, User, utcnow
 from . import settings
 from .audit import _jsonable, audit
-from .connectors import BaseConnector, ConnectorError, ConnectorResult, open_connectors
+from .connectors import (CONNECTORS, BaseConnector, ConnectorError, ConnectorResult, open_connectors, product_dry_run,
+                         product_mode)
 from .connectors.pp import PP_TIERS, pp_tier
 
 MAX_ATTEMPTS = 5
@@ -71,7 +83,7 @@ BLOCKED_ERROR = "paid subscription"
 PROGRAMME_SOURCE = "programme:"
 JOB_ACTOR = "job:recompute"
 
-ACTIONS = ("grant", "extend", "revoke", "noop", "blocked", "gave_up", "not_started")
+ACTIONS = ("grant", "extend", "revoke", "noop", "blocked", "gave_up", "not_started", "held")
 OUTCOMES = ("sent", "planned", "failed", "blocked", "skipped")
 
 
@@ -149,6 +161,25 @@ def is_blocked(grant: EntitlementGrant) -> bool:
     return grant.state == "failed" and grant.last_error == BLOCKED_ERROR
 
 
+def hold_of(grant: EntitlementGrant, person: Person | None = None) -> dict | None:
+    """The hold keeping this grant off, for the screens and the rule: the grant's own Pause first, then the
+    person's Pause all access. None when neither is set."""
+    if grant.held_at is not None:
+        return {"scope": "grant", "at": grant.held_at, "by": grant.held_by, "reason": grant.held_reason}
+    person = person if person is not None else grant.person
+    if person is not None and person.access_held_at is not None:
+        return {"scope": "person", "at": person.access_held_at, "by": person.access_held_by,
+                "reason": person.access_held_reason}
+    return None
+
+
+def _hold_since(grant: EntitlementGrant, person: Person) -> datetime | None:
+    """When the earliest hold on the grant began. The revoke it enforces ends access at midnight that day, so a
+    revoke that fails is retried under the same key on the following nights."""
+    stamps = [t for t in (grant.held_at, person.access_held_at) if t is not None]
+    return min(stamps) if stamps else None
+
+
 def display_state(grant: EntitlementGrant) -> str:
     """What the screens show: the database state, or "blocked" for a paid-subscription refusal."""
     return "blocked" if is_blocked(grant) else grant.state
@@ -161,8 +192,12 @@ def grant_key(grant_id: int, ends_at: datetime | None, after_revoke: int | None 
     return f"{key}:after:{after_revoke}" if after_revoke else key
 
 
-def revoke_key(grant_id: int, ends_at: datetime | None) -> str:
-    return f"grant:{grant_id}:revoke:{ends_at.isoformat() if ends_at else 'none'}"
+def revoke_key(grant_id: int, ends_at: datetime | None, after_grant: int | None = None) -> str:
+    """after_grant is the id of the succeeded grant or extension that followed the grant's last succeeded revoke,
+    when there is one: a revoke that follows a re-grant must never match the earlier revoke's row (pause, resume
+    and pause again on one day enforce the same end)."""
+    key = f"grant:{grant_id}:revoke:{ends_at.isoformat() if ends_at else 'none'}"
+    return f"{key}:after:{after_grant}" if after_grant else key
 
 
 # ---- what a run produces -----------------------------------------------------------------
@@ -174,7 +209,7 @@ class Decision:
     product: str
     kind: str
     value: str
-    action: str                 # grant | extend | revoke | noop | blocked | gave_up | not_started
+    action: str                 # grant | extend | revoke | noop | blocked | gave_up | not_started | held
     outcome: str                # sent | planned | failed | blocked | skipped
     ends_at: datetime | None = None
     key: str = ""
@@ -196,6 +231,9 @@ class RunSummary:
     people: int = 0
     decisions: list[Decision] = field(default_factory=list)
     note: str = ""              # why a run did nothing (another run held the lock)
+    products: dict = field(default_factory=dict)    # {product: live | dry_run | not_configured} as this run saw them
+    configured: dict = field(default_factory=dict)  # {product: True when this process holds its token and base URL}
+    stopped: list = field(default_factory=list)     # products switched to Dry run on Settings while the run was under way
 
     @property
     def actions(self) -> Counter:
@@ -221,6 +259,8 @@ class RunSummary:
         a, o = self.actions, self.outcomes
         mode = "DRY RUN, nothing sent" if self.dry_run else "live"
         extra = f", {self.unconfigured} not configured" if self.unconfigured else ""
+        if a.get("held"):
+            extra += f", {a['held']} held"
         if self.note:
             extra += f"; {self.note}"
         return (f"recompute {self.today.isoformat()} ({mode}): {self.people} people, {len(self.decisions)} decisions: "
@@ -374,11 +414,19 @@ def _find_or_create_grant(db: Session, person: Person, key: tuple, target: _Targ
     return grant
 
 
-def _decide(grant: EntitlementGrant, target: _Target, today: date) -> tuple[str, datetime | None]:
+def _decide(grant: EntitlementGrant, target: _Target, today: date,
+            held: datetime | None = None, remote: bool = False) -> tuple[str, datetime | None]:
     """(action, ends_at) for one grant. A grant that is not yet active takes its intended window as a side
-    effect; an active grant keeps the window the product confirmed until _execute confirms a new one."""
+    effect; an active grant keeps the window the product confirmed until _execute confirms a new one. A held
+    grant (held is when the hold began) is revoked while active, or while the product still holds a window for
+    it (remote: an extension failed until the grant was marked failed), and otherwise left exactly as it is."""
     end = target.ends
     ends_at = at_midnight(end)
+    if held is not None:
+        if grant.state == "active" or remote:
+            stop = at_midnight(held.date())
+            return "revoke", stop if grant.ends_at is None or grant.ends_at > stop else grant.ends_at
+        return "held", grant.ends_at
     if is_blocked(grant):
         return "blocked", grant.ends_at
     if end is not None and end > today:
@@ -446,6 +494,28 @@ def _last_succeeded_revoke(db: Session, grant: EntitlementGrant) -> int | None:
     return row[0] if row else None
 
 
+def _product_holds(db: Session, grant: EntitlementGrant) -> bool:
+    """Does the product still hold a window for this grant, as far as the outbox knows? True when a grant or an
+    extension succeeded after the last succeeded revoke: a failed extension leaves the old window in place even
+    once the grant reads failed."""
+    last_revoke = _last_succeeded_revoke(db, grant) or 0
+    return (db.query(ConnectorCall.id).filter(ConnectorCall.grant_id == grant.id, ConnectorCall.action.in_(("grant", "extend")),
+                                              ConnectorCall.status == "succeeded", ConnectorCall.id > last_revoke)
+            .first()) is not None
+
+
+def _regrant_since_revoke(db: Session, grant: EntitlementGrant) -> int | None:
+    """The last succeeded grant or extension sent after the grant's last succeeded revoke, when it has been
+    revoked before; None for a grant never revoked, so a first revoke keeps the plain key."""
+    last_revoke = _last_succeeded_revoke(db, grant)
+    if last_revoke is None:
+        return None
+    row = (db.query(ConnectorCall.id).filter(ConnectorCall.grant_id == grant.id, ConnectorCall.action.in_(("grant", "extend")),
+                                              ConnectorCall.status == "succeeded", ConnectorCall.id > last_revoke)
+           .order_by(ConnectorCall.id.desc()).first())
+    return row[0] if row else None
+
+
 def _floor_refusal(action: str, ends_at: datetime | None) -> str:
     """A grant or extension must end in the real future, whatever as-of date the caller used."""
     if action == "revoke":
@@ -458,7 +528,7 @@ def _floor_refusal(action: str, ends_at: datetime | None) -> str:
 def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Target, action: str,
              ends_at: datetime | None, *, dry_run: bool, connectors: dict[str, BaseConnector], actor,
              reason: str = "") -> Decision:
-    key = (revoke_key(grant.id, ends_at) if action == "revoke"
+    key = (revoke_key(grant.id, ends_at, _regrant_since_revoke(db, grant)) if action == "revoke"
            else grant_key(grant.id, ends_at, _last_succeeded_revoke(db, grant)))
     decision = Decision(person_id=person.id, person_key=person.person_key, grant_id=grant.id, product=grant.product,
                         kind=grant.kind, value=grant.value, action=action, outcome="skipped", ends_at=ends_at, key=key,
@@ -568,6 +638,8 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
         grant.ends_at = ends_at                 # the product has confirmed this window
         if target.starts is not None:
             grant.starts_at = at_midnight(target.starts)
+    elif ends_at is not None and (grant.ends_at is None or grant.ends_at > ends_at):
+        grant.ends_at = ends_at                 # a held grant: access stopped on the day the hold began
     grant.last_error = ""
     grant.last_sync_at = utcnow()
     if result.remote_ref:
@@ -624,11 +696,12 @@ def recompute_person(db: Session, person: Person, today: date | None = None, dry
     dry = effective_dry_run(dry_run)
     own_pool = connectors is None
     if own_pool:
-        pool_cm = open_connectors(dry_run=dry)
+        pool_cm = open_connectors(dry_run=dry, switches=settings.product_switches(db))
         connectors = pool_cm.__enter__()
     assert connectors is not None
     try:
         with advisory_lock(db, LOCK_PERSON, person.id):
+            db.refresh(person)      # a Pause all access committed since the person was loaded (mid-run) must count
             targets = targets_for(db, person, today, actor=actor)
             existing = {(g.product, g.kind, g.value): g for g in
                         db.query(EntitlementGrant).filter(EntitlementGrant.person_id == person.id,
@@ -651,8 +724,18 @@ def recompute_person(db: Session, person: Person, today: date | None = None, dry
 
 def _apply_one(db: Session, person: Person, grant: EntitlementGrant, target: _Target, today: date, dry: bool,
                connectors: dict[str, BaseConnector], actor) -> Decision:
-    action, ends_at = _decide(grant, target, today)
+    hold = hold_of(grant, person)
+    held = _hold_since(grant, person)
+    remote = held is not None and grant.state != "active" and _product_holds(db, grant)
+    action, ends_at = _decide(grant, target, today, held, remote)
     db.add(grant)
+    why = "paused" if hold and hold["scope"] == "grant" else "all access paused"
+    if action == "held":
+        return _skip(person, grant, action, ends_at, f"{why}: kept off until resumed", dry)
+    # The revoke a hold enforces tells the product only that Group HQ paused it: the reason typed on the pause
+    # form stays in Group HQ (the grant, the person and the audit rows), since products such as Hello New Home
+    # belong to another company and keep what they are sent.
+    reason = f"Group HQ: {why} (grant {grant.id})" if hold is not None and action == "revoke" else ""
     if action == "blocked":
         return _skip(person, grant, action, ends_at, BLOCKED_ERROR + ": not retried automatically", dry)
     if action == "not_started":
@@ -662,7 +745,8 @@ def _apply_one(db: Session, person: Person, grant: EntitlementGrant, target: _Ta
         return _skip(person, grant, action, ends_at, why, dry)
     if grant.product not in connectors:
         return _skip(person, grant, "noop", ends_at, f"no connector for {grant.product}", dry)
-    return _execute(db, grant, person, target, action, ends_at, dry_run=dry, connectors=connectors, actor=actor)
+    return _execute(db, grant, person, target, action, ends_at, dry_run=dry, connectors=connectors, actor=actor,
+                    reason=reason)
 
 
 def people_to_recompute(db: Session) -> list[Person]:
@@ -683,15 +767,32 @@ def recompute_all(db: Session, today: date | None = None, dry_run: bool | None =
         if not got:
             summary.note = RUN_IN_PROGRESS
             return summary
-        with open_connectors(dry_run=dry) as connectors:
+        switches = settings.product_switches(db)        # the Settings screen's switches, as the run starts
+        modes = [product_mode(p, switches=switches) for p in CONNECTORS]
+        summary.products = {m["product"]: "dry_run" if dry else m["state"] for m in modes}
+        summary.configured = {m["product"]: m["configured"] for m in modes}
+        with open_connectors(dry_run=dry, switches=switches) as connectors:
             for person in people_to_recompute(db):
+                _stop_switched_off(db, connectors, summary)
                 summary.people += 1
                 summary.decisions.extend(recompute_person(db, person, today, dry, actor=actor, connectors=connectors))
     audit(db, actor, "recompute.run", "job:recompute",
           after={"today": today.isoformat(), "dry_run": dry, "people": summary.people,
-                 "actions": dict(summary.actions), "outcomes": dict(summary.outcomes)})
+                 "actions": dict(summary.actions), "outcomes": dict(summary.outcomes), "products": summary.products,
+                 "configured": summary.configured, "stopped": summary.stopped or None})
     db.commit()
     return summary
+
+
+def _stop_switched_off(db: Session, connectors: dict[str, BaseConnector], summary: RunSummary) -> None:
+    """Before each person of a run: a product switched to Dry run on the Settings screen since the run started is
+    sent nothing more by this run (its connector is put in dry run, so its calls are planned). Only that way round:
+    a product switched to Live waits for the next run."""
+    switches = settings.product_switches(db)
+    for product, connector in connectors.items():
+        if not connector.dry_run and product_dry_run(product, switches=switches):
+            connector.dry_run = True
+            summary.stopped.append(product)
 
 
 def revoke_person(db: Session, person: Person, today: date | None = None, dry_run: bool | None = None, *,
@@ -703,7 +804,8 @@ def revoke_person(db: Session, person: Person, today: date | None = None, dry_ru
     today = today or utc_today()
     dry = effective_dry_run(dry_run)
     counts: Counter = Counter()
-    with advisory_lock(db, LOCK_PERSON, person.id), open_connectors(dry_run=dry) as connectors:
+    with advisory_lock(db, LOCK_PERSON, person.id), \
+            open_connectors(dry_run=dry, switches=settings.product_switches(db)) as connectors:
         for mentee in db.query(Mentee).filter(Mentee.person_id == person.id).order_by(Mentee.id).all():
             if mentee.status != "ended":
                 before = {"status": mentee.status}
@@ -740,3 +842,149 @@ def reset_for_retry(db: Session, grant: EntitlementGrant, *, actor: User | str) 
     grant.last_error = ""
     db.add(grant)
     audit(db, actor, "grant.retry", f"grant:{grant.id}", before=before, after=_snapshot(grant))
+
+
+# ---- holds: Pause and Resume -------------------------------------------------------------------------------
+def _actor_label(actor: User | str | None) -> str:
+    return (actor.email if isinstance(actor, User) else str(actor or "system"))[:200]
+
+
+def _grant_hold_fields(grant: EntitlementGrant) -> dict:
+    return {"held_at": grant.held_at, "held_by": grant.held_by or None, "held_reason": grant.held_reason or None}
+
+
+def _person_hold_fields(person: Person) -> dict:
+    return {"access_held_at": person.access_held_at, "access_held_by": person.access_held_by or None,
+            "access_held_reason": person.access_held_reason or None}
+
+
+def _hold_target(grant: EntitlementGrant) -> _Target:
+    return _Target(ends=None, mentee=grant.mentee, programme=None, item={})
+
+
+def _drop_waiting_revokes(db: Session, grant: EntitlementGrant) -> int:
+    """On resume, a revoke still in the outbox (planned in dry run, or failed and waiting for a retry) must never
+    go out later: a never-attempted row is deleted and an attempted one is closed as superseded."""
+    rows = db.query(ConnectorCall).filter(ConnectorCall.grant_id == grant.id, ConnectorCall.action == "revoke",
+                                          ConnectorCall.status != "succeeded").all()
+    for row in rows:
+        if row.attempts == 0:
+            db.delete(row)
+        else:
+            response = dict(row.response) if isinstance(row.response, dict) else {"previous": row.response}
+            response["superseded_by"] = "resume"
+            row.response = response
+            row.status = "failed"
+            db.add(row)
+    return len(rows)
+
+
+def _hold_counts(decisions: list[Decision]) -> dict:
+    """What Pause all access did to each grant, as counts for the screen. A revoke that had already used up its
+    attempts was not sent again ("gave up"), and one refused by the product is "blocked": in both the product may
+    still give access, so neither is counted as already off."""
+    labels = {"sent": "revoked", "planned": "planned", "failed": "failed", "blocked": "blocked"}
+
+    def label(d: Decision) -> str:
+        if d.outcome in labels:
+            return labels[d.outcome]
+        if d.action == "gave_up":
+            return "gave up"
+        if d.detail.startswith("not configured"):
+            return "not configured"
+        return "already off"
+    return dict(Counter(label(d) for d in decisions))
+
+
+def pause_grant(db: Session, grant: EntitlementGrant, today: date | None = None, dry_run: bool | None = None, *,
+                actor: User | str = JOB_ACTOR, reason: str = "") -> Decision:
+    """Pause one grant (the grant's page and the mentee screen). The hold is recorded (grant.pause) and, when the
+    grant is active, it is revoked in its product now through the outbox, exactly as the rule revokes; from then
+    on the recompute keeps it off whatever the payments say, until resume_grant. A product in dry run plans the
+    revoke and the next live run sends it. The reason is kept on the grant and in the audit row; the product is
+    told only "Group HQ: paused (grant <id>)". Commits. Returns the decision for the grant."""
+    today = today or utc_today()
+    dry = effective_dry_run(dry_run)
+    person = grant.person
+    with advisory_lock(db, LOCK_PERSON, person.id), \
+            open_connectors(dry_run=dry, switches=settings.product_switches(db)) as connectors:
+        db.refresh(grant)
+        db.refresh(person)
+        if grant.held_at is None:
+            before = _grant_hold_fields(grant)
+            grant.held_at = utcnow()
+            grant.held_by = _actor_label(actor)
+            grant.held_reason = (reason or "").strip()[:200]
+            db.add(grant)
+            audit(db, actor, "grant.pause", f"grant:{grant.id}", before=before,
+                  after={**_grant_hold_fields(grant), "state": grant.state})
+        decision = _apply_one(db, person, grant, _hold_target(grant), today, dry, connectors, actor)
+        db.commit()
+    return decision
+
+
+def resume_grant(db: Session, grant: EntitlementGrant, today: date | None = None, dry_run: bool | None = None, *,
+                 actor: User | str = JOB_ACTOR) -> list[Decision]:
+    """Clear a grant's hold (grant.resume) and recompute the person at once, so a grant the rule still supports is
+    sent again. The re-grant carries :after:<the pause's revoke call id> in its key, so it is a new call and the
+    product is asked again rather than matched to the row sent before the pause. A revoke still waiting in the
+    outbox is dropped. The grant stays off while the person's Pause all access is on. Commits. Returns the
+    recompute's decisions."""
+    person = grant.person
+    with advisory_lock(db, LOCK_PERSON, person.id):
+        db.refresh(grant)
+        if grant.held_at is not None:
+            before = _grant_hold_fields(grant)
+            grant.held_at, grant.held_by, grant.held_reason = None, "", ""
+            dropped = _drop_waiting_revokes(db, grant)
+            db.add(grant)
+            audit(db, actor, "grant.resume", f"grant:{grant.id}", before=before,
+                  after={**_grant_hold_fields(grant), "dropped_revokes": dropped or None})
+        db.commit()
+    return recompute_person(db, person, today, dry_run, actor=actor)
+
+
+def pause_person(db: Session, person: Person, today: date | None = None, dry_run: bool | None = None, *,
+                 actor: User | str = JOB_ACTOR, reason: str = "") -> dict:
+    """Pause all access (the mentee screen): the person is marked held (person.pause) and every active grant they
+    hold is revoked through its connector now. While the hold is on, the recompute keeps every grant of theirs
+    off, including any a programme would create later. Unlike Revoke all, no mentee is ended, so Resume needs
+    nothing else changed. The reason stays in Group HQ, as for pause_grant. Commits. Returns counts for the
+    screen, for example {"revoked": 3, "already off": 1} (_hold_counts)."""
+    today = today or utc_today()
+    dry = effective_dry_run(dry_run)
+    with advisory_lock(db, LOCK_PERSON, person.id), \
+            open_connectors(dry_run=dry, switches=settings.product_switches(db)) as connectors:
+        db.refresh(person)
+        if person.access_held_at is None:
+            before = _person_hold_fields(person)
+            person.access_held_at = utcnow()
+            person.access_held_by = _actor_label(actor)
+            person.access_held_reason = (reason or "").strip()[:200]
+            db.add(person)
+            audit(db, actor, "person.pause", f"person:{person.id}", before=before, after=_person_hold_fields(person))
+        decisions = [_apply_one(db, person, grant, _hold_target(grant), today, dry, connectors, actor)
+                     for grant in db.query(EntitlementGrant).filter(EntitlementGrant.person_id == person.id)
+                     .order_by(EntitlementGrant.id).all()]
+        db.commit()
+    return _hold_counts(decisions)
+
+
+def resume_person(db: Session, person: Person, today: date | None = None, dry_run: bool | None = None, *,
+                  actor: User | str = JOB_ACTOR) -> list[Decision]:
+    """Clear Pause all access (person.resume) and recompute the person at once; a grant paused on its own stays
+    paused. Revokes still waiting in the outbox for the grants this releases are dropped. Commits. Returns the
+    recompute's decisions."""
+    with advisory_lock(db, LOCK_PERSON, person.id):
+        db.refresh(person)
+        if person.access_held_at is not None:
+            before = _person_hold_fields(person)
+            person.access_held_at, person.access_held_by, person.access_held_reason = None, "", ""
+            released = (db.query(EntitlementGrant).filter(EntitlementGrant.person_id == person.id,
+                                                          EntitlementGrant.held_at.is_(None)).all())
+            dropped = sum(_drop_waiting_revokes(db, grant) for grant in released)
+            db.add(person)
+            audit(db, actor, "person.resume", f"person:{person.id}", before=before,
+                  after={**_person_hold_fields(person), "dropped_revokes": dropped or None})
+        db.commit()
+    return recompute_person(db, person, today, dry_run, actor=actor)

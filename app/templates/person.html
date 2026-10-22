@@ -1,5 +1,6 @@
 {% extends "app_base.html" %}
 {% import "_fields.html" as f %}
+{% import "_hold.html" as hd %}
 {% set title = person.person_key ~ " | Group HQ" %}
 {% block head %}{{ f.styles() }}{% endblock %}
 {% block content %}
@@ -66,6 +67,7 @@
 
     <section class="panel mt-2">
       <div class="panel-head"><h2>Grants</h2>{% if mentees %}<a class="btn btn-ghost btn-sm" href="/mentees/{{ mentees[0].id }}?tab=grants">Manage</a>{% endif %}</div>
+      {% if person.access_held_at %}<div class="hold-banner"><span>All access is paused since {{ person.access_held_at | uk }}{% if person.access_held_by %} by {{ person.access_held_by }}{% endif %}{% if person.access_held_reason %}: {{ person.access_held_reason }}{% endif %}. <span class="small">Every grant is kept revoked until it is resumed{% if mentees %} on the mentee page{% endif %}.</span></span></div>{% endif %}
       {% if grants %}
       <div class="table-scroll">
       <table class="data">
@@ -75,7 +77,7 @@
         <tr>
           <td>{{ product_name(g.product) }}</td>
           <td>{{ g.kind|replace("_", " ") }}: <code>{{ g.value }}</code></td>
-          <td><span class="status status-{{ g.state }}">{{ g.state }}</span></td>
+          <td><span class="status status-{{ g.state }}">{{ g.state }}</span>{{ hd.pill(hold_of(g, person)) }}</td>
           <td class="nowrap">{{ g.ends_at | uk("%d %b %Y") or "open" }}</td>
         </tr>
         {% endfor %}

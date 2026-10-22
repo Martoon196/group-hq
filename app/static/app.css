@@ -142,6 +142,18 @@ table.data td.detail { max-width: 46ch; word-break: break-word; }
 .chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .chip { background: var(--mist); border: 1px solid var(--line); border-radius: 999px; padding: .2rem .6rem; font-size: .82rem; font-weight: 700; }
 
+/* Product modes (Settings, the run form) and held grants, the same on every screen */
+.status-live { background: #E3F5EA; color: #17814A; }
+.status-dry_run { background: #E8EEFF; color: #2B4A9B; }
+.status-not_configured { background: #EEE; color: #666; }
+.status-held { background: #EFE3FA; color: #5B2A86; }
+.chip-live { background: #E3F5EA; border-color: #BFE3CD; color: #17814A; }
+.chip-dry_run { background: #E8EEFF; border-color: #C9D5F5; color: #2B4A9B; }
+.chip-not_configured { background: #EEE; color: #666; }
+.hold-banner { border-radius: 10px; padding: .8rem 1rem; margin: 0 0 1rem; background: #EFE3FA; color: #5B2A86; font-weight: 700; display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.hold-banner form { margin: 0; }
+.hold-banner .small { font-weight: 400; }
+
 /* Login and authenticator screens */
 .login-body { display: grid; place-items: center; min-height: 100vh; padding: 1rem; }
 .login-card { background: var(--paper); border-radius: var(--radius); box-shadow: var(--shadow); padding: 2rem; width: min(440px, 100%); }

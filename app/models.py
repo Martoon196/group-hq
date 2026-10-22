@@ -60,6 +60,11 @@ class Person(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     phone: Mapped[str] = mapped_column(String(40), default="", nullable=False)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Pause all access (the mentee screen): while set, every grant the person holds is kept revoked by the
+    # recompute, new ones included, until it is resumed (alembic/versions/0006_admin_switches.py).
+    access_held_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    access_held_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    access_held_reason: Mapped[str] = mapped_column(String(200), default="", nullable=False)
 
     mentees: Mapped[list["Mentee"]] = relationship(back_populates="person")
     grants: Mapped[list["EntitlementGrant"]] = relationship(back_populates="person")
@@ -178,6 +183,11 @@ class EntitlementGrant(TimestampMixin, Base):
     state: Mapped[str] = mapped_column(String(10), default="pending", nullable=False)  # pending | active | revoked | failed
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # A manual hold (Pause on the grant): revoked in the product when it is set and kept revoked by the
+    # recompute, whatever the payments say, until Resume clears it.
+    held_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    held_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    held_reason: Mapped[str] = mapped_column(String(200), default="", nullable=False)
 
     person: Mapped[Person] = relationship(back_populates="grants")
     mentee: Mapped[Mentee | None] = relationship(back_populates="grants")
@@ -223,6 +233,17 @@ class AuditLog(Base):
     after: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
 
     user: Mapped["User | None"] = relationship()
+
+
+class AppSetting(Base):
+    """A switch flipped on the Settings screen, keyed by name, with its value as JSON: product_switch.pp holds
+    "live" or "dry_run". Only what has been changed in the app lives here; everything else is a code default in
+    app.services.settings. Every change is audited (alembic/versions/0006_admin_switches.py)."""
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[dict | list | int | float | str | None] = mapped_column(JSONB, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
 
 
 class User(TimestampMixin, Base):

@@ -1,5 +1,6 @@
 {% extends "app_base.html" %}
 {% import "grants/_run_form.html" as rf %}
+{% import "_hold.html" as hd %}
 {% set title = "Grants | Group HQ" %}
 {% block head %}
 <style>
@@ -29,14 +30,14 @@
   <section class="panel">
     <div class="panel-head"><h2>Run the nightly recompute now</h2></div>
     <p class="help">The rule: paid in full gives 12 months from the start date once a payment has cleared; monthly gives access until the latest cleared period ends plus 7 days of grace. Each run grants, extends or revokes through the products and records every call. The cron runs this at 03:10 UTC.</p>
-    {{ rf.run_form("/grants/recompute", "everyone", today) }}
+    {{ rf.run_form("/grants/recompute", "everyone", today, product_modes) }}
   </section>
   <section class="panel">
     <h2>By state</h2>
     <div class="state-counts">
       {% for st in states %}<a href="/grants?state={{ st }}"{% if filters.state == st %} class="is-on"{% endif %}><span class="chip">{{ counts[st] }} {{ st }}</span></a>{% endfor %}
     </div>
-    <p class="help">Blocked means the product refused because the person is on a live paid subscription: comping them would stop their revenue, so Group HQ never retries it on its own. Failed grants are retried on each run up to {{ max_attempts }} attempts; after that, press Retry on the grant.</p>
+    <p class="help">Blocked means the product refused because the person is on a live paid subscription: comping them would stop their revenue, so Group HQ never retries it on its own. Failed grants are retried on each run up to {{ max_attempts }} attempts; after that, press Retry on the grant. Held means paused by hand, on the grant or with Pause all access for the person: it is kept revoked whatever is paid until it is resumed.</p>
   </section>
 </div>
 
@@ -87,13 +88,14 @@
     {% for g in grants %}
     {% set call = latest.get(g.id) %}
     {% set shown = display_state(g) %}
+    {% set hold = hold_of(g) %}
     <tr>
       <td><a href="/people/{{ g.person_id }}"><strong>{{ g.person.name or g.person.person_key }}</strong></a>{% if g.person.name %}<br><span class="small muted">{{ g.person.person_key }}</span>{% endif %}</td>
       <td>{{ product_name(g.product) }}</td>
       <td><a href="/grants/{{ g.id }}">{{ g.kind|replace("_", " ") }} <code>{{ g.value }}</code></a>{% if g.reason %}<br><span class="small muted">{{ g.reason }}</span>{% endif %}</td>
       <td class="nowrap">{{ g.starts_at | date }}</td>
       <td class="nowrap">{% if g.ends_at %}{{ g.ends_at | date }}{% if g.ends_at.date() <= today and g.state == "active" %} <span class="small muted">(due)</span>{% endif %}{% else %}<span class="muted">-</span>{% endif %}</td>
-      <td><span class="status status-{{ shown }}">{{ shown }}</span></td>
+      <td><span class="status status-{{ shown }}">{{ shown }}</span>{{ hd.pill(hold) }}</td>
       <td class="small">{{ g.remote_ref or "" }}</td>
       <td class="nowrap small">{{ g.last_sync_at | uk("%d %b %H:%M") }}</td>
       <td>{% if call %}{{ call.attempts }}/{{ max_attempts }} <span class="small muted">{{ call.status }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>

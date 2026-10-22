@@ -28,13 +28,13 @@
 </div>
 
 <section class="panel">
-  <div class="panel-head"><h2>What a batch does in each product now</h2></div>
+  <div class="panel-head"><h2>What a batch does in each product now</h2><a class="btn btn-ghost btn-sm" href="/settings">Product switches</a></div>
   <div class="chips">
     {% for m in product_modes %}
     <span class="chip {{ 'chip-ok' if m.state == 'live' else ('chip-dry' if m.state == 'dry_run' else 'chip-off') }}">{{ m.name }}: {{ {"live": "live", "dry_run": "dry run", "not_configured": "not configured"}[m.state] }}</span>
     {% endfor %}
   </div>
-  <p class="help">Each person's email is looked up in every live product and only the product ids still empty on their record are filled, so an id you set by hand is never overwritten. A product in dry run is not asked, and its grants are planned rather than sent. A lookup that fails is reported for that person and the batch carries on.</p>
+  <p class="help">Each person's email is looked up in every live product and only the product ids still empty on their record are filled, so an id you set by hand is never overwritten. A product in dry run is not asked, and its grants are planned rather than sent. Each product follows its Live / Dry run switch on Settings. A lookup that fails is reported for that person and the batch carries on.</p>
 </section>
 
 <form method="post" action="/mentees/import" class="form mt-2" data-submit-once>

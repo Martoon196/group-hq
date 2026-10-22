@@ -31,7 +31,7 @@ app = FastAPI(title="Group HQ", lifespan=lifespan, docs_url=None, redoc_url=None
 app.mount("/assets", StaticFiles(directory=str(config.APP_DIR / "static")), name="assets")
 
 from .routers import (audit, auth, dashboard, franchise, grants, mentee_import, mentees, people, programmes,  # noqa: E402  (after templates exist)
-                      sellers, territories)
+                      sellers, settings, territories)
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
@@ -44,6 +44,7 @@ app.include_router(franchise.router)
 app.include_router(sellers.router)
 app.include_router(territories.router)
 app.include_router(audit.router)
+app.include_router(settings.router)
 
 NO_STORE_PREFIXES = ("/login", "/password")
 

@@ -1,5 +1,6 @@
 {% extends "app_base.html" %}
 {% import "grants/_run_form.html" as rf %}
+{% import "_hold.html" as hd %}
 {% set title = "Grant " ~ grant.id ~ " | Group HQ" %}
 {% block head %}
 <style>
@@ -20,12 +21,22 @@
     {% if grant.state == "failed" or grant.last_error %}
     <form method="post" action="/grants/{{ grant.id }}/retry" data-confirm="Retry this grant now?{% if shown == 'blocked' %} The person was on a paid subscription last time; only retry if that has changed.{% endif %}"><label class="small"><input type="checkbox" name="dry_run" value="1"> dry run</label> <button class="btn btn-primary btn-sm" type="submit">Retry</button></form>
     {% endif %}
+    {% if not hold %}
+    <form method="post" action="/grants/{{ grant.id }}/pause" class="row-actions" data-confirm="Pause this grant? It is revoked in {{ product_name(grant.product) }} now and stays off, whatever is paid, until you resume it."><input type="hidden" name="next" value="/grants/{{ grant.id }}"><input name="reason" maxlength="200" placeholder="Reason (optional, stays in Group HQ)" aria-label="Reason for pausing, kept in Group HQ and not sent to the product" style="width:auto"> <button class="btn btn-ghost btn-sm" type="submit">Pause</button></form>
+    {% endif %}
   </div>
 </div>
 
+{% if hold %}
+<div class="hold-banner">
+  <span>{% if hold.scope == "grant" %}Paused{% else %}All access for {{ person.person_key }} is paused{% endif %} since {{ hold.at | uk }}{% if hold.by %} by {{ hold.by }}{% endif %}{% if hold.reason %}: {{ hold.reason }}{% endif %}. <span class="small">The recompute keeps this grant revoked, whatever is paid, until it is resumed.</span></span>
+  {% if hold.scope == "grant" %}{{ hd.buttons(grant, hold, "/grants/" ~ grant.id) }}{% elif mentee %}<a class="btn btn-ghost btn-sm" href="/mentees/{{ mentee.id }}?tab=grants">Resume on the mentee page</a>{% endif %}
+</div>
+{% endif %}
+
 <div class="two-col">
   <section class="panel">
-    <h2>Grant {{ grant.id }} <span class="status status-{{ shown }}">{{ shown }}</span></h2>
+    <h2>Grant {{ grant.id }} <span class="status status-{{ shown }}">{{ shown }}</span>{% if hold %} <span class="status status-held">held</span>{% endif %}</h2>
     <dl class="kv">
       <dt>Person</dt><dd><a href="/people/{{ person.id }}">{{ person.person_key }}</a>{% if person.name %} ({{ person.name }}){% endif %}</dd>
       <dt>Programme</dt><dd>{% if mentee %}<a href="/mentees/{{ mentee.id }}">{{ mentee.programme.name }}</a>, {{ "paid in full" if mentee.payment_mode == "full" else "paying monthly" }}, started {{ mentee.start_date | date }}, mentee {{ mentee.status }}{% else %}<span class="muted">none (source {{ grant.source or "manual" }})</span>{% endif %}</dd>
@@ -42,7 +53,7 @@
   <section class="panel">
     <h2>Recompute this person</h2>
     <p class="help">Applies the rule to every grant {{ person.person_key }} holds, not only this one.</p>
-    {{ rf.run_form("/grants/" ~ grant.id ~ "/recompute", person.person_key, today) }}
+    {{ rf.run_form("/grants/" ~ grant.id ~ "/recompute", person.person_key, today, product_modes) }}
   </section>
 </div>
 

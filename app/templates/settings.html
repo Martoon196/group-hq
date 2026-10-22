@@ -1,0 +1,68 @@
+{% extends "app_base.html" %}
+{% set title = "Settings | Group HQ" %}
+{% block head %}
+<style>
+  .switch-form { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+  .switch-form form { margin: 0; }
+  .switch-form .btn[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); cursor: default; transform: none; }
+  table.data td.switch { min-width: 15rem; }
+  .floor { border-radius: 10px; padding: .8rem 1rem; margin: 0 0 1.2rem; background: #E8EEFF; color: #2B4A9B; font-weight: 700; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Admin</span>
+  <h1>Settings</h1>
+</div>
+
+<section class="panel" id="products">
+  <div class="panel-head"><h2>Product switches</h2><a class="btn btn-ghost btn-sm" href="/audit?q=product:">Change history</a></div>
+  {% if floor %}<div class="floor">CONNECTORS_DRY_RUN=1 on this server: every product is in dry run whatever its switch says. Switches can still be set here and take effect once that is removed.</div>{% endif %}
+  <p class="help">Live sends grants, extensions and revokes to the product; Dry run records and shows each call and sends nothing, a run already under way included. A product whose switch has never been set follows the server's CONNECTORS_DRY_RUN list{% if env_list %} (<code>{{ env_list }}</code>){% endif %}. A product without its token or base URL sends nothing whatever the switch says, and shows as not configured. The nightly recompute and every button in Group HQ read these switches; the nightly job has its own copy of the tokens, shown on each row as of its last run.</p>
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Product</th><th>Now</th><th>Switch</th><th>Decided by</th><th>Token and base URL</th><th>Last changed</th></tr></thead>
+    <tbody>
+    {% for m in modes %}
+    <tr>
+      <td><strong>{{ m.name }}</strong></td>
+      <td><span class="status status-{{ m.state }}">{{ state_labels[m.state] }}</span></td>
+      <td class="switch">
+        <div class="switch-form">
+          <form method="post" action="/settings/products/{{ m.product }}" data-confirm="{{ m.confirm.live }}"><input type="hidden" name="mode" value="live"><button class="btn btn-ghost btn-sm" type="submit"{% if m.switch == "live" %} aria-pressed="true"{% endif %}>Live</button></form>
+          <form method="post" action="/settings/products/{{ m.product }}"{% if m.confirm.dry_run %} data-confirm="{{ m.confirm.dry_run }}"{% endif %}><input type="hidden" name="mode" value="dry_run"><button class="btn btn-ghost btn-sm" type="submit"{% if m.switch == "dry_run" %} aria-pressed="true"{% endif %}>Dry run</button></form>
+          {% if m.switch %}<form method="post" action="/settings/products/{{ m.product }}"{% if m.confirm.default %} data-confirm="{{ m.confirm.default }}"{% endif %}><input type="hidden" name="mode" value="default"><button class="btn btn-ghost btn-sm" type="submit">Use the default{% if not floor %} ({{ "dry run" if m.default == "dry_run" else "live" }}){% endif %}</button></form>{% endif %}
+        </div>
+      </td>
+      <td class="small">
+        {% if m.source == "floor" %}CONNECTORS_DRY_RUN=1 (every product){% if m.switch %}; switch saved as {{ switch_labels[m.switch]|lower }}{% endif %}
+        {% elif m.source == "switch" %}The switch: {{ switch_labels[m.switch]|lower }}
+        {% else %}Not switched yet: the server default is {{ "dry run" if m.default == "dry_run" else "live" }}{% endif %}
+      </td>
+      <td class="small">
+        This server: {% if m.configured %}<span class="ok-text">Set</span>{% else %}<span class="bad-text">Missing</span>{% if m.state != "not_configured" %}: going live would send nothing until it is set{% endif %}{% endif %}
+        <br>Nightly job: {% if m.nightly %}<span class="ok-text">Set</span>{% elif m.nightly is sameas false %}<span class="bad-text">Missing</span>{% else %}<span class="muted">not seen yet</span>{% endif %}
+        {% if m.state == "live" and m.live.kind == "missing" %}<br><span class="bad-text">The nightly job cannot send to it: add {{ m.token_var }} to the recompute cron in render.yaml.</span>{% endif %}
+        {% if m.base_url %}<br><span class="muted">{{ m.base_url }}</span>{% endif %}
+      </td>
+      <td class="small nowrap">{% if m.row %}{{ m.row.updated_at | uk("%d %b %Y %H:%M") }}<br><span class="muted">{{ m.row.updated_by }}</span>{% else %}<span class="muted">never</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="panel mt-2">
+  <h2>What the nightly job saw</h2>
+  {% if last_run and last_products %}
+  <p>The last nightly run ({{ last_run.created_at | uk("%d %b %Y %H:%M") }}) treated the products as:</p>
+  <div class="chips">{% for code, state in last_products.items() %}<span class="chip chip-{{ state }}">{{ product_name(code) }}: {{ state_labels.get(state, state)|lower }}</span>{% endfor %}</div>
+  {% elif last_run %}
+  <p class="muted">The last nightly run ({{ last_run.created_at | uk("%d %b %Y %H:%M") }}) was before the switches existed, so it did not record them.</p>
+  {% else %}
+  <p class="muted">No nightly run has been recorded yet.</p>
+  {% endif %}
+  <p class="help mt-1">The nightly job runs as its own Render cron with its own copy of the environment. It reads the same switches, but a product's token reaches it only once that token is copied to the cron (its <code>fromService</code> entry in render.yaml). A product live here whose token the job lacks is named on its row above, and the job's run then shows as failed on Render. A run of the job with <code>--dry-run</code> is passed over here, unless every recent run was one.</p>
+</section>
+{% endblock %}
