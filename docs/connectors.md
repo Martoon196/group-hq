@@ -244,9 +244,9 @@ constant-time check, a durable daily cap on the product side, and refusals as `{
 | 1 | Property Predator | `affiliate` (template item `{"product": "pp", "kind": "affiliate", "value": "affiliate"}`) | `POST /api/partner/grouphq/affiliate` `{email, reason}` | `{ok: true, account_id, code, link, created}` (`created` false when already an affiliate; idempotent) or `404 {ok: false, reason: "no_account"}`; `account_id` (PP's `users.id`, a UUID string) becomes `remote_ref` and fills `people.pp_account_id`, which is text since 0008; `code` and `link` are kept on the grant (`remote_info`) |
 | 1 | Property Predator | the earning links panel | `GET /api/partner/grouphq/affiliate?email=` | `{ok: true, account_id, affiliate: false}` or `{ok: true, account_id, affiliate: true, code, link, referred_accounts, commission_due_pence, commission_paid_pence}` |
 | 2 | Ordris | `affiliate` (`{"product": "ordris", "kind": "affiliate", "value": "partner"}`) | `POST /api/partner/grouphq/partners` `{email, name, external_ref: "grouphq:grant:<id>"}` | `{ok: true, partner_id, referral_code, link, created}`: an active partner in the programme `ORDRIS_MENTEE_PROGRAMME_CODE` names (the self-serve one by default), no Ordris login needed; `partner_id` becomes `remote_ref`, the code and link are kept on the grant |
-| 2 | Ordris | the earning links panel | `GET /api/partner/grouphq/partners?email=` | `{ok: true, partner: false}` or `{ok: true, partner: true, partner_id, referral_code, link, referrals, pending_pence, payable_pence, paid_pence}` |
+| 2 | Ordris | the earning links panel | `GET /api/partner/grouphq/partners?email=` | `{ok: true, partner: false}` or `{ok: true, partner: true, partner_id, referral_code, link, referrals, pending_pence, payable_pence, paid_pence}`. Not part of the contract: if the answer also carries `terms_accepted` (a bool), `terms_accepted_at` (null while not accepted) or `terms_version`, the panel shows "Partner terms" and says "terms not accepted" in the card's heading (`ordris.partner_terms`); without them it says nothing about terms |
 | 3 | Hello New Home | the recompute (after the partner seat) and the panel | `GET /api/partner/partners?email=` (as before) | the partner also carries `referral_code`, `referral_link`, `area` (`{slug, name}` or null), `tier`, `status`, `portal_url` and `admin_url` (the head-office page where the founder assigns the area). The recompute keeps them on the partner seat grant with `checked_at` and `needs_region` (found, area known and null, status active, tier not introducer), which the Needs a region queue lists without a live call. An answer with neither `area` nor `areas` is an HNH build without contract 3 and is never listed |
-| 4 | Key Properties | `sourcer_link` (as before) | `POST /api/partner/sourcers` and `PATCH /api/partner/sourcers/{id}` both carry `pp_account_id` (the UUID string, as text) whenever Group HQ knows it | the portal sets it on the user row only while that is empty; a row linked to a different PP account is `409 {ok: false, reason: "pp_account_mismatch"}`. The `pp_account_id` the portal answers is kept on the grant |
+| 4 | Key Properties | `sourcer_link` (as before) | `POST /api/partner/sourcers` and `PATCH /api/partner/sourcers/{id}` both carry `pp_account_id` (the UUID string, as text) whenever Group HQ knows it | the portal sets it on the user row only while that is empty; a row linked to a different PP account is `409 {ok: false, reason: "pp_account_mismatch"}`. A PP account another Key Properties login already holds is `409 {ok: false, reason: "pp_account_in_use"}` on the POST and on a PATCH carrying only the id, while a PATCH that also opens the sourcer or sets its share is applied without the link and answers `200` with `link_refused: {reason: "pp_account_in_use", message}`. The `pp_account_id` the portal answers, and any refusal, are kept on the grant |
 | 4 | Key Properties | the earning links panel | `GET /api/partner/sourcers?email=` | the row also carries `fee_share_pct`, `active`, `pp_linked`, `login_url`, `deals_submitted`, `earned_pence`, `pipeline_pence`; the portal's `404 {ok: false, error: "not_found"}` is "no sourcer" |
 
 **No revoke for an affiliate.** Both programmes are public and membership is permanent, so a revoke of an `affiliate`
@@ -280,8 +280,24 @@ portal's contract-4 build is live, Retry on a grant that has stopped sends the l
 `failed` with a plain message (`entitlements.MISMATCH_ERROR`) and is never retried on its own: Retry on the grant once
 the ids are put right. A grant that failed on its link call goes back to active on Retry and the same run sends the
 link again. A mismatched grant whose sourcer the portal still holds active is still switched off when access ends.
-A `409 pp_account_in_use` (that PP account is already linked to another Key Properties login) is an ordinary failure
-with the portal's message.
+`pp_account_in_use` (that PP account is already linked to another Key Properties login) is read wherever the portal
+says it, and is never retried on its own either, because sending the same id again cannot help until the founder puts it
+right in Key Properties. A `409` on the POST (the portal changed nothing: no sourcer created or opened, and a login
+that already had the email, such as an imported sourcer, left as it was) makes the grant `failed` with
+`entitlements.IN_USE_CREATE_ERROR`. A re-grant or extension the portal applied without the link (`200` with
+`link_refused`, `kp.link_refusal`) is a sent call and the grant is active, since the sourcer is open, with
+`entitlements.IN_USE_ERROR` as its last error; a link call refused with `409` leaves the grant active the same way and uses
+up that call's attempts. Each refusal is kept on the grant as `remote_info.link_refused` (`reason`, the portal's
+`message`, the `pp_account_id` sent, `at` and `sourcer_open`): no link call is sent for that id until Retry. Retry marks
+it `retried_at` rather than forgetting it, so the next live run asks again (the same run, unless the Retry is a dry run
+or Key Properties is in dry run or not configured, when nothing is sent and the refusal stays shown, saying Retry has
+been pressed). An answer that carries the person's id removes it, whether it comes after Retry or on an extension, and a
+fresh refusal replaces it. The grant page shows it ("Property Predator link: Refused by Key Properties") with the plain
+message and Retry; the earning links panel shows the same message on the Key Properties card
+(`entitlements.link_refusal_note`), headed "Not linked to Property Predator" for `pp_account_in_use` and "Linked to a
+different Property Predator account" for a mismatch, with a button to the grant, from what the grant keeps, so it shows
+even when Key Properties cannot be asked. Once the id is corrected on the person page, a refusal kept for the old id is
+not shown on an open sourcer (the next run sends the new id); a failed grant keeps showing it until Retry.
 
 **The seller.** Every person with an active mentee row and no seller gets a Group HQ seller of kind mentee
 (`commission.ensure_mentee_seller`, audited `seller.create`), so they hold a franchise referral code; a person who is

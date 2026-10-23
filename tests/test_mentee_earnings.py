@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import time
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -17,6 +18,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 import respx
+from markupsafe import escape
 
 from app import config, models, seed
 from app.db import engine
@@ -26,9 +28,12 @@ from app.services import earnings
 from app.services import entitlements as ent
 from app.services.connectors import ConnectorError, HNHConnector, KPConnector, OrdrisConnector, PPConnector
 from app.services.connectors.hnh import partner_info
+from app.services.connectors.kp import link_refusal
+from app.services.connectors.ordris import partner_terms as ordris_partner_terms
 from app.services.connectors.pp import AFFILIATE_KEPT
-from app.services.entitlements import (LINK_UNCONFIRMED, MAX_ATTEMPTS, MISMATCH_ERROR, display_state, link_key, recompute_person,
-                                       reset_for_retry, revoke_person)
+from app.services.entitlements import (IN_USE_CREATE_ERROR, IN_USE_ERROR, LINK_UNCONFIRMED, MAX_ATTEMPTS, MISMATCH_ERROR,
+                                       RETRY_PRESSED, display_state, link_key, link_refusal_heading, link_refusal_note,
+                                       recompute_person, reset_for_retry, revoke_person)
 
 TODAY = date(2026, 10, 20)
 PP = "https://pp.example.test"
@@ -966,3 +971,348 @@ def test_the_downgrade_clears_only_ids_an_integer_column_cannot_hold(db):
     assert db.get(Person, keep.id).pp_account_id is None
     rows = db.query(AuditLog).filter(AuditLog.action == "person.links", AuditLog.actor == migration.ACTOR).all()
     assert sorted(r.before["pp_account_id"] for r in rows) == sorted(["007", ACCOUNT, "2147483648"])
+
+
+# ---- contract 4: a Property Predator link Key Properties refuses (pp_account_in_use) -----------------------------------
+IN_USE_MESSAGE = "That PropertyPredator account is already linked to another Key Properties UK login."
+KP_ONLY = [{"product": "kp", "kind": "sourcer_link", "value": "mentee"}]
+
+
+def kp_card(html: str) -> str:
+    return html.split("<strong>Key Properties</strong>")[1].split('<div class="earn-card">')[0]
+
+
+def test_kp_link_refused_is_read_from_a_patch_answer_and_a_refused_link_call_is_a_failure():
+    held = fake_grant(product="kp", kind="sourcer_link", value="mentee", remote_ref="41")
+    with respx.mock(base_url=KP) as mock:
+        patch = mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(200, json=fixture("kp_sourcer_link_refused")))
+        result = KPConnector.from_config().grant(held, fake_person(pp_account_id=ACCOUNT))
+        assert body_of(patch.calls.last) == {"active": True, "pp_account_id": ACCOUNT}
+        assert result.remote_ref == "41" and result.info == {"link_refused": {"reason": "pp_account_in_use", "message": IN_USE_MESSAGE}}, \
+            "the sourcer is open (a success), and the link the portal left off is read"
+        with pytest.raises(ConnectorError) as raised:          # the same answer to a call that asked only for the link
+            KPConnector.from_config().link(held, fake_person(pp_account_id=ACCOUNT))
+        assert raised.value.reason == "pp_account_in_use" and raised.value.detail == IN_USE_MESSAGE
+        patch.mock(return_value=httpx.Response(409, json=fixture("kp_pp_account_in_use")))
+        with pytest.raises(ConnectorError) as raised:          # what the portal answers today to a link-only PATCH
+            KPConnector.from_config().link(held, fake_person(pp_account_id=ACCOUNT))
+        assert raised.value.reason == "pp_account_in_use" and raised.value.status == 409
+        post = mock.post("/api/partner/sourcers").mock(return_value=httpx.Response(409, json=fixture("kp_pp_account_in_use")))
+        with pytest.raises(ConnectorError) as raised:
+            KPConnector.from_config().grant(fake_grant(product="kp", kind="sourcer_link", value="mentee"), fake_person(pp_account_id=ACCOUNT))
+        assert raised.value.reason == "pp_account_in_use" and post.call_count == 1
+    assert link_refusal(fixture("kp_sourcer_linked")) is None
+    assert link_refusal({"link_refused": "yes"}) is None and link_refusal({"link_refused": {}}) is None
+    assert link_refusal({"sourcer": {"id": 41, "link_refused": {"error": "pp_account_in_use"}}}) == {"reason": "pp_account_in_use"}
+    assert link_refusal({"link_refused": {"reason": "pp_account_in_use", "message": "x" * 400}})["message"] == "x" * 300
+
+
+def test_a_pp_account_another_kp_login_holds_fails_the_first_grant_plainly_until_retry(admin_client, db, live):
+    """POST 409 pp_account_in_use: Key Properties created nothing, so the grant is failed with a message saying what to put
+    right in Key Properties, never sent again on its own, and shown on the grant page and the panel until Retry."""
+    person = make_person(db, pp_account_id=ACCOUNT)
+    enrol_paid(db, person, programme(db, "kp_only", KP_ONLY))
+    with respx.mock(base_url=KP) as mock:
+        post = mock.post("/api/partner/sourcers").mock(return_value=httpx.Response(409, json=fixture("kp_pp_account_in_use")))
+        [decision] = recompute_person(db, person, TODAY, False)
+    assert post.call_count == 1 and body_of(post.calls.last)["pp_account_id"] == ACCOUNT
+    assert decision.action == "grant" and decision.outcome == "failed" and decision.detail == IN_USE_CREATE_ERROR
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "failed" and grant.last_error == IN_USE_CREATE_ERROR and display_state(grant) == "failed"
+    refused = grant.remote_info["link_refused"]
+    assert refused["reason"] == "pp_account_in_use" and refused["message"] == IN_USE_MESSAGE
+    assert refused["pp_account_id"] == ACCOUNT and refused["at"] and refused["sourcer_open"] is False
+    for words in ("another Key Properties login", "changed nothing", "no sourcer was created or opened",
+                  "any Key Properties login they already had is left as it was", "In Key Properties", "merge it",
+                  "take the account off it", "press Retry on the grant"):
+        assert words in IN_USE_CREATE_ERROR, words
+    assert "no Key Properties access" not in IN_USE_CREATE_ERROR, "the POST also refuses a login that already has the email"
+    [row] = db.query(ConnectorCall).filter(ConnectorCall.grant_id == grant.id).all()
+    assert row.status == "failed" and row.attempts == MAX_ATTEMPTS
+    fail = db.query(AuditLog).filter(AuditLog.action == "grant.fail", AuditLog.entity == f"grant:{grant.id}").one()
+    assert fail.after["reason"] == "pp_account_in_use" and fail.after["link_refused"]["pp_account_id"] == ACCOUNT
+    with respx.mock(assert_all_called=False) as mock:
+        for _ in range(3):
+            [decision] = recompute_person(db, person, TODAY, False)
+            assert decision.action == "blocked" and "not retried automatically" in decision.detail
+    assert mock.calls.call_count == 0, "never sent again on its own"
+    # the grant page and the panel say what to do; Key Properties itself has no sourcer for the email
+    page = admin_client.get(f"/grants/{grant.id}").text
+    assert str(escape(IN_USE_CREATE_ERROR)) in page and f'action="/grants/{grant.id}/retry"' in page
+    assert "Refused by Key Properties (pp_account_in_use)" in page and ACCOUNT in page
+    with respx.mock(assert_all_called=False) as mock:
+        routes = mock_panel(mock)
+        routes.kp.mock(return_value=httpx.Response(404, json={"ok": False, "reason": "not_found", "error": "not_found"}))
+        card = kp_card(admin_client.get(f"/people/{person.id}/earnings?fragment=1").text)
+    assert "Not linked to Property Predator." in card and str(escape(IN_USE_CREATE_ERROR)) in card
+    assert f'href="/grants/{grant.id}"' in card
+    # put right in Key Properties: Retry sends the POST again and the refusal is gone
+    reset_for_retry(db, grant, actor="founder@example.test")
+    db.commit()
+    with respx.mock(base_url=KP) as mock:
+        post = mock.post("/api/partner/sourcers").mock(return_value=httpx.Response(201, json=fixture("kp_sourcer_linked")))
+        [decision] = recompute_person(db, person, TODAY, False)
+    assert post.call_count == 1 and decision.outcome == "sent" and decision.detail == "sent"
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "active" and grant.last_error == "" and grant.remote_info == {"pp_account_id": ACCOUNT}
+    with respx.mock(assert_all_called=False) as mock:
+        mock_panel(mock)
+        card = kp_card(admin_client.get(f"/people/{person.id}/earnings?fragment=1").text)
+    assert "Not linked to Property Predator." not in card
+
+
+def test_a_sourcer_opened_without_its_pp_link_says_so_and_waits_for_retry(admin_client, db, live):
+    """A re-grant Key Properties applies without the link (200 with link_refused): the sourcer is open, so the grant is
+    active; the refusal is kept and shown, the same id is not sent again on its own, and Retry asks again."""
+    person = make_person(db, pp_account_id=ACCOUNT)
+    mentee = enrol_paid(db, person, programme(db, "kp_only", KP_ONLY))
+    # a sourcer Group HQ switched off before (an earlier lapse), never linked to Property Predator
+    db.add(EntitlementGrant(person_id=person.id, mentee_id=mentee.id, product="kp", kind="sourcer_link", value="mentee",
+                            source="programme:kp_only", state="revoked", remote_ref="41"))
+    db.commit()
+    with respx.mock(base_url=KP) as mock:
+        patch = mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(200, json=fixture("kp_sourcer_link_refused")))
+        [decision] = recompute_person(db, person, TODAY, False)
+    assert body_of(patch.calls.last) == {"active": True, "pp_account_id": ACCOUNT}, "the re-grant carries the id"
+    assert decision.action == "grant" and decision.outcome == "sent"
+    assert decision.detail == f"sent without the Property Predator link: {IN_USE_ERROR}"
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "active" and grant.ends_at == datetime(2027, 10, 1) and grant.last_error == IN_USE_ERROR
+    assert display_state(grant) == "active", "the access itself went through"
+    refused = grant.remote_info["link_refused"]
+    assert refused["reason"] == "pp_account_in_use" and refused["pp_account_id"] == ACCOUNT and refused["message"] == IN_USE_MESSAGE
+    assert "pp_account_id" not in grant.remote_info, "Key Properties holds no account on the row"
+    assert "the sourcer is open but not linked" in IN_USE_ERROR and "press Retry on the grant" in IN_USE_ERROR
+    granted = db.query(AuditLog).filter(AuditLog.action == "grant.grant", AuditLog.entity == f"grant:{grant.id}").one()
+    assert granted.after["link_refused"]["reason"] == "pp_account_in_use"
+    with respx.mock(assert_all_called=False) as mock:
+        [decision] = recompute_person(db, person, TODAY, False)
+    assert mock.calls.call_count == 0 and decision.action == "noop", "no link call for an id Key Properties has refused"
+
+    # the panel shows it beside Key Properties' own answer, and from the grant when Key Properties cannot be asked
+    with respx.mock(assert_all_called=False) as mock:
+        routes = mock_panel(mock)
+        routes.kp.mock(return_value=httpx.Response(200, json={**fixture("kp_sourcer_status"), "pp_linked": False, "pp_account_id": None}))
+        card = kp_card(admin_client.get(f"/people/{person.id}/earnings?fragment=1").text)
+    assert "Not linked to Property Predator." in card and str(escape(IN_USE_ERROR)) in card and f'href="/grants/{grant.id}"' in card
+    assert "Sourcer login" in card, "the sourcer's own rows still show"
+    with respx.mock(assert_all_called=False) as mock:
+        routes = mock_panel(mock)
+        routes.kp.mock(side_effect=httpx.ConnectError("refused"))
+        card = kp_card(admin_client.get(f"/people/{person.id}/earnings?fragment=1").text)
+    assert "Couldn't reach Key Properties" in card and str(escape(IN_USE_ERROR)) in card
+    page = admin_client.get(f"/grants/{grant.id}").text
+    assert "Refused by Key Properties (pp_account_in_use)" in page and str(escape(IN_USE_ERROR)) in page
+    assert f'action="/grants/{grant.id}/retry"' in page, "an active grant with a refused link can be retried"
+
+    # Retry asks again in the same run, with the link call; Key Properties still refuses (409 on a link-only PATCH)
+    reset_for_retry(db, grant, actor="founder@example.test")
+    db.commit()
+    with respx.mock(base_url=KP) as mock:
+        patch = mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(409, json=fixture("kp_pp_account_in_use")))
+        [decision] = recompute_person(db, person, TODAY, False)
+    assert patch.call_count == 1 and body_of(patch.calls.last) == {"pp_account_id": ACCOUNT}
+    assert decision.action == "link" and decision.outcome == "failed" and decision.detail == IN_USE_ERROR
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "active" and grant.last_error == IN_USE_ERROR, "the sourcer is still open"
+    assert grant.remote_info["link_refused"]["reason"] == "pp_account_in_use"
+    assert "retried_at" not in grant.remote_info["link_refused"], "refused again: recorded afresh, so it waits for Retry"
+    row = db.query(ConnectorCall).filter(ConnectorCall.idempotency_key == link_key(grant.id, ACCOUNT)).one()
+    assert row.status == "failed" and row.attempts == MAX_ATTEMPTS
+    with respx.mock(assert_all_called=False) as mock:
+        recompute_person(db, person, TODAY, False)
+    assert mock.calls.call_count == 0, "a refused link is not sent again on its own"
+
+    # once it is put right in Key Properties, Retry links it and the message goes
+    reset_for_retry(db, grant, actor="founder@example.test")
+    db.commit()
+    with respx.mock(base_url=KP) as mock:
+        patch = mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(200, json=fixture("kp_sourcer_linked")))
+        [decision] = recompute_person(db, person, TODAY, False)
+    assert patch.call_count == 1 and decision.action == "link" and decision.outcome == "sent"
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "active" and grant.last_error == "" and grant.remote_info == {"pp_account_id": ACCOUNT}
+    assert link_refusal_note(grant, person) == ""
+
+
+def test_the_refusal_note_follows_the_grant_and_the_persons_current_account():
+    def grant(**kw):
+        base = {"product": "kp", "kind": "sourcer_link", "state": "active", "last_error": "",
+                "remote_info": {"link_refused": {"reason": "pp_account_in_use", "pp_account_id": ACCOUNT}}}
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    assert link_refusal_note(grant(), fake_person(pp_account_id=ACCOUNT)) == IN_USE_ERROR
+    assert link_refusal_note(grant(), fake_person(pp_account_id=OTHER_ACCOUNT)) == "", "an id since corrected on the person page"
+    mismatch = grant(remote_info={"link_refused": {"reason": "pp_account_mismatch", "pp_account_id": ACCOUNT}})
+    assert link_refusal_note(mismatch, fake_person(pp_account_id=ACCOUNT)) == MISMATCH_ERROR
+    assert link_refusal_note(grant(state="failed", last_error=MISMATCH_ERROR, remote_info={}), fake_person()) == MISMATCH_ERROR
+    other = link_refusal_note(grant(remote_info={"link_refused": {"reason": "something_new"}}), fake_person(pp_account_id=ACCOUNT))
+    assert "(something_new)" in other and "press Retry on the grant" in other
+    assert link_refusal_note(grant(state="revoked"), fake_person(pp_account_id=ACCOUNT)) == ""
+    assert link_refusal_note(grant(product="pp", kind="affiliate"), fake_person(pp_account_id=ACCOUNT)) == ""
+    assert link_refusal_note(grant(remote_info=None), fake_person(pp_account_id=ACCOUNT)) == ""
+    assert link_refusal_note(None) == ""
+    # a failed grant waits for Retry whatever the person page now says; an open sourcer is sent a corrected id on the next run
+    assert link_refusal_note(grant(state="failed", last_error=IN_USE_CREATE_ERROR), fake_person(pp_account_id=OTHER_ACCOUNT)) \
+        == IN_USE_CREATE_ERROR
+    assert link_refusal_note(grant(last_error=IN_USE_ERROR), fake_person(pp_account_id=ACCOUNT)) == IN_USE_ERROR
+    assert link_refusal_note(grant(last_error=IN_USE_ERROR), fake_person(pp_account_id=OTHER_ACCOUNT)) == "", \
+        "an open sourcer's refusal for an id since corrected is not shown, even while its last error still says it"
+    # which message: a call that changed nothing, or an open sourcer; and once Retry has been pressed
+    closed = {"reason": "pp_account_in_use", "pp_account_id": ACCOUNT, "sourcer_open": False}
+    assert link_refusal_note(grant(state="pending", remote_info={"link_refused": closed}), fake_person(pp_account_id=ACCOUNT)) \
+        == IN_USE_CREATE_ERROR
+    retried = {"link_refused": {**closed, "retried_at": "2026-10-20T09:00:00"}}
+    assert link_refusal_note(grant(state="pending", remote_info=retried), fake_person(pp_account_id=ACCOUNT)) \
+        == IN_USE_CREATE_ERROR + RETRY_PRESSED
+    assert link_refusal_heading(IN_USE_ERROR) == link_refusal_heading(IN_USE_CREATE_ERROR) == "Not linked to Property Predator."
+    assert link_refusal_heading(MISMATCH_ERROR + RETRY_PRESSED) == "Linked to a different Property Predator account."
+    assert link_refusal_heading("") == ""
+
+
+def _reopened_without_link(db, person) -> EntitlementGrant:
+    """A sourcer Group HQ switched off before, whose re-grant Key Properties applies without the PP link (200 with
+    link_refused): the grant is active with IN_USE_ERROR and the refusal kept."""
+    mentee = enrol_paid(db, person, programme(db, "kp_only", KP_ONLY))
+    db.add(EntitlementGrant(person_id=person.id, mentee_id=mentee.id, product="kp", kind="sourcer_link", value="mentee",
+                            source="programme:kp_only", state="revoked", remote_ref="41"))
+    db.commit()
+    with respx.mock(base_url=KP) as mock:
+        mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(200, json=fixture("kp_sourcer_link_refused")))
+        recompute_person(db, person, TODAY, False)
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "active" and grant.last_error == IN_USE_ERROR and grant.remote_info["link_refused"]["sourcer_open"] is True
+    return grant
+
+
+def test_an_extension_key_properties_links_clears_the_refusal_without_retry(admin_client, db, live, monkeypatch):
+    """The founder puts it right in Key Properties and presses nothing: the next call that carries the id (here an
+    extension) is answered with it, and the refusal and the panel warning go."""
+    person = make_person(db, pp_account_id=ACCOUNT)
+    _reopened_without_link(db, person)
+    monkeypatch.setenv("GROUPHQ_SETTING_FULL_TERM_MONTHS", "13")     # a longer term, so the next run extends the window
+    with respx.mock(base_url=KP) as mock:
+        patch = mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(200, json=fixture("kp_sourcer_linked")))
+        [decision] = recompute_person(db, person, TODAY, False)
+    assert decision.action == "extend" and decision.outcome == "sent" and decision.detail == "sent"
+    assert patch.call_count == 1 and body_of(patch.calls.last) == {"active": True, "pp_account_id": ACCOUNT}
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "active" and grant.last_error == "" and grant.ends_at == datetime(2027, 11, 1)
+    assert grant.remote_info == {"pp_account_id": ACCOUNT}, "Key Properties now holds the account: the refusal is over"
+    assert link_refusal_note(grant, person) == ""
+    with respx.mock(assert_all_called=False) as mock:
+        mock_panel(mock)
+        card = kp_card(admin_client.get(f"/people/{person.id}/earnings?fragment=1").text)
+    assert "Sourcer login" in card and "earn-warning" not in card and "Not linked to Property Predator." not in card
+
+
+def test_a_dry_run_retry_keeps_the_refusal_shown_and_the_next_live_run_asks_again(admin_client, db, live):
+    """Retry with dry run ticked sends nothing, so the refusal stays on record and on the panel (saying Retry has been
+    pressed); the next live run sends the call, and a fresh refusal waits for Retry again."""
+    person = make_person(db, pp_account_id=ACCOUNT)
+    enrol_paid(db, person, programme(db, "kp_only", KP_ONLY))
+    with respx.mock(base_url=KP) as mock:
+        mock.post("/api/partner/sourcers").mock(return_value=httpx.Response(409, json=fixture("kp_pp_account_in_use")))
+        recompute_person(db, person, TODAY, False)
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "failed" and grant.last_error == IN_USE_CREATE_ERROR
+    with respx.mock(assert_all_called=False) as mock:
+        page = admin_client.post(f"/grants/{grant.id}/retry", data={"dry_run": "1"})
+    assert page.status_code == 200 and mock.calls.call_count == 0, "a dry-run Retry sends nothing"
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    refused = grant.remote_info["link_refused"]
+    assert refused["reason"] == "pp_account_in_use" and refused["pp_account_id"] == ACCOUNT and refused["message"] == IN_USE_MESSAGE
+    assert refused["retried_at"] and grant.state == "pending" and grant.last_error == ""
+    assert link_refusal_note(grant, person) == IN_USE_CREATE_ERROR + RETRY_PRESSED
+    with respx.mock(assert_all_called=False) as mock:
+        routes = mock_panel(mock)
+        routes.kp.mock(return_value=httpx.Response(404, json={"ok": False, "reason": "not_found", "error": "not_found"}))
+        card = kp_card(admin_client.get(f"/people/{person.id}/earnings?fragment=1").text)
+    assert "Not linked to Property Predator." in card and str(escape(IN_USE_CREATE_ERROR + RETRY_PRESSED)) in card
+    detail = admin_client.get(f"/grants/{grant.id}").text
+    assert "Refused by Key Properties (pp_account_in_use)" in detail and "Retry pressed" in detail
+    # the next live run sends what the Retry planned; still refused, it is recorded afresh and waits for Retry again
+    with respx.mock(base_url=KP) as mock:
+        post = mock.post("/api/partner/sourcers").mock(return_value=httpx.Response(409, json=fixture("kp_pp_account_in_use")))
+        [decision] = recompute_person(db, person, TODAY, False)
+    assert post.call_count == 1 and decision.outcome == "failed" and decision.detail == IN_USE_CREATE_ERROR
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "failed" and "retried_at" not in grant.remote_info["link_refused"]
+    assert link_refusal_note(grant, person) == IN_USE_CREATE_ERROR
+    with respx.mock(assert_all_called=False) as mock:
+        recompute_person(db, person, TODAY, False)
+    assert mock.calls.call_count == 0, "not sent again on its own"
+
+
+def test_a_dry_run_retry_of_an_open_sourcer_plans_the_link_and_the_next_live_run_sends_it(admin_client, db, live):
+    person = make_person(db, pp_account_id=ACCOUNT)
+    grant = _reopened_without_link(db, person)
+    with respx.mock(assert_all_called=False) as mock:
+        page = admin_client.post(f"/grants/{grant.id}/retry", data={"dry_run": "1"})
+    assert page.status_code == 200 and mock.calls.call_count == 0
+    row = db.query(ConnectorCall).filter(ConnectorCall.idempotency_key == link_key(grant.id, ACCOUNT)).one()
+    assert row.action == "link" and row.status == "pending" and row.attempts == 0, "the link call is planned, not sent"
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.state == "active" and grant.last_error == "" and grant.remote_info["link_refused"]["retried_at"]
+    assert link_refusal_note(grant, person) == IN_USE_ERROR + RETRY_PRESSED
+    with respx.mock(base_url=KP) as mock:
+        patch = mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(200, json=fixture("kp_sourcer_linked")))
+        [decision] = recompute_person(db, person, TODAY, False)
+    assert patch.call_count == 1 and body_of(patch.calls.last) == {"pp_account_id": ACCOUNT}
+    assert decision.action == "link" and decision.outcome == "sent"
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert grant.remote_info == {"pp_account_id": ACCOUNT} and link_refusal_note(grant, person) == ""
+
+
+def test_a_mismatch_card_says_the_sourcer_is_linked_to_a_different_account(admin_client, db, live):
+    person = make_person(db, pp_account_id=ACCOUNT)
+    mentee = enrol_paid(db, person, programme(db, "kp_only", KP_ONLY))
+    db.add(EntitlementGrant(person_id=person.id, mentee_id=mentee.id, product="kp", kind="sourcer_link", value="mentee",
+                            source="programme:kp_only", state="revoked", remote_ref="41"))
+    db.commit()
+    with respx.mock(base_url=KP) as mock:
+        mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(409, json=fixture("kp_pp_account_mismatch")))
+        [decision] = recompute_person(db, person, TODAY, False)
+    grant = grants_of(db, person)[("kp", "sourcer_link")]
+    assert decision.outcome == "failed" and grant.state == "failed" and grant.last_error == MISMATCH_ERROR
+    with respx.mock(assert_all_called=False) as mock:
+        routes = mock_panel(mock)
+        routes.kp.mock(return_value=httpx.Response(200, json={**fixture("kp_sourcer_status"), "pp_account_id": OTHER_ACCOUNT}))
+        card = kp_card(admin_client.get(f"/people/{person.id}/earnings?fragment=1").text)
+    assert "Linked to a different Property Predator account." in card and str(escape(MISMATCH_ERROR)) in card
+    assert "Not linked to Property Predator." not in card, "the sourcer is linked, only to another account"
+    assert f'href="/grants/{grant.id}"' in card
+
+
+# ---- contract 2 in the panel: the Ordris card -----------------------------------------------------------------------------
+def test_the_ordris_card_shows_contract_two_and_the_terms_only_when_ordris_says(admin_client, db, live):
+    person, mentee = _mentee(db)
+    with respx.mock() as mock:
+        mock_panel(mock)
+        html = admin_client.get(f"/people/{person.id}/earnings?fragment=1&mentee={mentee.id}").text
+    card = html.split("<strong>Ordris</strong>")[1].split('<div class="earn-card">')[0]
+    rows = re.findall(r"<dt>(.*?)</dt>\s*<dd>(.*?)</dd>", card, re.S)
+    assert [label for label, _ in rows] == ["Referral link", "Code", "Referrals", "Pending", "Payable", "Paid"]
+    values = dict(rows)
+    assert 'value="https://ordris.example.test/?ref=AMYA41"' in values["Referral link"]
+    assert (values["Code"], values["Referrals"], values["Pending"], values["Payable"], values["Paid"]) == \
+        ("AMYA41", "2", "£50.00", "£15.00", "£0.00")
+    assert ">live</span>" in card and "Partner programme" in card and "terms" not in card, \
+        "contract 2 says nothing about terms, so neither does the card"
+    # when Ordris's answer also says whether the partner terms are accepted, the card shows it
+    for extra, row, headline in (
+            ({"terms_accepted_at": None, "terms_version": "2026-10"}, "Not accepted", "Partner programme: terms not accepted"),
+            ({"terms_accepted": False}, "Not accepted", "Partner programme: terms not accepted"),
+            ({"terms_accepted_at": "2026-10-24T08:30:00Z", "terms_version": "2026-10"}, "Accepted 24 Oct 2026 (version 2026-10)",
+             "Partner programme</p>"),
+            ({"terms_accepted": True}, "Accepted", "Partner programme</p>")):
+        with respx.mock() as mock:
+            routes = mock_panel(mock)
+            routes.ordris.mock(return_value=httpx.Response(200, json={**fixture("ordris_partner_status"), **extra}))
+            html = admin_client.get(f"/people/{person.id}/earnings?fragment=1&mentee={mentee.id}").text
+        card = html.split("<strong>Ordris</strong>")[1].split('<div class="earn-card">')[0]
+        values = dict(re.findall(r"<dt>(.*?)</dt>\s*<dd>(.*?)</dd>", card, re.S))
+        assert values["Partner terms"] == row and headline in card, extra
+    assert ordris_partner_terms({"terms_version": "2026-10"}) == {}, "a version alone says nothing about acceptance"
+    assert ordris_partner_terms({"terms_accepted": "yes", "terms_accepted_at": 7}) == {"terms_accepted": False}

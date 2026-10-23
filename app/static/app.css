@@ -170,6 +170,8 @@ table.data td.detail { max-width: 46ch; word-break: break-word; }
 .link-box { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 .link-box input { flex: 1; min-width: 180px; font: inherit; font-size: .88rem; padding: .4rem .6rem; border: 2px solid var(--line); border-radius: 8px; }
 .earn-panel .bad-text, .region-queue .bad-text { color: #9B1C4B; font-weight: 700; }
+.earn-panel .earn-warning { border-left: 3px solid #9B1C4B; padding-left: .6rem; margin-top: .5rem; }
+.earn-panel .earn-warning .bad-text { font-weight: 400; }
 .earn-loading { color: var(--muted); }
 
 /* Login and authenticator screens */

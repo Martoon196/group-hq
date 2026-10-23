@@ -62,7 +62,13 @@ once Key Properties answers with that id: a 200 that does not carry it (a portal
 attempt (LINK_UNCONFIRMED), tried again on later runs up to MAX_ATTEMPTS. A 409 pp_account_mismatch from Key Properties
 is a failed grant with MISMATCH_ERROR, never retried on its own (Retry on the grant once the ids are put right: a grant
 that failed only on its link call goes back to active, so the same run sends the link again); it is still revoked when
-access ends. An affiliate grant enrols in a public programme and its revoke is a recorded no-op; a 404 that is not the
+access ends. pp_account_in_use (another Key Properties login already holds the PP account) is never retried on its own
+either: a 409 on the POST (the portal changed nothing) fails the grant with IN_USE_CREATE_ERROR; a re-grant or
+extension the portal applies without the link (200 with link_refused) and a refused link call leave the open sourcer
+active with IN_USE_ERROR. Every such refusal is kept on the grant (remote_info.link_refused, with the id sent), so the
+same id is not sent again until Retry (which marks it retried_at and keeps it shown until Key Properties answers), and
+the grant pages and the earning links panel say what to put right in Key Properties (link_refusal_note); an answer
+that carries the person's id removes it. An affiliate grant enrols in a public programme and its revoke is a recorded no-op; a 404 that is not the
 product's own refusal (its route not deployed yet) is a failed call that does not use up an attempt (NOT_DEPLOYED). After the decisions, an active Hello New Home partner seat is looked
 up (contract 3, live HNH only) and its area, links and admin page are kept on the grant (remote_info), which the
 "Needs a region" queue reads; and a person with an active mentee row and no seller gets a Group HQ seller of kind
@@ -89,7 +95,7 @@ from .audit import _jsonable, audit
 from .connectors import (CONNECTORS, BaseConnector, ConnectorError, ConnectorResult, open_connectors, product_dry_run,
                          product_mode)
 from .connectors.base import route_missing
-from .connectors.kp import MISMATCH_REASON
+from .connectors.kp import IN_USE_REASON, LINK_REFUSALS, MISMATCH_REASON
 from .connectors.pp import AFFILIATE_KEPT, PP_TIERS, pp_tier
 
 MAX_ATTEMPTS = 5
@@ -105,6 +111,21 @@ MISMATCH_ERROR = ("Key Properties links this sourcer to a different Property Pre
 LINK_UNCONFIRMED = ("Key Properties answered without the Property Predator account on the sourcer, so the link has not "
                     "taken (its build may not accept pp_account_id yet). It is tried again on the next runs; after "
                     f"{MAX_ATTEMPTS} tries press Retry.")
+# pp_account_in_use: the PP account is already on another Key Properties login. What the founder does is the same
+# whichever call met it; what the mentee has meanwhile is not, so there are two messages.
+_IN_USE_FIX = ("In Key Properties, find the login that holds this Property Predator account: if it is the mentee's own "
+               "second login, merge it into their sourcer login; if it is someone else's, take the account off it. Key "
+               "Properties has no screen for either yet, so it is a change in its database. If the account id on the person "
+               "page is wrong, correct it there instead. Then press Retry on the grant.")
+IN_USE_ERROR = ("Key Properties already has this Property Predator account on another Key Properties login "
+                "(pp_account_in_use), so the sourcer is open but not linked to it: deal packs they forward from Property "
+                "Predator land on that other login. " + _IN_USE_FIX)
+IN_USE_CREATE_ERROR = ("Key Properties already has this Property Predator account on another Key Properties login "
+                       "(pp_account_in_use), so it changed nothing: no sourcer was created or opened for this email, and "
+                       "any Key Properties login they already had is left as it was. " + _IN_USE_FIX)
+# Every message for a link Key Properties refused: never retried on its own, cleared by Retry (reset_for_retry).
+LINK_REFUSED_ERRORS = (MISMATCH_ERROR, IN_USE_ERROR, IN_USE_CREATE_ERROR)
+RETRY_PRESSED = " Retry has been pressed since, so the next live run asks Key Properties again."
 NOT_DEPLOYED = "{name} answered 404 without its own refusal, so its route is not deployed yet: not counted as an attempt, asked again on the next run. "
 PROGRAMME_SOURCE = "programme:"
 JOB_ACTOR = "job:recompute"
@@ -191,10 +212,49 @@ def is_blocked(grant: EntitlementGrant) -> bool:
     return grant.state == "failed" and grant.last_error == BLOCKED_ERROR
 
 
-def is_mismatch(grant: EntitlementGrant) -> bool:
-    """Key Properties refused the sourcer link because its row is linked to another PP account: a failed grant that
-    the recompute leaves alone until Retry (it is still revoked when access ends)."""
-    return grant.state == "failed" and grant.last_error == MISMATCH_ERROR
+def is_link_refused(grant: EntitlementGrant) -> bool:
+    """Key Properties refused the sourcer link: its row is linked to another PP account (pp_account_mismatch), or another
+    login already holds the PP account (pp_account_in_use) on a call that then changed nothing. A failed grant that the
+    recompute leaves alone until Retry (it is still revoked when access ends). A sourcer left open without the link stays
+    active and is not this: it shows the refusal through link_refusal_note()."""
+    return grant.state == "failed" and grant.last_error in LINK_REFUSED_ERRORS
+
+
+def link_refusal_note(grant: EntitlementGrant | None, person: Person | None = None) -> str:
+    """The plain message for a Key Properties sourcer link whose Property Predator link the portal refused, for the grant
+    pages and the earning links panel, or "" when there is none. A failed grant shows its last error while that is one of
+    the refusal messages, since it waits for Retry whatever the person page now says. Otherwise the refusal kept on the
+    grant (remote_info.link_refused) is shown only for the person's current PP account id: once the id is corrected on
+    the person page, an open sourcer is sent the new id on the next run, so the old refusal is no longer shown. A
+    refusal Retry has been pressed for (retried_at) is still shown, saying the next live run asks again, until Key
+    Properties answers."""
+    if grant is None or (grant.product, grant.kind) != ("kp", "sourcer_link") or grant.state not in ("pending", "active", "failed"):
+        return ""
+    refused = (grant.remote_info or {}).get("link_refused")
+    refused = refused if isinstance(refused, dict) else None
+    sent = refused.get("pp_account_id") if refused else None
+    corrected = (person is not None and sent not in (None, "") and str(sent) != str(person.pp_account_id or ""))
+    if grant.last_error in LINK_REFUSED_ERRORS and (grant.state == "failed" or not corrected):
+        return grant.last_error
+    if refused is None or corrected:
+        return ""
+    reason = str(refused.get("reason") or "")
+    if reason == IN_USE_REASON:
+        note = IN_USE_ERROR if refused.get("sourcer_open", True) else IN_USE_CREATE_ERROR
+    elif reason == MISMATCH_REASON:
+        note = MISMATCH_ERROR
+    else:
+        note = (f"Key Properties left the Property Predator link off ({reason or 'no reason given'}). Open the grant for "
+                "what it said, put it right in Key Properties, then press Retry on the grant.")
+    return note + (RETRY_PRESSED if refused.get("retried_at") else "")
+
+
+def link_refusal_heading(note: str) -> str:
+    """The bold first words of a link_refusal_note() on the earning links panel: a mismatch means the sourcer IS
+    linked, only to another Property Predator account."""
+    if not note:
+        return ""
+    return "Linked to a different Property Predator account." if note.startswith(MISMATCH_ERROR) else "Not linked to Property Predator."
 
 
 def hold_of(grant: EntitlementGrant, person: Person | None = None) -> dict | None:
@@ -472,7 +532,7 @@ def _decide(grant: EntitlementGrant, target: _Target, today: date,
         return "held", grant.ends_at
     if is_blocked(grant):
         return "blocked", grant.ends_at
-    if is_mismatch(grant):
+    if is_link_refused(grant):
         # Left alone until Retry, except that access the product may still give is taken away when it ends.
         if remote and (end is None or end <= today):
             enforced = ends_at if ends_at is not None and ends_at <= at_midnight(today) else at_midnight(today)
@@ -590,6 +650,33 @@ def _merge_info(grant: EntitlementGrant, info: dict) -> None:
         grant.remote_info = _json({**(grant.remote_info or {}), **info})
 
 
+def _keep_link_refusal(grant: EntitlementGrant, person: Person, reason: str, message: str = "") -> dict:
+    """Record on the grant (remote_info.link_refused) that Key Properties refused to link the person's PP account: the
+    reason, the portal's own message, the account id that was sent, when, and whether the sourcer is open (the grant is
+    active) or the refused call changed nothing. _kp_link_due sends no link for that id again until Retry marks it;
+    link_refusal_note() shows it. A fresh refusal replaces any earlier one, Retry mark included."""
+    refused = {"reason": (reason or "")[:80], "message": (message or "")[:300] or None,
+               "pp_account_id": person.pp_account_id, "at": utcnow().isoformat(timespec="seconds"),
+               "sourcer_open": grant.state == "active"}
+    grant.remote_info = _json({**(grant.remote_info or {}), "link_refused": refused})
+    return refused
+
+
+def _drop_link_refusal(grant: EntitlementGrant) -> None:
+    if "link_refused" in (grant.remote_info or {}):
+        grant.remote_info = _json({k: v for k, v in grant.remote_info.items() if k != "link_refused"})
+
+
+def _mark_link_refusal_retried(grant: EntitlementGrant) -> None:
+    """Retry was pressed on a grant whose link Key Properties refused: the refusal stays on record (and on the panel)
+    until Key Properties answers again, but no longer stops the call (_kp_link_due), so the next live run asks again.
+    A dry-run Retry, or one while Key Properties is in dry run or not configured, sends nothing and so keeps it shown."""
+    refused = (grant.remote_info or {}).get("link_refused")
+    if isinstance(refused, dict):
+        grant.remote_info = _json({**grant.remote_info,
+                                   "link_refused": {**refused, "retried_at": utcnow().isoformat(timespec="seconds")}})
+
+
 def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Target, action: str,
              ends_at: datetime | None, *, dry_run: bool, connectors: dict[str, BaseConnector], actor,
              reason: str = "", key: str = "") -> Decision:
@@ -684,16 +771,26 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
             row.attempts = MAX_ATTEMPTS        # never retried on its own
             decision.action, decision.outcome, decision.detail = "blocked", "blocked", BLOCKED_ERROR
             audit(db, actor, "grant.block", f"grant:{grant.id}", before=before, after=_snapshot(grant))
-        elif error.reason == MISMATCH_REASON and grant.product == "kp" and action != "revoke":
-            # Key Properties holds another PP account on this sourcer. Sending the same id again cannot help, so it is
-            # never retried on its own: a failed grant with a plain message until someone puts the ids right.
-            grant.state = "failed"
-            grant.last_error = MISMATCH_ERROR
+        elif error.reason in LINK_REFUSALS and grant.product == "kp" and action != "revoke":
+            # Key Properties refused the PP account: it holds another one on this sourcer (pp_account_mismatch), or
+            # another login already holds this one (pp_account_in_use). Sending the same id again cannot help until the
+            # founder puts it right in Key Properties, so it is never retried on its own: a plain message on the grant
+            # (and the earning links panel) until Retry. A refused link call leaves an open sourcer active; any other
+            # refused call changed nothing in the portal, so the grant is failed.
+            if error.reason == MISMATCH_REASON:
+                grant.state = "failed"
+                grant.last_error = MISMATCH_ERROR
+            elif action == "link":
+                grant.last_error = IN_USE_ERROR
+            else:
+                grant.state = "failed"
+                grant.last_error = IN_USE_CREATE_ERROR
             row.attempts = MAX_ATTEMPTS
-            decision.outcome, decision.detail = "failed", MISMATCH_ERROR
+            refused = _keep_link_refusal(grant, person, error.reason, error.detail)
+            decision.outcome, decision.detail = "failed", grant.last_error
             audit(db, actor, "grant.fail", f"grant:{grant.id}", before=before,
-                  after={**_snapshot(grant), "attempts": row.attempts, "action": action, "reason": MISMATCH_REASON,
-                         "pp_account_id": person.pp_account_id})
+                  after={**_snapshot(grant), "attempts": row.attempts, "action": action, "reason": error.reason,
+                         "pp_account_id": person.pp_account_id, "link_refused": refused})
         else:
             grant.last_error = error.summary()[:1000]
             if grant.kind == "affiliate" and route_missing(error):
@@ -744,15 +841,27 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
     grant.last_sync_at = utcnow()
     if result.remote_ref:
         grant.remote_ref = result.remote_ref[:200]
-    _merge_info(grant, result.info)
+    info = dict(result.info or {})
+    refused = info.pop("link_refused", None) if grant.product == "kp" else None
+    _merge_info(grant, info)
+    kept = None
+    if isinstance(refused, dict):
+        # Contract 4: the portal opened the sourcer (or set its share) but left the PP account off, because another
+        # login already holds it. The access is in place; the link waits for the founder and Retry.
+        kept = _keep_link_refusal(grant, person, str(refused.get("reason") or ""), str(refused.get("message") or ""))
+        grant.last_error = link_refusal_note(grant, person)
+    elif grant.product == "kp" and person.pp_account_id and str(info.get("pp_account_id") or "") == str(person.pp_account_id):
+        _drop_link_refusal(grant)               # the portal now holds the person's account: any earlier refusal is over
     filled = _apply_links(person, result.links, db)
     db.add_all([row, grant, person])
     decision.outcome = "sent"
     decision.detail = result.noop or "sent"
+    if kept is not None:
+        decision.detail = f"sent without the Property Predator link: {grant.last_error}"
     decision.plan = result.plan
     decision.once = result.once
     audit(db, actor, f"grant.{action}", f"grant:{grant.id}", before=before,
-          after={**_snapshot(grant), "noop": result.noop or None, "links": filled or None})
+          after={**_snapshot(grant), "noop": result.noop or None, "links": filled or None, **({"link_refused": kept} if kept else {})})
     return decision
 
 
@@ -909,12 +1018,18 @@ def _kp_link_due(db: Session, grant: EntitlementGrant, person: Person) -> str:
     """The link_key to send when an active Key Properties sourcer link has not had the person's current PP account id
     confirmed by Key Properties (remote_info.pp_account_id, compared as text), or "" when nothing is due: no id known,
     already confirmed, or that very call already went through or used up its attempts (an unconfirmed answer counts
-    as a failed attempt, so it is tried again until then)."""
+    as a failed attempt, so it is tried again until then), or Key Properties has refused to link that very id
+    (remote_info.link_refused, until Retry marks it retried_at: sending it again cannot help until the founder puts it
+    right there)."""
     if (grant.product, grant.kind) != ("kp", "sourcer_link") or grant.state != "active" or not grant.remote_ref:
         return ""
     pp_account_id = person.pp_account_id
     confirmed = (grant.remote_info or {}).get("pp_account_id")
     if not pp_account_id or (confirmed is not None and str(confirmed) == str(pp_account_id)):
+        return ""
+    refused = (grant.remote_info or {}).get("link_refused")
+    if (isinstance(refused, dict) and not refused.get("retried_at")
+            and str(refused.get("pp_account_id") or "") == str(pp_account_id)):
         return ""
     key = link_key(grant.id, pp_account_id)
     row = db.query(ConnectorCall.status, ConnectorCall.attempts).filter(ConnectorCall.idempotency_key == key).first()
@@ -927,7 +1042,7 @@ def _apply_one(db: Session, person: Person, grant: EntitlementGrant, target: _Ta
                connectors: dict[str, BaseConnector], actor) -> Decision:
     hold = hold_of(grant, person)
     held = _hold_since(grant, person)
-    remote = grant.state != "active" and (held is not None or is_mismatch(grant)) and _product_holds(db, grant)
+    remote = grant.state != "active" and (held is not None or is_link_refused(grant)) and _product_holds(db, grant)
     action, ends_at = _decide(grant, target, today, held, remote)
     db.add(grant)
     why = "paused" if hold and hold["scope"] == "grant" else "all access paused"
@@ -937,8 +1052,8 @@ def _apply_one(db: Session, person: Person, grant: EntitlementGrant, target: _Ta
     # form stays in Group HQ (the grant, the person and the audit rows), since products such as Hello New Home
     # belong to another company and keep what they are sent.
     reason = f"Group HQ: {why} (grant {grant.id})" if hold is not None and action == "revoke" else ""
-    if action == "blocked" and is_mismatch(grant):
-        return _skip(person, grant, action, ends_at, "Key Properties holds another PP account: not retried automatically", dry)
+    if action == "blocked" and is_link_refused(grant):
+        return _skip(person, grant, action, ends_at, "Key Properties refused the Property Predator link: not retried automatically", dry)
     if action == "blocked":
         return _skip(person, grant, action, ends_at, BLOCKED_ERROR + ": not retried automatically", dry)
     if action == "not_started":
@@ -1044,8 +1159,13 @@ def revoke_person(db: Session, person: Person, today: date | None = None, dry_ru
 def reset_for_retry(db: Session, grant: EntitlementGrant, *, actor: User | str) -> None:
     """Clear a failed or blocked grant so the next recompute tries it again. Caller commits. A Key Properties sourcer
     link that failed on its link call (pp_account_mismatch) goes back to active rather than pending when the portal
-    still holds the sourcer: the link call is what is retried, and an active grant is what sends it (_kp_link_due)."""
+    still holds the sourcer: the link call is what is retried, and an active grant is what sends it (_kp_link_due).
+    A link Key Properties refused (remote_info.link_refused) is marked retried_at rather than forgotten: the next live
+    run asks again (the same run, unless it is a dry run or Key Properties is in dry run or not configured), so an open
+    sourcer whose re-grant was applied without the link is sent the link call, while the refusal stays on record and
+    on the panel until Key Properties answers: linked, it goes; refused again, it is recorded afresh."""
     before = _snapshot(grant)
+    _mark_link_refusal_retried(grant)
     failed_link = False
     for row in db.query(ConnectorCall).filter(ConnectorCall.grant_id == grant.id, ConnectorCall.status == "failed").all():
         failed_link = failed_link or row.action == "link"

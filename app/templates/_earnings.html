@@ -7,6 +7,7 @@
     <div class="earn-head"><strong>{{ p.name }}</strong> <span class="status status-{{ p.state }}">{{ p.state_label }}</span></div>
     {% if p.state == "unreachable" %}<p class="small bad-text">Couldn't reach {{ p.name }}{% if p.detail %}: {{ p.detail }}{% endif %}.</p>{% endif %}
     {% if p.headline %}<p class="small">{{ p.headline }}</p>{% endif %}
+    {% if p.warning %}<div class="earn-warning"><p class="small bad-text"><strong>{{ p.warning_title or "Not linked to Property Predator." }}</strong> {{ p.warning }}</p>{% if p.warning_url %}<p><a class="btn btn-ghost btn-sm" href="{{ p.warning_url }}">Open the grant</a></p>{% endif %}</div>{% endif %}
     {% if p.rows %}
     <dl class="kv">
       {% for row in p.rows %}

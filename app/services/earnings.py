@@ -17,11 +17,14 @@ the WhatsApp welcome, and the "Needs a region" queue (docs/mentee-earnings.md).
                                        recompute last read and kept on the grant (no live call)
 
 What each product answers (contracts 1 to 4, docs/connectors.md): Property Predator the affiliate link, referred
-accounts and commission due and paid; Ordris the referral link, referrals and pending, payable and paid; Key Properties
+accounts and commission due and paid; Ordris the referral link, referrals and pending, payable and paid (and, when its
+answer says so, whether the partner has accepted its partner terms: "terms not accepted" otherwise); Key Properties
 the sourcer login, share, whether the sourcer is linked to the PP account, deals, earned and pipeline; Hello New Home
 the partner portal, the referral link and the area, or "Needs a region" with a button to the head-office page where
 the founder assigns it. Money arrives in pence and is shown in pounds. Where a product cannot be asked live, the code
-and link the recompute kept on the grant (remote_info) are shown as "last known" and used in the message.
+and link the recompute kept on the grant (remote_info) are shown as "last known" and used in the message. A Property
+Predator link Key Properties refused (pp_account_in_use or pp_account_mismatch, kept on the sourcer link grant) is shown
+on the Key Properties card with what to put right there and a button to the grant, where Retry is.
 
 Nothing here writes to the database: a page view never changes a grant or a person.
 """
@@ -29,8 +32,9 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from time import monotonic
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,6 +44,7 @@ from . import settings
 from .commission import pounds
 from .connectors import CONNECTORS, ConnectorError, product_mode
 from .connectors.base import safe_url
+from .entitlements import link_refusal_heading, link_refusal_note
 
 EARNINGS_TIMEOUT = 4.0              # seconds each product has to answer; the four are asked at the same time
 GRACE_SECONDS = 1.5                 # on top of the timeout before a product that has not answered is given up on
@@ -47,6 +52,7 @@ PRODUCT_ORDER = ("pp", "ordris", "kp", "hnh")
 STATE_LABELS = {"ok": "live", "none": "not enrolled", "dry_run": "dry run", "not_configured": "not configured",
                 "unreachable": "couldn't reach"}
 TRACKED_LINK = "https://hellonewhome.co.uk/partners-programme?seller={code}"     # a seller's tracked link (also the sellers screens)
+LONDON = ZoneInfo("Europe/London")
 
 
 @dataclass
@@ -69,6 +75,9 @@ class ProductEarnings:
     action_url: str | None = None   # Hello New Home's admin page when the partner needs a region
     action_label: str = ""
     needs_region: bool = False
+    warning: str = ""               # what the founder must put right in the product (a Key Properties link it refused)
+    warning_title: str = ""         # its bold first words: not linked, or linked to a different account
+    warning_url: str | None = None  # the grant page, where Retry is
 
     @property
     def state_label(self) -> str:
@@ -148,6 +157,28 @@ def _pp(info: dict, has_grant: bool) -> ProductEarnings:
     return p
 
 
+def _day(value: str | None) -> str:
+    """A timestamp a product answered (ISO 8601) as the day in UK time, e.g. 24 Oct 2026; "" when it cannot be read."""
+    try:
+        when = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(LONDON).strftime("%d %b %Y")
+
+
+def _terms(info: dict) -> str:
+    """The Ordris partner terms row: "" when Ordris did not say (contract 2 carries no terms), else accepted or not."""
+    if "terms_accepted" not in info:
+        return ""
+    if not info["terms_accepted"]:
+        return "Not accepted"
+    day = _day(info.get("terms_accepted_at")) if info.get("terms_accepted_at") else ""
+    version = info.get("terms_version")
+    return "Accepted" + (f" {day}" if day else "") + (f" (version {version})" if version else "")
+
+
 def _ordris(info: dict, has_grant: bool) -> ProductEarnings:
     p = ProductEarnings("ordris", settings.product_name("ordris"), "ok")
     if not info.get("partner"):
@@ -155,10 +186,12 @@ def _ordris(info: dict, has_grant: bool) -> ProductEarnings:
         p.headline = ("Not a partner yet: their programme enrols them when the recompute grants their access." if has_grant
                       else "Not a partner, and none of their programmes enrols them.")
         return p
-    p.headline = "Partner programme"
+    terms = _terms(info)
+    p.headline = "Partner programme" + (": terms not accepted" if terms == "Not accepted" else "")
     p.rows = _rows(("Referral link", None, info.get("link")), ("Code", info.get("referral_code")),
                    ("Referrals", _count(info.get("referrals"))), ("Pending", _money(info.get("pending_pence"))),
-                   ("Payable", _money(info.get("payable_pence"))), ("Paid", _money(info.get("paid_pence"))))
+                   ("Payable", _money(info.get("payable_pence"))), ("Paid", _money(info.get("paid_pence"))),
+                   ("Partner terms", terms))
     p.links = {"ordris_partner": info.get("link")}
     return p
 
@@ -289,6 +322,15 @@ def _cached(product: str, grant: EntitlementGrant | None, p: ProductEarnings) ->
     p.cached = True
 
 
+def _link_warning(p: ProductEarnings, grant: EntitlementGrant | None, person: Person) -> None:
+    """A Property Predator link Key Properties refused (contract 4: pp_account_in_use or pp_account_mismatch), from what
+    the recompute kept on the sourcer link grant, so it shows whatever the live answer was and whether or not Key
+    Properties could be asked just now: the plain message says what to put right there, and the grant has Retry."""
+    note = link_refusal_note(grant, person)
+    if note and grant is not None:
+        p.warning, p.warning_title, p.warning_url = note, link_refusal_heading(note), f"/grants/{grant.id}"
+
+
 def earning_links(db: Session, person: Person, *, timeout: float | None = None) -> EarningLinks:
     """Every product's panel for the person, asked at the same time (each within `timeout`, EARNINGS_TIMEOUT unless
     given), plus their Group HQ seller."""
@@ -337,6 +379,7 @@ def earning_links(db: Session, person: Person, *, timeout: float | None = None) 
     for product, panel in panels.items():
         if panel.state in ("dry_run", "not_configured", "unreachable"):
             _cached(product, grants.get((product, EARNING_KINDS[product])), panel)
+    _link_warning(panels["kp"], grants.get(("kp", "sourcer_link")), person)
     return EarningLinks(products=[panels[p] for p in PRODUCT_ORDER], seller=seller_for(db, person))
 
 

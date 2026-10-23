@@ -89,7 +89,9 @@ The Neon rates on Settings start blank and are never assumed. The module's contr
 Every mentee is enrolled in each scheme the group runs: the Property Predator affiliate programme and the Ordris partner
 programme (the `affiliate` grant kind; both public, so a revoke is recorded and nothing is sent), the Key Properties
 sourcer fee share (the sourcer link now carries their Property Predator account), the Hello New Home partner seat, and a
-Group HQ seller code created for every active mentee who has none. The mentee and person pages show an **Earning links**
+Group HQ seller code created for every active mentee who has none. A Property Predator link Key Properties refuses (that
+account is already on another Key Properties login, or the sourcer holds a different one) is shown on the grant and in
+the panel with what to put right in Key Properties, then Retry. The mentee and person pages show an **Earning links**
 panel, asked of each product after the page loads, and the mentee page copies a plain **WhatsApp welcome** with every
 link. **Needs a region** on the dashboard (and the Mentees filter of that name) lists active mentees whose Hello New
 Home partner has no area yet, with a button to the Hello New Home page where the founder assigns it. What each mentee

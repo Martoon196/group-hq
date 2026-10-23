@@ -20,7 +20,11 @@ grant with a plain message and never retries on its own. The portal's answer car
 which is kept on the grant (ConnectorResult.info) so the recompute knows whether the link has reached Key Properties.
 The id is PP's users.id, a UUID string, sent and compared as text. link() is the PATCH that carries pp_account_id and
 nothing else, for an active sourcer whose row has not confirmed it: it never re-opens a sourcer or resets a share
-(the portal's PATCH accepts pp_account_id on its own).
+(the portal's PATCH accepts pp_account_id on its own). When another Key Properties login already holds the PP account,
+the portal refuses the link: 409 pp_account_in_use on POST (nothing created) and on a link-only PATCH, while a PATCH
+that also opens the sourcer or sets its share is applied without the link and answers 200 with
+link_refused {reason, message}. That refusal is read into ConnectorResult.info["link_refused"] (link_refusal()) and the
+recompute shows it on the grant and the earning links panel (entitlements.IN_USE_ERROR).
 GET ?email= also answers fee_share_pct, active, pp_linked, login_url, deals_submitted, earned_pence and
 pipeline_pence, which the earning links panel shows (sourcer_status).
 """
@@ -32,7 +36,7 @@ from urllib.parse import quote
 
 from ... import config
 from .base import (BaseConnector, ConnectorError, ConnectorResult, _int_or_none, account_ref, normalise_email, route_missing,
-                   safe_url, whole_number)
+                   safe_url, short_text, whole_number)
 
 if TYPE_CHECKING:   # pragma: no cover
     from ...models import EntitlementGrant, Person
@@ -67,6 +71,28 @@ def _company(person: "Person") -> str:
 
 PLACEHOLDER = "{sourcer_id}"       # stands in for the id in a dry-run plan when none is known yet
 MISMATCH_REASON = "pp_account_mismatch"
+IN_USE_REASON = "pp_account_in_use"     # the PP account is already on another Key Properties login
+LINK_REFUSALS = (MISMATCH_REASON, IN_USE_REASON)
+
+
+def link_refusal(data: Any) -> dict | None:
+    """What a 200 answer says about a link the portal left off: contract 4's PATCH applies a re-grant or extension
+    without the link when another login already holds the PP account, and answers the row plus
+    link_refused {reason: "pp_account_in_use", message}. None when the answer carries no such refusal."""
+    record = data if isinstance(data, dict) else {}
+    refused = record.get("link_refused")
+    if not isinstance(refused, dict):
+        refused = _first(data).get("link_refused")
+    if not isinstance(refused, dict):
+        return None
+    reason = short_text(refused.get("reason"), 80) or short_text(refused.get("error"), 80)
+    if not reason:
+        return None
+    out = {"reason": reason}
+    message = short_text(refused.get("message"), 300)
+    if message:
+        out["message"] = message
+    return out
 
 
 def share_pct(value: Any) -> str | None:
@@ -172,6 +198,9 @@ class KPConnector(BaseConnector):
         linked = account_ref(record.get("pp_account_id")) if record else None
         if linked is not None:
             result.info = {"pp_account_id": linked}
+        refused = link_refusal(result.data)
+        if refused is not None:
+            result.info = {**result.info, "link_refused": refused}
         return result
 
     def _sourcer_path(self, sourcer_id: str) -> str:
@@ -209,7 +238,13 @@ class KPConnector(BaseConnector):
         account = account_ref(person.pp_account_id)
         if grant.kind != "sourcer_link" or not grant.remote_ref or account is None:
             raise ConnectorError("unsupported", detail="kp: a link needs the sourcer id and the person's PP account id")
-        return self._with_sourcer(self.request("PATCH", self._sourcer_path(grant.remote_ref), json={"pp_account_id": account}))
+        result = self._with_sourcer(self.request("PATCH", self._sourcer_path(grant.remote_ref), json={"pp_account_id": account}))
+        refused = (result.info or {}).get("link_refused")
+        if refused:
+            # The link was all this call asked for (the portal answers 409 for that today): a refusal is a failure.
+            raise ConnectorError(refused["reason"], status=result.status, detail=refused.get("message", ""),
+                                 body=result.data, plan=result.plan)
+        return result
 
     def _sourcer_id(self, grant: "EntitlementGrant", person: "Person") -> str | None:
         """The portal's id for the person, or None when it has no sourcer with that email. The portal answers

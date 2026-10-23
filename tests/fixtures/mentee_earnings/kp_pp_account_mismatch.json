@@ -1,1 +1,1 @@
-{"ok": false, "reason": "pp_account_mismatch", "error": "pp_account_mismatch", "message": "amy@example.test is already linked to a different PropertyPredator account, so nothing was changed. Martin can correct the link by hand."}
+{"ok": false, "reason": "pp_account_mismatch", "error": "pp_account_mismatch", "message": "amy@example.test is already linked to a different PropertyPredator account, so nothing was changed. The portal has no screen for that link yet: it has to be put right in the portal's database."}

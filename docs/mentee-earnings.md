@@ -16,6 +16,10 @@ grants their access (the nightly job at 03:10, or **Recompute now** on the mente
 | Hello New Home partner seat | the existing `hnh partner_seat` item | the seat is paused; their area stays assigned until head office changes it |
 | Group HQ franchise referral code | a seller record (kind mentee) is created for every active mentee who has none, with a code of their own | the seller record stays; switch it off on the seller page if it should stop |
 
+**Founder decision, 23 October 2026:** Group HQ sends Key Properties the Property Predator account id that Property
+Predator answers, even when Property Predator has not verified that account's email (`email_verified` is not read), so
+mentees who signed up with a password only are linked too.
+
 What each scheme pays, and when, is set by that business's own published terms. Group HQ only enrols; it never sets a
 rate, an attribution rule or a payout. Hello New Home has no commission figures in its system, so partner statements
 stay manual. A Group HQ seller's statements stay held until the self-billing agreement is entered on their seller page,
@@ -34,9 +38,13 @@ enrolling mentees in one of them, remove its item on **Programmes**.
   only asked about someone who holds or is due its scheme, or whose id there Group HQ already has: the person page of
   a prospect or an outside seller asks nobody and says "Not asked".
   - Property Predator: affiliate link and code, referred accounts, commission due and paid.
-  - Ordris: referral link and code, referrals, pending, payable and paid.
+  - Ordris: referral link and code, referrals, pending, payable and paid, and whether they have accepted Ordris's
+    partner terms (**terms not accepted** otherwise) once Ordris's answer says so.
   - Key Properties: sourcer login, share of the sourcing fee, whether the sourcer is linked to Property Predator,
-    deals submitted, earned and pipeline.
+    deals submitted, earned and pipeline. When Key Properties refused the Property Predator link, the card says
+    **Not linked to Property Predator** (or, when the sourcer holds another account, **Linked to a different Property
+    Predator account**) with what to put right in Key Properties and an **Open the grant** button (where Retry is),
+    even when Key Properties cannot be asked just now.
   - Hello New Home: partner portal, referral link and code, and the area, or **Needs a region** with a button to the
     Hello New Home page where you assign it.
   - Group HQ seller: code, tracked link and whether statements are held.
@@ -63,6 +71,17 @@ once Hello New Home is live in Group HQ and its lookup reports an area field; un
   holds another Property Predator account. Check the account id on the person page against the one Key Properties
   holds, put the wrong one right, then press **Retry** on the grant. Group HQ never retries this on its own. The
   Property Predator account id is the long id Property Predator shows (letters, digits and hyphens), not a number.
+- **Key Properties already has this Property Predator account on another Key Properties login (pp_account_in_use).**
+  Another Key Properties login holds their Property Predator account, usually a login of their own that Key Properties
+  made when they sent a deal pack from Property Predator under another email. If the grant is failed, Key Properties
+  changed nothing: Group HQ has not created or opened a sourcer for them, and a Key Properties login they already had
+  is left as it was. If the sourcer is open, deal packs they forward from Property Predator go to that other login. In
+  Key Properties, find the login that holds the account: if it is the mentee's own second login, merge it into their
+  sourcer login; if it is someone else's, take the account off it. Key Properties has no screen for either yet, so it
+  is a change in its database. If the account id on the person page is wrong, correct it there instead. Then press
+  **Retry** on the grant. Group HQ never sends the same id again on its own; the grant page shows what Key Properties
+  said. A Retry with **dry run** ticked only shows the call: the warning stays, says Retry has been pressed, and the
+  next live run sends it.
 - **Key Properties answered without the Property Predator account on the sourcer.** Key Properties is running a build
   that does not take the account yet. Group HQ tries again on the next five runs; once Key Properties is updated,
   press **Retry** on the grant if it has stopped.

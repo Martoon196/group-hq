@@ -16,7 +16,8 @@ The affiliate kind (contract 2 of the mentee-earnings packet, docs/connectors.md
             programme its ORDRIS_MENTEE_PROGRAMME_CODE names (the self-serve one by default); no Ordris login is needed
     GET  {ORDRIS_BASE_URL}/api/partner/grouphq/partners?email=
          -> {ok: true, partner: false} or {ok: true, partner: true, partner_id, referral_code, link, referrals,
-            pending_pence, payable_pence, paid_pence}
+            pending_pence, payable_pence, paid_pence}; when the answer also carries terms_accepted, terms_accepted_at or
+            terms_version (not part of the contract), partner_terms() reads them and the panel shows the partner terms
 
 There is no revoke: the programme is public and membership is permanent, so revoking an affiliate grant is a
 recorded no-op and nothing is sent.
@@ -38,6 +39,25 @@ PLANS = ("starter", "pro", "enterprise")
 
 def external_ref(grant: "EntitlementGrant") -> str:
     return f"grouphq:grant:{grant.id}"
+
+
+def partner_terms(data: dict) -> dict:
+    """Whether the partner has accepted Ordris's partner terms, when the answer says so. Contract 2 does not carry this;
+    the Ordris partner record is gaining terms_accepted_at and terms_version, so an answer may add terms_accepted (a
+    bool), terms_accepted_at (a timestamp, null while not accepted) and terms_version. An answer with none of them gives
+    {} and the panel says nothing about terms."""
+    out: dict = {}
+    if isinstance(data.get("terms_accepted"), bool):
+        out["terms_accepted"] = data["terms_accepted"]
+    if "terms_accepted_at" in data:
+        when = short_text(data.get("terms_accepted_at"), 40)
+        if when:
+            out["terms_accepted_at"] = when
+        out.setdefault("terms_accepted", when is not None)
+    version = short_text(data.get("terms_version"), 40)
+    if version and "terms_accepted" in out:
+        out["terms_version"] = version
+    return out
 
 
 def partner_info(data: dict) -> dict:
@@ -64,6 +84,7 @@ def partner_info(data: dict) -> dict:
         value = whole_number(data.get(key))
         if value is not None:
             info[key] = value
+    info.update(partner_terms(data))
     return info
 
 
