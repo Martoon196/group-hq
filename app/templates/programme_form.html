@@ -34,9 +34,10 @@
     <dl class="kv">
       <dt>product</dt><dd>{% for p in products %}<code>{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</dd>
       <dt>kind</dt><dd>{% for k in kinds %}<code>{{ k }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</dd>
-      <dt>value</dt><dd>The product's own name for the right: <code>pro_buyer</code> (PP Hunter), <code>starter</code> (Ordris plan), <code>area</code> (HNH seat), <code>mentee</code> (KP sourcer source), <code>kpuk.submit</code> (PP flag).</dd>
+      <dt>value</dt><dd>The product's own name for the right: <code>pro_buyer</code> (PP Hunter), <code>starter</code> (Ordris plan), <code>area</code> (HNH seat), <code>mentee</code> (KP sourcer source), <code>kpuk.submit</code> (PP flag), <code>affiliate</code> (PP affiliate programme), <code>partner</code> (Ordris partner programme).</dd>
       <dt>months</dt><dd>Optional whole number from 1 to 13. With it the item runs that many months from the start date; without it the item follows the mentee's computed access end.</dd>
       <dt>extras</dt><dd><code>fee_share_pct</code> (0 to 100) on a <code>kp sourcer_link</code>; <code>area_slug</code> or <code>postcodes</code> (a list of outward codes) and <code>fee_waived</code> (true or false) on an <code>hnh partner_seat</code>. A template may give one <code>pp comp_tier</code> only.</dd>
+      <dt>affiliate</dt><dd><code>pp affiliate</code> and <code>ordris affiliate</code> enrol the person in that product's public affiliate or partner programme, once each. Membership is permanent, so a revoke is recorded here and nothing is sent.</dd>
     </dl>
     <h2 class="mt-2">Example</h2>
 <pre class="json">[

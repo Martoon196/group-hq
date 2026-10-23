@@ -30,7 +30,7 @@ from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import (MENTEE_STATUSES, PAYMENT_METHODS, PAYMENT_MODES, EntitlementGrant, Mentee, Payment, Person,
                       Programme, User, utcnow)
-from ..services import settings
+from ..services import earnings, settings
 from ..services.audit import audit, changes
 from ..templating import go, render
 from .people import like_pattern, page_of, parse_date, parse_int, qs
@@ -203,9 +203,17 @@ def payment_snapshot(p: Payment) -> dict:
 # ---- list ---------------------------------------------------------------------------------
 @router.get("/mentees", response_class=HTMLResponse)
 def mentees_list(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """The register. ?region=needed is the "Needs a region" queue: active mentees whose Hello New Home partner had no
+    area at the last recompute (app.services.earnings.needs_region), each with the button to Hello New Home's admin page
+    where the founder assigns it."""
     qp = request.query_params
-    filters = {"status": qp.get("status", "").strip(), "programme": qp.get("programme", "").strip(), "q": qp.get("q", "").strip()[:120]}
+    filters = {"status": qp.get("status", "").strip(), "programme": qp.get("programme", "").strip(), "q": qp.get("q", "").strip()[:120],
+               "region": "needed" if qp.get("region", "").strip() == "needed" else ""}
     q = _mentee_query(db)
+    regions: dict[int, dict] = {}
+    if filters["region"]:
+        q = q.filter(Mentee.status == "active", Mentee.person_id.in_(earnings.needs_region_person_ids(db)))
+        regions = {r["person"].id: r for r in earnings.needs_region(db)}
     if filters["status"] in MENTEE_STATUSES:
         q = q.filter(Mentee.status == filters["status"])
     if filters["programme"].isdigit():
@@ -220,7 +228,8 @@ def mentees_list(request: Request, db: Session = Depends(get_db), user: User = D
     rows = [(m, access_summary(m)) for m in mentees]
     ctx = {"user": user, "section": "mentees", "rows": rows, "total": total, "page": page, "pages": pages, "filters": filters,
            "statuses": MENTEE_STATUSES, "programmes": _programme_choices(db), "qs": qs(filters),
-           "qs_prev": qs(filters, page=page - 1), "qs_next": qs(filters, page=page + 1), "mode_labels": MODE_LABELS}
+           "qs_prev": qs(filters, page=page - 1), "qs_next": qs(filters, page=page + 1), "mode_labels": MODE_LABELS,
+           "regions": regions}
     return render(request, "mentees.html", ctx)
 
 

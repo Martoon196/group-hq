@@ -536,7 +536,7 @@ def test_the_nightly_job_refuses_a_database_its_build_does_not_match(db, live, m
         assert job.main([], out=out) == 1
         assert mock.calls.call_count == 0
     assert "recompute refused" in out.getvalue() and "0005_district_cost_share" in out.getvalue()
-    assert "0007_growth" in out.getvalue(), "the build's own head is named"
+    assert "0008_mentee_earnings" in out.getvalue(), "the build's own head is named"
     assert grants_of(db, person) == []
     with session() as fresh:
         assert fresh.query(AuditLog).filter(AuditLog.action == "recompute.run").count() == 0
@@ -611,12 +611,14 @@ def test_an_import_batch_follows_the_switches(admin_client, monkeypatch):
         ordris_post = mock.post(f"{ORDRIS}/api/partner/grouphq/entitlements").mock(
             return_value=httpx.Response(200, json={"ok": True, "user_id": "user_1", "org_id": "org_1", "plan": "starter"}))
         hnh_post = mock.post(f"{HNH}/api/partner/partners").mock(return_value=httpx.Response(201, json=created))
+        ordris_partner = mock.post(f"{ORDRIS}/api/partner/grouphq/partners").mock(
+            return_value=httpx.Response(200, json={"ok": True, "partner_id": 5, "referral_code": "DEE5", "created": True}))
         r = admin_client.post("/mentees/import", data=form("Dee New, dee@example.test", amount="2000"))
         kp_calls = [c for c in mock.calls if c.request.url.host == "kp.example.test"]
     assert r.status_code == 200, r.text[:600]
     assert kp_calls == [] and kp_post.call_count == 0, "Key Properties is neither looked up nor sent a grant"
-    assert ordris_post.call_count == hnh_post.call_count == 1
-    assert r.text.count('class="status status-sent"') == 2 and r.text.count('class="status status-planned"') == 3
+    assert ordris_post.call_count == hnh_post.call_count == ordris_partner.call_count == 1
+    assert r.text.count('class="status status-sent"') == 3 and r.text.count('class="status status-planned"') == 4
 
 
 def test_the_hnh_handoff_follows_the_switch(admin_client, monkeypatch):

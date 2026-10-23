@@ -140,10 +140,10 @@ def test_linked_ids_are_set_by_hand_and_a_pp_account_belongs_to_one_person(admin
     assert r.status_code == 303 and "Linked ids saved" in flash_of(r.headers["location"])["ok"]
     with session() as db:
         person = db.get(Person, jo)
-        assert person.pp_account_id == 42 and person.ordris_user_id == "user_2abc" and person.ordris_org_id is None
+        assert person.pp_account_id == "42" and person.ordris_user_id == "user_2abc" and person.ordris_org_id is None
         assert person.kp_user_id == 7 and person.kp_investor_id is None and person.hnh_partner_id == 3 and person.hnh_user_id is None
     rows = audit_rows("person.links")
-    assert rows[-1].after == {"pp_account_id": 42, "ordris_user_id": "user_2abc", "kp_user_id": 7, "hnh_partner_id": 3}
+    assert rows[-1].after == {"pp_account_id": "42", "ordris_user_id": "user_2abc", "kp_user_id": 7, "hnh_partner_id": 3}
     assert rows[-1].before == {"pp_account_id": None, "ordris_user_id": None, "kp_user_id": None, "hnh_partner_id": None}
 
     # the same PP account on a second person is refused, by name
@@ -153,11 +153,13 @@ def test_linked_ids_are_set_by_hand_and_a_pp_account_belongs_to_one_person(admin
     with session() as db:
         assert db.get(Person, amy).pp_account_id is None
 
-    # a non-numeric id for a numeric column is refused and the typed value stays on the form
-    r = admin_client.post(f"/people/{jo}/links", data={"pp_account_id": "forty-two", "kp_user_id": "7"})
-    assert r.status_code == 400 and "whole number" in r.text and 'value="forty-two"' in r.text
+    # a non-numeric id for a numeric column is refused and the typed value stays on the form; a PP id is text (PP's
+    # users.id is a UUID) but never one with a space in it
+    r = admin_client.post(f"/people/{jo}/links", data={"pp_account_id": "forty two", "kp_user_id": "seven"})
+    assert r.status_code == 400 and "whole number" in r.text and 'value="seven"' in r.text and 'value="forty two"' in r.text
+    assert "letters, digits and hyphens" in r.text
     with session() as db:
-        assert db.get(Person, jo).pp_account_id == 42
+        assert db.get(Person, jo).pp_account_id == "42" and db.get(Person, jo).kp_user_id == 7
 
     # blanks clear, and an unchanged submission writes nothing
     r = admin_client.post(f"/people/{jo}/links", data={})

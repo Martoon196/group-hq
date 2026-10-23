@@ -1,13 +1,15 @@
 """Programmes: the packages a person can be enrolled on, each with a grant template.
 
 The template is a JSON list of items {product, kind, value[, months]}: product is one of pp, ordris,
-kp, hnh; kind one of comp_tier, org_plan, sourcer_link, partner_seat, flag; value the product's own
-name for the right (pro_buyer, starter, area, mentee, kpuk.submit); months, when present, fixes the
+kp, hnh; kind one of comp_tier, org_plan, sourcer_link, partner_seat, flag, affiliate; value the product's own
+name for the right (pro_buyer, starter, area, mentee, kpuk.submit, affiliate); months, when present, fixes the
 item's term instead of following the mentee's computed end date. A few items take one more key the
 connector reads: fee_share_pct (kp sourcer_link), area_slug or postcodes and fee_waived (hnh
 partner_seat). The shape is validated here so the engine never meets an item it cannot act on, and a
-template may name PP comp_tier once only (PP holds one comp per account). Programmes are seeded
-(app.seed) and edited here, never created from a screen: the codes are the plan's.
+template may name PP comp_tier once only (PP holds one comp per account). An affiliate item enrols the person in
+a product's public affiliate or partner programme and exists for Property Predator and Ordris only (Key Properties
+pays sourcers through the sourcer link, Hello New Home partners through the partner seat), once per product.
+Programmes are seeded (app.seed) and edited here, never created from a screen: the codes are the plan's.
 
 price is what the programme costs: for a mentee paying in full, access starts once the cleared
 payments reach it. Left blank, any cleared payment starts the term.
@@ -38,6 +40,9 @@ EXTRA_KEYS: dict[tuple[str, str], tuple[str, ...]] = {
     ("kp", "sourcer_link"): ("fee_share_pct",),
     ("hnh", "partner_seat"): ("area_slug", "postcodes", "fee_waived"),
 }
+# The products whose public affiliate or partner programme Group HQ can enrol someone in (contracts 1 and 2,
+# docs/connectors.md).
+AFFILIATE_PRODUCTS = {"pp": "Property Predator affiliate programme", "ordris": "Ordris partner programme"}
 MAX_MONTHS = 13            # twelve months is the longest term sold; one more covers a renewal landing early
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 OUTWARD_RE = re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?$")
@@ -106,6 +111,7 @@ def parse_grant_template(raw: str) -> tuple[list[dict], str]:
     items: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
     pp_comp_seen = False
+    affiliate_seen: set[str] = set()
     for i, item in enumerate(data, start=1):
         if not isinstance(item, dict):
             return [], f"Item {i} must be an object with product, kind and value."
@@ -118,6 +124,13 @@ def parse_grant_template(raw: str) -> tuple[list[dict], str]:
             if pp_comp_seen:
                 return [], f"Item {i}: a template may give one Property Predator tier only; the account holds one comp at a time."
             pp_comp_seen = True
+        if kind == "affiliate":
+            if product not in AFFILIATE_PRODUCTS:
+                return [], (f"Item {i}: an affiliate item is for Property Predator or Ordris only. Key Properties pays its "
+                            "sourcers through the sourcer link and Hello New Home its partners through the partner seat.")
+            if product in affiliate_seen:
+                return [], f"Item {i}: a template may enrol someone in the {AFFILIATE_PRODUCTS[product]} once only."
+            affiliate_seen.add(product)
         if not isinstance(value, str) or not value.strip():
             return [], f"Item {i}: value must be the product's name for the right, for example pro_buyer or starter."
         value = value.strip()

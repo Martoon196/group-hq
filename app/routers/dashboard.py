@@ -1,4 +1,5 @@
-"""The home screen: counts that matter and the latest audit entries."""
+"""The home screen: counts that matter, the "Needs a region" queue (active mentees whose Hello New Home partner has no
+area yet, from what the recompute last read: no live call) and the latest audit entries."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
@@ -8,7 +9,10 @@ from sqlalchemy.orm import Session
 from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import AuditLog, ConnectorCall, EntitlementGrant, Mentee, Person, Programme, User
+from ..services import earnings
 from ..templating import render
+
+REGION_CARD_ROWS = 8            # the dashboard lists this many; /mentees?region=needed lists them all
 
 router = APIRouter(dependencies=[Depends(check_origin)])
 
@@ -27,4 +31,6 @@ def dashboard(request: Request, db: Session = Depends(get_db), user: User = Depe
         "programmes": db.query(Programme).filter(Programme.active.is_(True)).count(),
     }
     recent = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(12).all()
-    return render(request, "dashboard.html", {"user": user, "section": "dashboard", "stats": stats, "recent": recent})
+    regions = earnings.needs_region(db)
+    return render(request, "dashboard.html", {"user": user, "section": "dashboard", "stats": stats, "recent": recent,
+                                              "regions": regions[:REGION_CARD_ROWS], "regions_total": len(regions)})

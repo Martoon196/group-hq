@@ -24,13 +24,18 @@ PROGRAMMES: list[dict] = [
         "name": "Mentorship",
         "description": ("Paid in full gives 12 months; monthly gives access while paying, with 7 days of grace "
                         "after each period ends. The HNH partner seat is fee-waived while the mentorship is active "
-                        "and the KP sourcer gets the KP forwarding right as a separate flag beside the PP tier."),
+                        "and the KP sourcer gets the KP forwarding right as a separate flag beside the PP tier. Every "
+                        "mentee is also enrolled in the Property Predator affiliate programme and the Ordris partner "
+                        "programme; both are public, so the membership stays when the mentorship ends."),
         "grant_template": [
             {"product": "pp", "kind": "comp_tier", "value": "pro_buyer"},
             {"product": "ordris", "kind": "org_plan", "value": "starter"},
             {"product": "hnh", "kind": "partner_seat", "value": "area"},
             {"product": "kp", "kind": "sourcer_link", "value": "mentee"},
             {"product": "pp", "kind": "flag", "value": "kpuk.submit"},
+            # Appended to an existing database's template by alembic/versions/0008_mentee_earnings.py (only when absent).
+            {"product": "pp", "kind": "affiliate", "value": "affiliate"},
+            {"product": "ordris", "kind": "affiliate", "value": "partner"},
         ],
     },
     {

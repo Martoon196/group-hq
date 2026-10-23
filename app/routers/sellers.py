@@ -38,6 +38,7 @@ from ..models import SELLER_KINDS, AuditLog, CommissionEntry, CommissionRule, Fr
 from ..services import commission
 from ..services.audit import audit, changes
 from ..services.commission import CommissionError, KIND_LABELS, percent, pounds
+from ..services.earnings import TRACKED_LINK
 from ..templating import go, render
 from .people import find_person_by_key, like_pattern, page_of, parse_date, person_key_problem, qs
 
@@ -52,7 +53,7 @@ STAGE_LABELS = {
     "enquiry": "Enquiry", "discovery": "Discovery", "pack_sent": "Pack sent", "follow_up": "Follow-up",
     "agreement": "Agreement", "paid": "Paid", "onboarding": "Onboarding", "lost": "Lost",
 }
-TRACKED_LINK = "https://hellonewhome.co.uk/partners-programme?seller={code}"
+# The tracked link lives with the earning links (app.services.earnings), which shows it on the mentee and person pages.
 NO_SELF_BILLING = ("No self-billing agreement is on record, so this seller's entries are held back from every statement "
                    "until the date it was signed is entered below.")
 

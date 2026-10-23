@@ -12,14 +12,27 @@ Auth: Bearer KP_PARTNER_TOKEN (GROUPHQ_PARTNER_TOKEN on the portal side, keyed b
 X-Partner-Client: grouphq. A grant creates or re-activates the sourcer; a revoke deactivates it
 (the user and their deals stay). fee_share_pct is sent only when the programme template item carries it:
 the default is the portal's own (schema default 50) until Martin signs the figure off.
+
+Contract 4 of the mentee-earnings packet (docs/connectors.md): the POST and the PATCH both carry pp_account_id when
+Group HQ knows it, and the portal sets it on the user row only while that is empty; a row already linked to a
+different Property Predator account is refused with 409 pp_account_mismatch, which the recompute records as a failed
+grant with a plain message and never retries on its own. The portal's answer carries the pp_account_id it holds,
+which is kept on the grant (ConnectorResult.info) so the recompute knows whether the link has reached Key Properties.
+The id is PP's users.id, a UUID string, sent and compared as text. link() is the PATCH that carries pp_account_id and
+nothing else, for an active sourcer whose row has not confirmed it: it never re-opens a sourcer or resets a share
+(the portal's PATCH accepts pp_account_id on its own).
+GET ?email= also answers fee_share_pct, active, pp_linked, login_url, deals_submitted, earned_pence and
+pipeline_pence, which the earning links panel shows (sourcer_status).
 """
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from ... import config
-from .base import BaseConnector, ConnectorError, ConnectorResult, _int_or_none, normalise_email
+from .base import (BaseConnector, ConnectorError, ConnectorResult, _int_or_none, account_ref, normalise_email, route_missing,
+                   safe_url, whole_number)
 
 if TYPE_CHECKING:   # pragma: no cover
     from ...models import EntitlementGrant, Person
@@ -53,6 +66,47 @@ def _company(person: "Person") -> str:
 
 
 PLACEHOLDER = "{sourcer_id}"       # stands in for the id in a dry-run plan when none is known yet
+MISMATCH_REASON = "pp_account_mismatch"
+
+
+def share_pct(value: Any) -> str | None:
+    """The sourcer's fee share as the portal answers it (a number, or text such as "50.00" from a NUMERIC column) shown
+    as "50" or "37.5"; None when it is missing or not a percentage from 0 to 100."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return None
+    if not number.is_finite() or number < 0 or number > 100:
+        return None
+    text = f"{number.normalize():f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def sourcer_info(record: dict) -> dict:
+    """What contract 4's lookup answers that the earning links panel shows. Missing or malformed values are left out;
+    a login link that is not a plain http(s) URL is dropped."""
+    info: dict = {"sourcer": True}
+    sourcer_id = whole_number(record.get("id"))
+    if sourcer_id is not None:
+        info["id"] = sourcer_id
+    share = share_pct(record.get("fee_share_pct"))
+    if share is not None:
+        info["fee_share_pct"] = share
+    for key in ("active", "pp_linked"):
+        if isinstance(record.get(key), bool):
+            info[key] = record[key]
+    login = safe_url(record.get("login_url"))
+    if login:
+        info["login_url"] = login
+    for key in ("deals_submitted", "earned_pence", "pipeline_pence"):
+        value = whole_number(record.get(key))
+        if value is not None:
+            info[key] = value
+    return info
+
+
 LIST_MAX = 200                     # the most rows one list call asks for
 _LIST_KEYS = ("sourcers", "users", "results", "items", "rows")
 
@@ -87,7 +141,7 @@ def sourcer_row(raw: Any) -> dict | None:
         "source": str(raw.get("source") or "").strip()[:40],
         "active": active if isinstance(active, bool) else None,
         "deals": _count(deals),
-        "pp_account_id": _int_or_none(raw.get("pp_account_id")),
+        "pp_account_id": account_ref(raw.get("pp_account_id")),
         "created_at": str(raw.get("created_at") or "")[:40] or None,
     }
 
@@ -115,6 +169,9 @@ class KPConnector(BaseConnector):
                                      body=result.data, plan=result.plan)
             result.remote_ref = str(as_int)
             result.links = {"kp_user_id": as_int}
+        linked = account_ref(record.get("pp_account_id")) if record else None
+        if linked is not None:
+            result.info = {"pp_account_id": linked}
         return result
 
     def _sourcer_path(self, sourcer_id: str) -> str:
@@ -127,21 +184,32 @@ class KPConnector(BaseConnector):
             raise self.unsupported(grant)
         extra = extra or {}
         fee = _int_or_none(extra.get("fee_share_pct"))
+        account = account_ref(person.pp_account_id)
         if grant.remote_ref:
             patch: dict = {"active": True}
             if fee is not None:
                 patch["fee_share_pct"] = fee
+            if account is not None:
+                patch["pp_account_id"] = account        # set by the portal only while its row has none
             return self._with_sourcer(self.request("PATCH", self._sourcer_path(grant.remote_ref), json=patch))
         payload: dict = {
             "email": normalise_email(person.person_key),
             "name": person.name or "",
             "company": _company(person),
-            "pp_account_id": person.pp_account_id,
+            "pp_account_id": account,
             "source": (grant.value or "mentee").strip().lower() or "mentee",
         }
         if fee is not None:
             payload["fee_share_pct"] = fee
         return self._with_sourcer(self.request("POST", self.SOURCERS, json=payload))
+
+    def link(self, grant: "EntitlementGrant", person: "Person") -> ConnectorResult:
+        """Contract 4's link on its own: PATCH {pp_account_id} for a sourcer the grant already holds. Nothing else is
+        sent, so a sourcer switched off or given another share in the portal by hand stays exactly as it is."""
+        account = account_ref(person.pp_account_id)
+        if grant.kind != "sourcer_link" or not grant.remote_ref or account is None:
+            raise ConnectorError("unsupported", detail="kp: a link needs the sourcer id and the person's PP account id")
+        return self._with_sourcer(self.request("PATCH", self._sourcer_path(grant.remote_ref), json={"pp_account_id": account}))
 
     def _sourcer_id(self, grant: "EntitlementGrant", person: "Person") -> str | None:
         """The portal's id for the person, or None when it has no sourcer with that email. The portal answers
@@ -174,6 +242,20 @@ class KPConnector(BaseConnector):
 
     def lookup(self, email: str) -> ConnectorResult:
         return self._with_sourcer(self.request("GET", self.SOURCERS, params={"email": normalise_email(email)}))
+
+    def sourcer_status(self, email: str) -> ConnectorResult:
+        """Contract 4's GET, for the earning links panel. In dry run only the plan; live, result.info is sourcer_info()
+        of the row, or {"sourcer": False} when the portal refuses with 404 (no sourcer with that email). A 404 that is
+        not the portal's own refusal (route_missing) is raised like any other failure."""
+        try:
+            result = self.lookup(email)
+        except ConnectorError as error:
+            if error.status == 404 and not route_missing(error):
+                return ConnectorResult(ok=True, status=404, data=error.body, plan=error.plan, info={"sourcer": False})
+            raise
+        if not result.dry_run:
+            result.info = sourcer_info(_first(result.data))
+        return result
 
     def list_sourcers(self, limit: int = 100, offset: int = 0) -> ConnectorResult:
         """One page of the portal's sourcers, newest first: GET /api/partner/sourcers?limit=&offset= with no email

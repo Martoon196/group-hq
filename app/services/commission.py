@@ -12,6 +12,7 @@ be quoted to a seller before it is true. Partners never see any of this; Group H
     generate_statements(db, "2026-10", actor=...)    the previous month's unpaid entries, per seller
     mark_paid(db, statement, paid_at, actor=...)     stamps the statement and every entry on it
     seller_totals(db, seller_id)                     earned, clawed back, cleared, paid and owed
+    ensure_mentee_seller(db, person, actor=...)      a seller of kind mentee for a mentee who has none (the recompute)
 
 Money is an integer number of pence throughout; a percentage of pence is rounded half up to the penny.
 Nothing here commits: the caller (a route, the job or a test) commits, so an audit row is never written
@@ -28,6 +29,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from ..models import AuditLog, CommissionEntry, CommissionRule, FranchiseOpportunity, Person, Seller, Statement, User, utcnow
@@ -528,6 +530,29 @@ def generate_code(db: Session, person: Person | None, *, attempts: int = 20) -> 
         if db.query(Seller.id).filter(func.lower(Seller.code) == code.lower()).first() is None:
             return code
     raise CommissionError("Could not find an unused seller code; try again.")
+
+
+def ensure_mentee_seller(db: Session, person: Person, *, actor: User | str = "") -> Seller | None:
+    """Give a mentee a seller record so they hold a franchise referral code (the recompute calls this for every person
+    with an active mentee row). Idempotent: a person who already has a seller, of any kind and active or not, is left
+    exactly as they are and None is returned. The new seller is kind mentee, active, with a generated code and no
+    self-billing agreement, so every statement stays held until that agreement is entered (the existing rule).
+    Audited as seller.create. Written in a savepoint: a code or person clash with a concurrent write leaves nothing
+    behind and the next recompute tries again. Caller commits."""
+    if person.id is None or db.query(Seller.id).filter(Seller.person_id == person.id).first() is not None:
+        return None
+    try:
+        with db.begin_nested():
+            seller = Seller(person_id=person.id, kind="mentee", code=generate_code(db, person), bank_reference="",
+                            self_billing_agreed_at=None, active=True)
+            db.add(seller)
+            db.flush()
+    except (IntegrityError, CommissionError):
+        return None
+    audit(db, actor, "seller.create", f"seller:{seller.id}",
+          after={"person_id": seller.person_id, "kind": seller.kind, "code": seller.code, "bank_reference": "",
+                 "self_billing_agreed_at": None, "active": True, "via": "recompute: active mentee"})
+    return seller
 
 
 def code_problem(code: str) -> str:

@@ -11,6 +11,11 @@ fails validation re-renders with the submitted values and a 400 so nothing typed
 
 This module also hosts the small form helpers the other register routers share (get_or_404,
 parse_int, parse_date, like_pattern, page_of).
+
+GET /people/{id}/earnings is the earning links panel (app.services.earnings): with ?fragment=1 only the panel's
+body, which the person and mentee pages load after they have rendered, so a slow product never holds them; without
+it, the panel on a page of its own (the link for a browser without JavaScript). ?mentee=<id> (a mentee row of this
+person) adds the Copy WhatsApp welcome button for that programme. It only reads: nothing is written.
 """
 from __future__ import annotations
 
@@ -27,8 +32,9 @@ from sqlalchemy.orm import Session, selectinload
 from ..auth import check_origin, normalise_email, require_admin
 from ..db import get_db
 from ..models import ConnectorCall, EntitlementGrant, Mentee, Person, PersonOrganisation, User
-from ..services import settings
+from ..services import earnings, settings
 from ..services.audit import audit, changes
+from ..services.connectors.base import account_ref
 from ..services.entitlements import hold_of
 from ..templating import go, render
 
@@ -41,9 +47,10 @@ RENAME_REFUSED = ("Revoke every grant before changing the email: the products ar
                   "the old address would stay live in the product.")
 PAGE_SIZE = 50
 
-# (column, product, label, type). Integer ids are the products' own primary keys; Ordris ids are Clerk strings.
+# (column, product, label, type). Integer ids are the products' own primary keys; Ordris ids are Clerk strings, and
+# Property Predator's users.id is a UUID string (checked with account_ref: letters, digits and hyphens, no spaces).
 LINK_FIELDS: tuple[tuple[str, str, str, type], ...] = (
-    ("pp_account_id", "pp", "Account id (users.id)", int),
+    ("pp_account_id", "pp", "Account id (users.id)", str),
     ("ordris_user_id", "ordris", "Clerk user id", str),
     ("ordris_org_id", "ordris", "Clerk organisation id", str),
     ("kp_user_id", "kp", "User id", int),
@@ -234,6 +241,23 @@ def person_detail(person_id: int, request: Request, db: Session = Depends(get_db
     return _person_page(request, db, user, person)
 
 
+@router.get("/people/{person_id}/earnings", response_class=HTMLResponse)
+def person_earnings(person_id: int, request: Request, mentee: str = "", fragment: str = "", db: Session = Depends(get_db),
+                    user: User = Depends(require_admin)):
+    person = get_or_404(db, Person, person_id)
+    row = None
+    if mentee.isdigit():
+        row = (db.query(Mentee).options(selectinload(Mentee.programme))
+               .filter(Mentee.id == int(mentee), Mentee.person_id == person.id).first())
+    links = earnings.earning_links(db, person)
+    welcome = earnings.welcome_message(person, row.programme.name, links) if row is not None else ""
+    ctx = {"user": user, "section": "mentees" if row is not None else "people", "person": person, "mentee": row,
+           "links": links, "welcome": welcome}
+    response = render(request, "_earnings.html" if fragment else "earnings.html", ctx)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @router.post("/people/{person_id}", response_class=HTMLResponse)
 def person_update(person_id: int, request: Request, email: str = Form(""), name: str = Form(""), phone: str = Form(""),
                   notes: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
@@ -284,6 +308,9 @@ async def person_links(person_id: int, request: Request, db: Session = Depends(g
                 errors.append(f"{settings.product_name(product)} {label.lower()} must be a whole number.")
             else:
                 new[col] = int(raw)
+        elif col == "pp_account_id" and account_ref(raw) != raw:
+            errors.append(f"{settings.product_name(product)} {label.lower()} must be the id as Property Predator shows it "
+                          "(letters, digits and hyphens, with no spaces).")
         else:
             new[col] = raw
     if not errors and new.get("pp_account_id") is not None:

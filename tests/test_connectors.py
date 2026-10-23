@@ -177,7 +177,7 @@ def test_pp_comp_sends_the_contract_and_links_the_account():
         result = PPConnector.from_config().grant(grant, person, reason="Group HQ: Mentorship (grant 12)")
     assert body_of(route.calls.last) == {"email": "amy@example.test", "tier": "pro_buyer", "until": "2027-10-01T00:00:00Z",
                                          "revert_to": "free", "reason": "Group HQ: Mentorship (grant 12)"}
-    assert result.ok and result.remote_ref == "77" and result.links == {"pp_account_id": 77}
+    assert result.ok and result.remote_ref == "77" and result.links == {"pp_account_id": "77"}, "PP's id is kept as text"
     assert result.data["tier"] == "pro_buyer"
 
 
@@ -243,7 +243,7 @@ def test_pp_account_lookup_and_flags():
             200, json={"account_id": 77, "tier": "free", "subscription_status": None, "comp_expires_at": None}))
         result = PPConnector.from_config().lookup("Amy@Example.test")
         assert route.calls.last.request.url.params["email"] == "amy@example.test"
-        assert result.links == {"pp_account_id": 77} and result.remote_ref == "77"
+        assert result.links == {"pp_account_id": "77"} and result.remote_ref == "77"
         flags = mock.post("/api/partner/grouphq/flags").mock(return_value=httpx.Response(200, json={"ok": True, "account_id": 77}))
         PPConnector.from_config().grant(fake_grant(kind="flag", value="kpuk.submit"), fake_person())
         assert body_of(flags.calls.last) == {"email": "amy@example.test", "key": "kpuk.submit", "until": "2027-10-01T00:00:00Z"}
@@ -293,12 +293,12 @@ def test_kp_contract_creates_then_patches():
         post = mock.post("/api/partner/sourcers").mock(return_value=httpx.Response(201, json=created))
         result = KPConnector.from_config().grant(grant, person, extra={"fee_share_pct": 50})
         assert body_of(post.calls.last) == {"email": "amy@example.test", "name": "Amy Archer", "company": "Archer Homes Ltd",
-                                            "pp_account_id": 77, "source": "mentee", "fee_share_pct": 50}
+                                            "pp_account_id": "77", "source": "mentee", "fee_share_pct": 50}
         assert result.remote_ref == "41" and result.links == {"kp_user_id": 41}
         # a second grant with the id known re-activates instead of creating
         patch = mock.patch("/api/partner/sourcers/41").mock(return_value=httpx.Response(200, json={**created, "created": False, "linked": True}))
         KPConnector.from_config().grant(fake_grant(product="kp", kind="sourcer_link", value="mentee", remote_ref="41"), person)
-        assert body_of(patch.calls.last) == {"active": True}
+        assert body_of(patch.calls.last) == {"active": True, "pp_account_id": "77"}, "contract 4: the PATCH carries the PP id too"
         KPConnector.from_config().revoke(fake_grant(product="kp", kind="sourcer_link", value="mentee", remote_ref="41"), person)
         assert body_of(patch.calls.last) == {"active": False}
         # no remote ref: look the sourcer up by email first

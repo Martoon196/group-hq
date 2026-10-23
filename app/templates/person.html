@@ -44,7 +44,14 @@
   </div>
 
   <div>
-    <section class="panel">
+    <section class="panel earn-panel">
+      <div class="panel-head"><h2>Earning links</h2><a class="btn btn-ghost btn-sm" href="/people/{{ person.id }}/earnings">Open on its own</a></div>
+      <div data-fragment-src="/people/{{ person.id }}/earnings?fragment=1" data-fragment-fail="Couldn't load the earning links. Reload the page to try again; you may need to sign in again." aria-busy="true" aria-live="polite">
+        <p class="earn-loading small">Asking each product for this person's links. Open on its own if this does not fill in.</p>
+      </div>
+    </section>
+
+    <section class="panel mt-2">
       <div class="panel-head"><h2>Programmes</h2><a class="btn btn-ghost btn-sm" href="/mentees/new?person_id={{ person.id }}">Enrol</a></div>
       {% if mentees %}
       <div class="table-scroll">

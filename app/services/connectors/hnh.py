@@ -14,6 +14,11 @@ founder has decided it; without one HNH creates the partner with no area and HQ 
 
 Hello New Home is a separate company (Hello New Home 2 Ltd): this call moves a name and an email
 between two controllers, so it stays in dry run until the intra-group data sharing agreement exists.
+
+Contract 3 of the mentee-earnings packet (docs/connectors.md): the lookup's partner also answers referral_code,
+referral_link, area ({slug, name} or null), tier, status, portal_url and admin_url (the head-office page where the
+founder assigns the area). partner_status() reads them; the recompute keeps them on the grant (remote_info), which is
+what the "Needs a region" queue lists without a live call, and the earning links panel reads them live.
 """
 from __future__ import annotations
 
@@ -21,7 +26,8 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from ... import config
-from .base import BaseConnector, ConnectorError, ConnectorResult, _int_or_none, normalise_email
+from .base import (BaseConnector, ConnectorError, ConnectorResult, _int_or_none, normalise_email, route_missing, safe_url,
+                   short_text, whole_number)
 
 if TYPE_CHECKING:   # pragma: no cover
     from ...models import EntitlementGrant, Person
@@ -29,6 +35,55 @@ if TYPE_CHECKING:   # pragma: no cover
 TIERS = ("introducer", "area")
 PAUSED = "paused"
 PLACEHOLDER = "{partner_id}"       # stands in for the id in a dry-run plan when none is known yet
+
+
+def _area(value: Any) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    slug, name = short_text(value.get("slug"), 80), short_text(value.get("name"), 120)
+    return {"slug": slug, "name": name or slug} if (slug or name) else None
+
+
+def partner_info(data: Any) -> dict:
+    """What contract 3's lookup answers, for the panel and the region queue: {found: False}, or found with the partner
+    id, referral code and link, area ({slug, name} or None), tier, status, portal and admin links, and needs_region.
+    Each field is read from the partner record, or from the top of the answer when the record lacks it. area_known
+    is False when the answer carries neither area nor areas (an HNH build without contract 3): such a partner is
+    never listed as needing a region, because nothing says it has none. An introducer has no territory by design and
+    is never listed either."""
+    top = data if isinstance(data, dict) else {}
+    record = _record(data)
+    if top.get("found") is False or not record or (record is top and "id" not in record and top.get("found") is not True):
+        return {"found": False}
+
+    def pick(key: str):
+        return record[key] if key in record else top.get(key)
+
+    info: dict = {"found": True}
+    partner_id = whole_number(record.get("id"))
+    if partner_id is not None:
+        info["partner_id"] = partner_id
+    code = short_text(pick("referral_code"), 64)
+    if code:
+        info["referral_code"] = code
+    for key in ("referral_link", "portal_url", "admin_url"):
+        link = safe_url(pick(key))
+        if link:
+            info[key] = link
+    for key in ("tier", "status"):
+        text = short_text(pick(key), 20)
+        if text:
+            info[key] = text.lower()
+    area_known = "area" in record or "area" in top
+    area = _area(pick("area"))
+    if not area_known and isinstance(record.get("areas"), list):
+        area_known = True
+        area = next((a for a in (_area(raw) for raw in record["areas"]) if a), None)
+    info["area"] = area
+    info["area_known"] = area_known
+    info["needs_region"] = (area_known and area is None and info.get("status", "active") == "active"
+                            and info.get("tier") != "introducer")
+    return info
 
 
 def _record(data: Any) -> dict:
@@ -150,3 +205,17 @@ class HNHConnector(BaseConnector):
 
     def lookup(self, email: str) -> ConnectorResult:
         return self._with_partner(self.request("GET", self.PARTNERS, params={"email": normalise_email(email)}))
+
+    def partner_status(self, email: str) -> ConnectorResult:
+        """Contract 3's lookup, for the earning links panel and the region queue. In dry run only the plan; live,
+        result.info is partner_info() of the answer ({found: False} for no partner, a 404 refusal included; a 404 that is
+        not HNH's own refusal, route_missing, is raised like any other failure)."""
+        try:
+            result = self.lookup(email)
+        except ConnectorError as error:
+            if error.status == 404 and not route_missing(error):
+                return ConnectorResult(ok=True, status=404, data=error.body, plan=error.plan, info={"found": False})
+            raise
+        if not result.dry_run:
+            result.info = partner_info(result.data)
+        return result

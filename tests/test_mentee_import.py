@@ -149,7 +149,7 @@ def test_kp_list_sourcers_dry_run_plans_the_call_and_live_reads_every_shape():
         amy, bob = result.data["sourcers"]
         assert amy == {"id": 41, "email": "amy@example.test", "name": "Amy Archer", "company": "Archer Homes Ltd", "source": "mentee",
                        "active": True, "deals": 3, "pp_account_id": None, "created_at": "2026-09-01T10:00:00.000Z"}
-        assert bob["deals"] == 2 and bob["pp_account_id"] == 77, "a list of deals counts; the account id arrives as a string"
+        assert bob["deals"] == 2 and bob["pp_account_id"] == "77", "a list of deals counts; the account id is text, as it arrives"
         # a bare list, and the count under another name
         mock.get("/api/partner/sourcers").mock(return_value=httpx.Response(200, json=[{"id": 5, "email": "c@example.test", "deal_count": "7"}]))
         only = KPConnector.from_config().list_sourcers()
@@ -293,7 +293,7 @@ def test_existing_person_keeps_hand_set_ids_and_empty_ids_are_filled(admin_clien
         assert a.name == "Amy Archer", "a nameless person takes the name from the row"
         assert a.ordris_user_id == "user_by_hand", "an id set by hand is never overwritten"
         assert a.kp_investor_id == 5
-        assert (a.ordris_org_id, a.kp_user_id, a.hnh_partner_id, a.hnh_user_id, a.pp_account_id) == ("org_9", None, 9, 31, 77)
+        assert (a.ordris_org_id, a.kp_user_id, a.hnh_partner_id, a.hnh_user_id, a.pp_account_id) == ("org_9", None, 9, 31, "77")
         assert db.get(Person, cat).kp_user_id == 41, "a KP user id already linked to someone else is not linked twice"
         b = db.get(Person, bob)
         assert b.name == "Robert Brown", "a name already recorded is kept"
@@ -358,7 +358,8 @@ def test_payment_and_grants_are_created_in_dry_run(admin_client):
         assert payment.amount == Decimal("1250.00") and payment.paid_at == midnight and payment.cleared_at == midnight
         assert payment.method == "manual" and payment.period_end is None and "existing-users import" in payment.notes
         grants = db.query(EntitlementGrant).filter(EntitlementGrant.person_id == cara.id).all()
-        assert len(grants) == 5 and {g.product for g in grants} == {"pp", "ordris", "hnh", "kp"}
+        assert len(grants) == 7 and {g.product for g in grants} == {"pp", "ordris", "hnh", "kp"}
+        assert {(g.product, g.kind) for g in grants if g.kind == "affiliate"} == {("pp", "affiliate"), ("ordris", "affiliate")}
         calls = db.query(ConnectorCall).all()
         assert calls and all(c.status == "pending" for c in calls), "planned in dry run, sent by the next live run"
     page = r.text
@@ -366,8 +367,8 @@ def test_payment_and_grants_are_created_in_dry_run(admin_client):
     assert audit_rows("mentee.create")[0].after["via"] == "import"
     assert audit_rows("payment.create")[0].after["pence"] == 125000
     recompute = audit_rows("mentee.recompute")
-    assert len(recompute) == 1 and recompute[0].after["outcomes"] == {"planned": 5}
-    assert audit_rows("mentee.import")[0].after["grants"] == {"planned": 5}
+    assert len(recompute) == 1 and recompute[0].after["outcomes"] == {"planned": 7}
+    assert audit_rows("mentee.import")[0].after["grants"] == {"planned": 7}
 
 
 def test_monthly_payment_runs_from_the_start_date_and_grants_wait_when_asked(admin_client):
@@ -399,14 +400,17 @@ def test_live_grants_go_out_and_the_hnh_password_is_shown_once_and_never_stored(
         ordris_post = mock.post(f"{ORDRIS}/api/partner/grouphq/entitlements").mock(
             return_value=httpx.Response(200, json={"ok": True, "user_id": "user_1", "org_id": "org_1", "plan": "starter"}))
         hnh_post = mock.post(f"{HNH}/api/partner/partners").mock(return_value=httpx.Response(201, json=created_partner))
+        ordris_partner = mock.post(f"{ORDRIS}/api/partner/grouphq/partners").mock(return_value=httpx.Response(
+            200, json={"ok": True, "partner_id": 5, "referral_code": "DEE5", "link": "https://ordris.example.test/?ref=DEE5",
+                       "created": True}))
         r = admin_client.post("/mentees/import", data=form("Dee New, dee@example.test", amount="2000"))
     assert r.status_code == 200, r.text[:600]
-    assert kp_post.call_count == ordris_post.call_count == hnh_post.call_count == 1
+    assert kp_post.call_count == ordris_post.call_count == hnh_post.call_count == ordris_partner.call_count == 1
     assert json.loads(kp_post.calls.last.request.content)["email"] == "dee@example.test"
     page = r.text
     assert PASSWORD in page and "Pass this on now" in page
-    assert page.count('class="status status-sent"') == 3, "Ordris, Hello New Home and Key Properties are live"
-    assert page.count('class="status status-planned"') == 2, "PP is in dry run, so its two rights are planned"
+    assert page.count('class="status status-sent"') == 4, "Ordris (plan and partner), Hello New Home and Key Properties are live"
+    assert page.count('class="status status-planned"') == 3, "PP is in dry run, so its three rights are planned"
     with session() as db:
         dee = db.query(Person).filter(Person.person_key == "dee@example.test").one()
         assert (dee.kp_user_id, dee.ordris_user_id, dee.hnh_partner_id) == (41, "user_1", 9), "the grants filled the empty ids"

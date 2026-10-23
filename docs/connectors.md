@@ -5,7 +5,7 @@ API looks like, and how far each contract has got. Written 20 October 2026.
 
 | Product | Module | Contract | Status |
 |---|---|---|---|
-| Property Predator | `app/services/connectors/pp.py` | plan Phase 1, PP branch `feat/grouphq-partner` | **implemented here; the PP side goes through PP's audit lane before anything is live** |
+| Property Predator | `app/services/connectors/pp.py` | plan Phase 1, PP branch `feat/grouphq-partner`; affiliate contract 1 (below) | **implemented here; the PP side goes through PP's audit lane before anything is live** |
 | Ordris | `app/services/connectors/ordris.py` | plan Phase 2, Ordris branch `grouphq-connector` | **built on the product branch**, verified against the fixtures here; not yet live |
 | Key Properties | `app/services/connectors/kp.py` | plan Phase 2, portal branch `grouphq-connector` | **built on the product branch**, verified against the fixtures here; not yet live |
 | Hello New Home | `app/services/connectors/hnh.py` | plan Phase 2, HNH branch `partner-api` | **built on the product branch**, verified against the fixtures here; stays in dry run until the data sharing agreement exists |
@@ -118,8 +118,8 @@ at 13 months.
 
 `until` is sent as `2027-10-01T00:00:00Z`, midnight UTC at the start of the day access ends, which
 PP's `grant_comp` parses with `fromisoformat`. `revert_to` is always `free`: a mentee gift ends on
-the free tier, never on a tier they were not paying for. `account_id` in any answer fills
-`people.pp_account_id` when it is empty. Asks of the PP endpoint, so the mapping above holds: send
+the free tier, never on a tier they were not paying for. `account_id` in any answer (PP's `users.id`, a UUID
+string, kept as text) fills `people.pp_account_id` when it is empty and no other person holds it. Asks of the PP endpoint, so the mapping above holds: send
 `reason` codes `paid_subscription` (409), `no_account` (404) and `not_on_comp` (409) rather than
 prose, and keep the hourly `expire_comps` reverting on its own so a Group HQ outage never makes a
 gift permanent.
@@ -230,6 +230,71 @@ territory in place. Hello New Home
 is a separate company (Hello New Home 2 Ltd): this call moves a name and an email between two data
 controllers, so it stays in dry run until the intra-group data sharing agreement and consent wording
 exist (plan, Phase 3).
+
+## Mentee earnings: contracts 1 to 4 (23 October 2026)
+
+Every mentee is enrolled in each scheme the group runs (`docs/mentee-earnings.md`). The product side of each contract
+is built in that product's own lane; Group HQ codes to exactly these, and the recorded fixtures in
+`tests/fixtures/mentee_earnings/` are the bodies it expects. All four are server to server with the product's
+existing Group HQ credential: no `Origin`, `X-Partner-Client: grouphq`, the product's own token header and
+constant-time check, a durable daily cap on the product side, and refusals as `{ok: false, reason, message}`.
+
+| # | Product | Group HQ grant or read | Call | Answer |
+|---|---|---|---|---|
+| 1 | Property Predator | `affiliate` (template item `{"product": "pp", "kind": "affiliate", "value": "affiliate"}`) | `POST /api/partner/grouphq/affiliate` `{email, reason}` | `{ok: true, account_id, code, link, created}` (`created` false when already an affiliate; idempotent) or `404 {ok: false, reason: "no_account"}`; `account_id` (PP's `users.id`, a UUID string) becomes `remote_ref` and fills `people.pp_account_id`, which is text since 0008; `code` and `link` are kept on the grant (`remote_info`) |
+| 1 | Property Predator | the earning links panel | `GET /api/partner/grouphq/affiliate?email=` | `{ok: true, account_id, affiliate: false}` or `{ok: true, account_id, affiliate: true, code, link, referred_accounts, commission_due_pence, commission_paid_pence}` |
+| 2 | Ordris | `affiliate` (`{"product": "ordris", "kind": "affiliate", "value": "partner"}`) | `POST /api/partner/grouphq/partners` `{email, name, external_ref: "grouphq:grant:<id>"}` | `{ok: true, partner_id, referral_code, link, created}`: an active partner in the programme `ORDRIS_MENTEE_PROGRAMME_CODE` names (the self-serve one by default), no Ordris login needed; `partner_id` becomes `remote_ref`, the code and link are kept on the grant |
+| 2 | Ordris | the earning links panel | `GET /api/partner/grouphq/partners?email=` | `{ok: true, partner: false}` or `{ok: true, partner: true, partner_id, referral_code, link, referrals, pending_pence, payable_pence, paid_pence}` |
+| 3 | Hello New Home | the recompute (after the partner seat) and the panel | `GET /api/partner/partners?email=` (as before) | the partner also carries `referral_code`, `referral_link`, `area` (`{slug, name}` or null), `tier`, `status`, `portal_url` and `admin_url` (the head-office page where the founder assigns the area). The recompute keeps them on the partner seat grant with `checked_at` and `needs_region` (found, area known and null, status active, tier not introducer), which the Needs a region queue lists without a live call. An answer with neither `area` nor `areas` is an HNH build without contract 3 and is never listed |
+| 4 | Key Properties | `sourcer_link` (as before) | `POST /api/partner/sourcers` and `PATCH /api/partner/sourcers/{id}` both carry `pp_account_id` (the UUID string, as text) whenever Group HQ knows it | the portal sets it on the user row only while that is empty; a row linked to a different PP account is `409 {ok: false, reason: "pp_account_mismatch"}`. The `pp_account_id` the portal answers is kept on the grant |
+| 4 | Key Properties | the earning links panel | `GET /api/partner/sourcers?email=` | the row also carries `fee_share_pct`, `active`, `pp_linked`, `login_url`, `deals_submitted`, `earned_pence`, `pipeline_pence`; the portal's `404 {ok: false, error: "not_found"}` is "no sourcer" |
+
+**No revoke for an affiliate.** Both programmes are public and membership is permanent, so a revoke of an `affiliate`
+grant (lapse, Revoke all, Pause, a template edit) is a recorded no-op (`noop: "kept: public programme"`) and nothing is
+sent. The grant reads revoked in Group HQ; the code and link stay on it.
+
+**A route that is not deployed yet.** Every contract refuses with `{ok: false, reason, message}`, so a `404` without
+`ok: false` (FastAPI's `{"detail": "Not Found"}`, an HTML page) means the product has not deployed its side yet
+(`base.route_missing`). On an `affiliate` grant that is a failed call that does not use up an attempt, so the grant is
+asked again each night and never reaches "gave up" while Property Predator or Ordris deploys; the grant shows why. The
+panel shows such a product as "couldn't reach", never as "no account" or "not enrolled". Deploying PP contract 1 and
+Ordris contract 2 before Group HQ's 0008 is still the tidy order.
+
+**Order inside one person's recompute.** Orphaned grants are revoked first, as before. Then, when the person will be
+sent a Key Properties sourcer link and Group HQ does not know their Property Predator account yet, PP's account lookup
+(`GET .../account?email=`, live PP only; a 404 is "no account", any other failure is a skipped `lookup` row on the run
+page and the link goes without the id). Then every PP grant (whose answers also record the account id), then the KP
+sourcer link, then everything else in template order. After the decisions, an active Hello New Home partner seat is
+looked up (contract 3) and what HNH answers is kept on the grant; a failed lookup keeps the last answer and records
+`check_error`.
+
+**The Key Properties link.** An active sourcer link whose row has not confirmed the person's current PP account
+(`remote_info.pp_account_id`, compared as text) is sent a `link` call, `PATCH /api/partner/sourcers/{id}`
+`{pp_account_id}` and nothing else (the portal's PATCH takes the id on its own), under its own key
+`grant:<id>:link:pp:<account id>`, so a mentee linked before Group HQ knew the id gets it. It never re-opens a sourcer
+switched off by hand in the portal or resets a share set there. The link counts as done only when the portal answers
+with that id: a `200` without it (a portal that drops the field) is a failed attempt (`entitlements.LINK_UNCONFIRMED`),
+and so is a refusal such as the pre-contract-4 portal's `422 invalid` for a PATCH carrying the id alone; both are tried
+again on the next runs up to five attempts, as is a transient failure, and none changes the grant's state. Once the
+portal's contract-4 build is live, Retry on a grant that has stopped sends the link again at once. A `409 pp_account_mismatch` on any Key Properties grant or link call makes the grant
+`failed` with a plain message (`entitlements.MISMATCH_ERROR`) and is never retried on its own: Retry on the grant once
+the ids are put right. A grant that failed on its link call goes back to active on Retry and the same run sends the
+link again. A mismatched grant whose sourcer the portal still holds active is still switched off when access ends.
+A `409 pp_account_in_use` (that PP account is already linked to another Key Properties login) is an ordinary failure
+with the portal's message.
+
+**The seller.** Every person with an active mentee row and no seller gets a Group HQ seller of kind mentee
+(`commission.ensure_mentee_seller`, audited `seller.create`), so they hold a franchise referral code; a person who is
+already a seller, of any kind, is left alone. Statements stay held until self-billing is agreed.
+
+**The earning links panel** (`GET /people/<id>/earnings?fragment=1[&mentee=<id>]`, loaded by the mentee and person pages
+after they render) asks the four products at once, each within four seconds. A product is asked about the person only
+when they hold or are due its earning right (a grant, or an item of a programme they are an active mentee on), hold an
+affiliate grant in any state, or Group HQ already has their id there; anyone else is shown "not asked" and their email
+goes to no product. A product in dry run is not asked, one
+without a token or base URL is not configured, one that fails is "couldn't reach <product>", and where a product cannot
+be asked the code and link the recompute kept are shown as last known. It writes nothing. Every link a product answers
+is kept only when it is a plain `http(s)` URL.
 
 ## Rehearsing a connector
 

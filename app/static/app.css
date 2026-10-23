@@ -154,6 +154,24 @@ table.data td.detail { max-width: 46ch; word-break: break-word; }
 .hold-banner form { margin: 0; }
 .hold-banner .small { font-weight: 400; }
 
+/* Earning links (mentee and person pages) and the Needs a region queue */
+.status-ok { background: #E3F5EA; color: #17814A; }
+.status-none { background: #EEE; color: #666; }
+.status-unreachable { background: #FDE8EE; color: #9B1C4B; }
+.earn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+.earn-card { border: 1px solid var(--line); border-radius: 10px; padding: .9rem 1rem; background: var(--paper); min-width: 0; }
+.earn-card .kv { margin: .4rem 0 0; }
+.earn-card .kv dd { min-width: 0; overflow-wrap: anywhere; }
+.earn-head { display: flex; gap: .5rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.earn-card p { margin: .4rem 0 0; }
+.earn-welcome { margin-top: 1rem; display: grid; gap: .5rem; justify-items: start; }
+.earn-welcome details { width: 100%; }
+.earn-welcome textarea { width: 100%; font: inherit; font-size: .9rem; padding: .6rem .7rem; border: 2px solid var(--line); border-radius: 8px; margin-top: .4rem; }
+.link-box { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.link-box input { flex: 1; min-width: 180px; font: inherit; font-size: .88rem; padding: .4rem .6rem; border: 2px solid var(--line); border-radius: 8px; }
+.earn-panel .bad-text, .region-queue .bad-text { color: #9B1C4B; font-weight: 700; }
+.earn-loading { color: var(--muted); }
+
 /* Login and authenticator screens */
 .login-body { display: grid; place-items: center; min-height: 100vh; padding: 1rem; }
 .login-card { background: var(--paper); border-radius: var(--radius); box-shadow: var(--shadow); padding: 2rem; width: min(440px, 100%); }

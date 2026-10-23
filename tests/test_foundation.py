@@ -15,7 +15,7 @@ from tests.conftest import ADMIN_EMAIL, session
 
 
 def test_database_is_at_head():
-    assert migrate.current_revision() == migrate.head_revision() == "0007_growth"
+    assert migrate.current_revision() == migrate.head_revision() == "0008_mentee_earnings"
 
 
 def test_grants_is_mounted_and_needs_a_login(client):
@@ -33,11 +33,13 @@ def test_programmes_are_seeded_once_and_never_overwritten(db):
     assert {"product": "pp", "kind": "flag", "value": "kpuk.submit"} in items, "KP forwarding is a separate right"
     assert {"product": "hnh", "kind": "partner_seat", "value": "area"} in items
     assert {"product": "ordris", "kind": "org_plan", "value": "starter"} in items
+    assert {"product": "pp", "kind": "affiliate", "value": "affiliate"} in items, "mentee earnings (0008)"
+    assert {"product": "ordris", "kind": "affiliate", "value": "partner"} in items, "mentee earnings (0008)"
     assert [i for i in rows["hnh_franchise"].grant_template if i["product"] == "pp"][0]["months"] == 3
     assert [i for i in rows["kp_mentee"].grant_template if i["product"] == "pp"][0]["months"] == 12
     for item in (i for p in rows.values() for i in p.grant_template):
         assert item["product"] in ("pp", "ordris", "kp", "hnh")
-        assert item["kind"] in ("comp_tier", "org_plan", "sourcer_link", "partner_seat", "flag")
+        assert item["kind"] in ("comp_tier", "org_plan", "sourcer_link", "partner_seat", "flag", "affiliate")
 
     # editing a template in the database survives the next boot
     rows["mentorship"].grant_template = [{"product": "pp", "kind": "comp_tier", "value": "pro_buyer"}]

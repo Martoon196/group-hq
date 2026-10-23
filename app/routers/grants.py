@@ -31,6 +31,7 @@ from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import GRANT_KINDS, PRODUCTS, AuditLog, ConnectorCall, EntitlementGrant, Person, User
 from ..services import settings
+from ..services.connectors.pp import AFFILIATE_KEPT
 from ..services.entitlements import (BLOCKED_ERROR, MAX_ATTEMPTS, RunSummary, display_state, hold_of, is_blocked,
                                      pause_grant, recompute_all, recompute_person, reset_for_retry, resume_grant,
                                      utc_today)
@@ -249,6 +250,9 @@ def _pause_note(grant: EntitlementGrant, decision) -> tuple[str, str]:
     still giving access is an error, so the founder is never told access stopped when it did not."""
     name = settings.product_name(grant.product)
     kept = "The nightly recompute keeps it off, whatever is paid, until you resume it."
+    if decision.outcome in ("sent", "planned") and decision.detail == AFFILIATE_KEPT:
+        return (f"Paused in Group HQ. {name}'s programme is public and membership is permanent, so nothing was sent and "
+                "they stay a member there."), ""
     if decision.outcome == "sent":
         return f"Paused: revoked in {name} now. {kept}", ""
     if decision.outcome == "planned":

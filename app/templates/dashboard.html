@@ -11,6 +11,27 @@
   <div class="stat{% if stats.grants_failed %} is-bad{% endif %}"><strong>{{ stats.grants_active }}</strong><span><a href="/grants">active grants</a> · {{ stats.grants_pending }} pending · {{ stats.grants_failed }} failed</span></div>
   <div class="stat{% if stats.calls_failed %} is-bad{% endif %}"><strong>{{ stats.calls_pending }}</strong><span>connector calls waiting · {{ stats.calls_failed }} failed</span></div>
 </div>
+<section class="panel mt-2 region-queue">
+  <div class="panel-head"><h2>Needs a region{% if regions_total %} <span class="status status-unreachable">{{ regions_total }}</span>{% endif %}</h2>{% if regions_total %}<a class="btn btn-ghost btn-sm" href="/mentees?region=needed">All {{ regions_total }}</a>{% endif %}</div>
+  {% if regions %}
+  <p class="help">Active mentees seated as Hello New Home partners with no area yet, as the last recompute found them. Assign the area in Hello New Home; the next recompute takes them off this list.</p>
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Mentee</th><th>Checked</th><th></th></tr></thead>
+    <tbody>
+    {% for r in regions %}
+    <tr>
+      <td>{% if r.mentee %}<a href="/mentees/{{ r.mentee.id }}"><strong>{{ r.person.name or r.person.person_key }}</strong></a>{% else %}<a href="/people/{{ r.person.id }}"><strong>{{ r.person.name or r.person.person_key }}</strong></a>{% endif %}{% if r.person.name %}<br><span class="small muted">{{ r.person.person_key }}</span>{% endif %}</td>
+      <td class="nowrap small">{{ r.checked_at[:10] if r.checked_at else "" }}</td>
+      <td class="row-actions">{% if r.admin_url %}<a class="btn btn-primary btn-sm" href="{{ r.admin_url }}" target="_blank" rel="noopener noreferrer">Assign a region in Hello New Home</a>{% else %}<span class="small muted">Hello New Home gave no admin link</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="muted">Every active mentee with a Hello New Home partner seat has an area, as far as the last recompute found.</p>{% endif %}
+</section>
+
 <div class="two-col mt-2">
   <section class="panel">
     <div class="panel-head"><h2>Latest activity</h2><a class="btn btn-ghost btn-sm" href="/audit">Audit log</a></div>

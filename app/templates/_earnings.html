@@ -1,0 +1,44 @@
+{# The earning links panel's body: loaded into the mentee and person pages after they render (app.js, data-fragment-src),
+   and shown on its own at /people/<id>/earnings without JavaScript. Every value here came from a product or the seller
+   ledger and is escaped by Jinja; links are plain http(s) only (connectors.base.safe_url). #}
+<div class="earn-grid">
+  {% for p in links.products %}
+  <div class="earn-card">
+    <div class="earn-head"><strong>{{ p.name }}</strong> <span class="status status-{{ p.state }}">{{ p.state_label }}</span></div>
+    {% if p.state == "unreachable" %}<p class="small bad-text">Couldn't reach {{ p.name }}{% if p.detail %}: {{ p.detail }}{% endif %}.</p>{% endif %}
+    {% if p.headline %}<p class="small">{{ p.headline }}</p>{% endif %}
+    {% if p.rows %}
+    <dl class="kv">
+      {% for row in p.rows %}
+      <dt>{{ row.label }}</dt>
+      <dd>{% if row.url %}<span class="link-box"><input id="earn-{{ p.product }}-{{ loop.index }}" type="text" readonly value="{{ row.url }}" aria-label="{{ p.name }} {{ row.label|lower }}"><button class="btn btn-ghost btn-sm" type="button" data-copy-target="#earn-{{ p.product }}-{{ loop.index }}">Copy</button></span>{% elif p.needs_region and row.label == "Area" %}<span class="bad-text"><strong>Needs a region</strong></span>{% else %}{{ row.value }}{% endif %}</dd>
+      {% endfor %}
+    </dl>
+    {% endif %}
+    {% if p.cached %}<p class="help">Last known, as the recompute kept it: {{ p.name }} {% if p.state == "dry_run" %}is in dry run{% elif p.state == "not_configured" %}is not configured here{% else %}did not answer just now{% endif %}.</p>{% endif %}
+    {% if p.action_url %}<p><a class="btn btn-primary btn-sm" href="{{ p.action_url }}" target="_blank" rel="noopener noreferrer">{{ p.action_label }}</a></p>{% endif %}
+  </div>
+  {% endfor %}
+  <div class="earn-card">
+    <div class="earn-head"><strong>Group HQ seller</strong>{% if links.seller.seller_id %} <span class="status status-{{ 'live' if links.seller.active else 'ended' }}">{{ "active" if links.seller.active else "off" }}</span>{% endif %}</div>
+    {% if links.seller.seller_id %}
+    <p class="small">Franchise referral code for Hello New Home territories.</p>
+    <dl class="kv">
+      <dt>Code</dt><dd><code>{{ links.seller.code }}</code></dd>
+      <dt>Tracked link</dt><dd><span class="link-box"><input id="earn-seller-link" type="text" readonly value="{{ links.seller.link }}" aria-label="Group HQ tracked link"><button class="btn btn-ghost btn-sm" type="button" data-copy-target="#earn-seller-link">Copy</button></span></dd>
+      <dt>Statements</dt><dd>{% if links.seller.self_billing_agreed_at %}Self-billing agreed {{ links.seller.self_billing_agreed_at | date }}{% else %}Held until self-billing is agreed{% endif %}</dd>
+    </dl>
+    <p><a class="btn btn-ghost btn-sm" href="/sellers/{{ links.seller.seller_id }}">Seller record</a></p>
+    {% else %}
+    <p class="small">No seller record yet. The recompute gives every active mentee one, with a code of their own.</p>
+    {% endif %}
+  </div>
+</div>
+{% if welcome %}
+<div class="earn-welcome">
+  <button class="btn btn-primary btn-sm" type="button" data-copy-target="#earn-welcome" data-copied="Copied: paste it into WhatsApp">Copy WhatsApp welcome</button>
+  <details><summary>Show the message</summary><textarea id="earn-welcome" readonly rows="14" aria-label="WhatsApp welcome message">{{ welcome }}</textarea></details>
+  <p class="help">Every link they have, in plain words, with no figures: each programme's own terms say what it pays.</p>
+  {% if links.missing %}<p class="small bad-text">Not in the message: {{ links.missing|join(", ") }}, which could not be asked just now. Reload this page later, or add the link by hand.</p>{% endif %}
+</div>
+{% endif %}

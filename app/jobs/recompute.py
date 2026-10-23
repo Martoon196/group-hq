@@ -69,6 +69,9 @@ def _report(summary: RunSummary, out=sys.stdout) -> None:
         print(f"  {decision.outcome:8} {decision.action:8} {decision.person_key:40} {decision.label:36} until {until}"
               f"{'  ' + decision.detail if decision.detail and decision.detail not in ('sent', 'planned') else ''}",
               file=out)
+    for decision in summary.decisions:
+        if decision.kind == "lookup":       # a PP account lookup that failed before a Key Properties link was sent
+            print(f"  note     {decision.person_key:40} pp {decision.detail}", file=out)
     print(summary.line(), file=out)
 
 

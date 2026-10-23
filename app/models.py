@@ -18,7 +18,8 @@ from .db import Base
 
 # ---- vocabularies (mirrored by the CheckConstraints in alembic/versions/0001_baseline.py) ----
 PRODUCTS = ("pp", "ordris", "kp", "hnh")
-GRANT_KINDS = ("comp_tier", "org_plan", "sourcer_link", "partner_seat", "flag")
+# affiliate was added by alembic/versions/0008_mentee_earnings.py, which recreates ck_entitlement_grants_kind.
+GRANT_KINDS = ("comp_tier", "org_plan", "sourcer_link", "partner_seat", "flag", "affiliate")
 GRANT_STATES = ("pending", "active", "revoked", "failed")
 PAYMENT_MODES = ("full", "monthly")
 PAYMENT_METHODS = ("manual", "stripe_link", "invoice")
@@ -50,7 +51,9 @@ class Person(TimestampMixin, Base):
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     person_key: Mapped[str] = mapped_column(String(254), nullable=False)
-    pp_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Property Predator's users.id, a UUID string (text since alembic/versions/0008_mentee_earnings.py; it was an
+    # integer column that a real PP id could never fill).
+    pp_account_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     ordris_user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)   # Clerk user id
     ordris_org_id: Mapped[str | None] = mapped_column(String(64), nullable=True)    # Clerk organisation id
     kp_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -173,8 +176,8 @@ class EntitlementGrant(TimestampMixin, Base):
     person_id: Mapped[int] = mapped_column(ForeignKey("people.id", ondelete="RESTRICT"), nullable=False)
     mentee_id: Mapped[int | None] = mapped_column(ForeignKey("mentees.id", ondelete="SET NULL"), nullable=True)
     product: Mapped[str] = mapped_column(String(10), nullable=False)        # pp | ordris | kp | hnh
-    kind: Mapped[str] = mapped_column(String(20), nullable=False)           # comp_tier | org_plan | sourcer_link | partner_seat | flag
-    value: Mapped[str] = mapped_column(String(120), nullable=False)         # e.g. pro_buyer, starter, area, mentee, kpuk.submit
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)           # comp_tier | org_plan | sourcer_link | partner_seat | flag | affiliate
+    value: Mapped[str] = mapped_column(String(120), nullable=False)         # e.g. pro_buyer, starter, area, mentee, kpuk.submit, affiliate
     starts_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reason: Mapped[str] = mapped_column(String(200), default="", nullable=False)
@@ -188,6 +191,11 @@ class EntitlementGrant(TimestampMixin, Base):
     held_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     held_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     held_reason: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    # What the product last told us that is worth showing, never a credential (alembic/versions/0008_mentee_earnings.py):
+    # an affiliate's code and link (pp, ordris), the PP account id Key Properties confirmed on the sourcer (kp), and a
+    # Hello New Home partner's area, links and admin page as the recompute last read them (hnh), which is what the
+    # "Needs a region" queue reads without a live call.
+    remote_info: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
     person: Mapped[Person] = relationship(back_populates="grants")
     mentee: Mapped[Mentee | None] = relationship(back_populates="grants")

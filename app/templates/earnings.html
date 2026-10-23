@@ -1,0 +1,16 @@
+{% extends "app_base.html" %}
+{% set title = "Earning links: " ~ (person.name or person.person_key) ~ " | Group HQ" %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Person #{{ person.id }}</span>
+  <h1>Earning links: {{ person.name or person.person_key }}</h1>
+  <p class="muted">Asked of each product just now.</p>
+  <div class="actions">
+    {% if mentee %}<a class="btn btn-ghost btn-sm" href="/mentees/{{ mentee.id }}">Mentee record</a>{% endif %}
+    <a class="btn btn-ghost btn-sm" href="/people/{{ person.id }}">Person record</a>
+  </div>
+</div>
+<section class="panel earn-panel">
+  {% include "_earnings.html" %}
+</section>
+{% endblock %}

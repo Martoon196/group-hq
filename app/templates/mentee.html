@@ -22,6 +22,13 @@
   <div class="stat"><strong>{{ money(cleared_total) }}</strong><span>cleared{% if pending_total %} · {{ money(pending_total) }} awaiting clearance{% endif %}</span></div>
 </div>
 
+<section class="panel mt-2 earn-panel">
+  <div class="panel-head"><h2>Earning links</h2><a class="btn btn-ghost btn-sm" href="/people/{{ mentee.person.id }}/earnings?mentee={{ mentee.id }}">Open on its own</a></div>
+  <div data-fragment-src="/people/{{ mentee.person.id }}/earnings?fragment=1&amp;mentee={{ mentee.id }}" data-fragment-fail="Couldn't load the earning links. Reload the page to try again; you may need to sign in again." aria-busy="true" aria-live="polite">
+    <p class="earn-loading small">Asking each product for this mentee's links. Open on its own if this does not fill in.</p>
+  </div>
+</section>
+
 <ul class="tabs mt-2">
   <li><a href="/mentees/{{ mentee.id }}?tab=payments"{% if tab == "payments" %} class="is-active" aria-current="page"{% endif %}>Payments<span class="count">{{ payments|length }}</span></a></li>
   <li><a href="/mentees/{{ mentee.id }}?tab=grants"{% if tab == "grants" %} class="is-active" aria-current="page"{% endif %}>Grants<span class="count">{{ grants|length }}</span></a></li>

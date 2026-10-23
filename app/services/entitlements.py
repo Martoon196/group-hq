@@ -50,6 +50,23 @@ Which products are sent anything is connectors.product_dry_run with the product 
 (settings.product_switches): the web service and the nightly job read the same switches. A run reads them as it
 starts, and again before each person so that a product switched to Dry run while a run is under way is sent
 nothing more; a switch to Live waits for the next run.
+
+Mentee earnings (alembic/versions/0008_mentee_earnings.py, docs/mentee-earnings.md). Inside one person's recompute
+the order is: orphaned grants revoked; then, when the person has a Key Properties sourcer link and no Property
+Predator account id yet, PP's account lookup (live PP only); then every PP grant; then the KP sourcer link, which
+carries pp_account_id whenever Group HQ knows it (contract 4); then everything else in template order. The PP account
+id is PP's users.id, a UUID string, kept and sent as text. An active sourcer link whose Key Properties row has not
+confirmed the person's current PP account is sent a "link" call, PATCH {pp_account_id} and nothing else, keyed
+grant:<id>:link:pp:<account id>, so a mentee linked before Group HQ knew the id gets it too. The link counts as done only
+once Key Properties answers with that id: a 200 that does not carry it (a portal build without contract 4) is a failed
+attempt (LINK_UNCONFIRMED), tried again on later runs up to MAX_ATTEMPTS. A 409 pp_account_mismatch from Key Properties
+is a failed grant with MISMATCH_ERROR, never retried on its own (Retry on the grant once the ids are put right: a grant
+that failed only on its link call goes back to active, so the same run sends the link again); it is still revoked when
+access ends. An affiliate grant enrols in a public programme and its revoke is a recorded no-op; a 404 that is not the
+product's own refusal (its route not deployed yet) is a failed call that does not use up an attempt (NOT_DEPLOYED). After the decisions, an active Hello New Home partner seat is looked
+up (contract 3, live HNH only) and its area, links and admin page are kept on the grant (remote_info), which the
+"Needs a region" queue reads; and a person with an active mentee row and no seller gets a Group HQ seller of kind
+mentee (commission.ensure_mentee_seller), whose statements stay held until self-billing is agreed.
 """
 from __future__ import annotations
 
@@ -67,11 +84,13 @@ from sqlalchemy.orm import Session
 
 from .. import config
 from ..models import ConnectorCall, EntitlementGrant, Mentee, Payment, Person, Programme, User, utcnow
-from . import settings
+from . import commission, settings
 from .audit import _jsonable, audit
 from .connectors import (CONNECTORS, BaseConnector, ConnectorError, ConnectorResult, open_connectors, product_dry_run,
                          product_mode)
-from .connectors.pp import PP_TIERS, pp_tier
+from .connectors.base import route_missing
+from .connectors.kp import MISMATCH_REASON
+from .connectors.pp import AFFILIATE_KEPT, PP_TIERS, pp_tier
 
 MAX_ATTEMPTS = 5
 MAX_GRANT_DAYS = 400            # no grant or extension ever ends further away than this (a typo guard)
@@ -80,10 +99,21 @@ LOCK_PERSON = 1                 # pg_advisory_lock(LOCK_PERSON, person.id)
 LOCK_RUN = 2                    # pg_try_advisory_lock(LOCK_RUN, 0): one nightly run at a time
 RUN_IN_PROGRESS = "another recompute is already running; nothing was done"
 BLOCKED_ERROR = "paid subscription"
+MISMATCH_ERROR = ("Key Properties links this sourcer to a different Property Predator account (pp_account_mismatch). "
+                  "Check the Property Predator account id on the person page against the one Key Properties holds, put "
+                  "the wrong one right, then press Retry.")
+LINK_UNCONFIRMED = ("Key Properties answered without the Property Predator account on the sourcer, so the link has not "
+                    "taken (its build may not accept pp_account_id yet). It is tried again on the next runs; after "
+                    f"{MAX_ATTEMPTS} tries press Retry.")
+NOT_DEPLOYED = "{name} answered 404 without its own refusal, so its route is not deployed yet: not counted as an attempt, asked again on the next run. "
 PROGRAMME_SOURCE = "programme:"
 JOB_ACTOR = "job:recompute"
+# The order of a person's targets (contract 4): PP first, so its answers record the account id, then the KP sourcer
+# link that carries it, then everything else in template order.
+TARGET_ORDER = {"pp": 0, "kp": 1}
 
-ACTIONS = ("grant", "extend", "revoke", "noop", "blocked", "gave_up", "not_started", "held")
+ACTIONS = ("grant", "extend", "revoke", "noop", "blocked", "gave_up", "not_started", "held", "link")
+KEPT_LABEL = "kept by a public programme"      # an affiliate grant's revoke: recorded here, nothing sent
 OUTCOMES = ("sent", "planned", "failed", "blocked", "skipped")
 
 
@@ -161,6 +191,12 @@ def is_blocked(grant: EntitlementGrant) -> bool:
     return grant.state == "failed" and grant.last_error == BLOCKED_ERROR
 
 
+def is_mismatch(grant: EntitlementGrant) -> bool:
+    """Key Properties refused the sourcer link because its row is linked to another PP account: a failed grant that
+    the recompute leaves alone until Retry (it is still revoked when access ends)."""
+    return grant.state == "failed" and grant.last_error == MISMATCH_ERROR
+
+
 def hold_of(grant: EntitlementGrant, person: Person | None = None) -> dict | None:
     """The hold keeping this grant off, for the screens and the rule: the grant's own Pause first, then the
     person's Pause all access. None when neither is set."""
@@ -190,6 +226,11 @@ def grant_key(grant_id: int, ends_at: datetime | None, after_revoke: int | None 
     that follows a revoke must never match the row that was sent before it."""
     key = f"grant:{grant_id}:{ends_at.isoformat() if ends_at else 'none'}"
     return f"{key}:after:{after_revoke}" if after_revoke else key
+
+
+def link_key(grant_id: int, pp_account_id: str) -> str:
+    """The one call that tells Key Properties the PP account of an active sourcer link it has not confirmed."""
+    return f"grant:{grant_id}:link:pp:{pp_account_id}"
 
 
 def revoke_key(grant_id: int, ends_at: datetime | None, after_grant: int | None = None) -> str:
@@ -261,6 +302,8 @@ class RunSummary:
         extra = f", {self.unconfigured} not configured" if self.unconfigured else ""
         if a.get("held"):
             extra += f", {a['held']} held"
+        if a.get("link"):
+            extra += f", {a['link']} Key Properties link{'s' if a['link'] != 1 else ''} to PP"
         if self.note:
             extra += f"; {self.note}"
         return (f"recompute {self.today.isoformat()} ({mode}): {self.people} people, {len(self.decisions)} decisions: "
@@ -429,6 +472,13 @@ def _decide(grant: EntitlementGrant, target: _Target, today: date,
         return "held", grant.ends_at
     if is_blocked(grant):
         return "blocked", grant.ends_at
+    if is_mismatch(grant):
+        # Left alone until Retry, except that access the product may still give is taken away when it ends.
+        if remote and (end is None or end <= today):
+            enforced = ends_at if ends_at is not None and ends_at <= at_midnight(today) else at_midnight(today)
+            grant.ends_at = enforced
+            return "revoke", enforced
+        return "blocked", grant.ends_at
     if end is not None and end > today:
         if target.starts is not None and target.starts > today:
             if grant.state == "active":
@@ -476,13 +526,22 @@ def _supersede(db: Session, grant: EntitlementGrant, key: str) -> None:
             db.add(row)
 
 
-def _apply_links(person: Person, links: dict) -> dict:
-    """Fill empty person ids from what the product told us; never overwrite a link already recorded."""
+UNIQUE_LINKS = ("pp_account_id",)       # uq_people_pp_account_id: one PP account belongs to one person
+
+
+def _apply_links(person: Person, links: dict, db: Session | None = None) -> dict:
+    """Fill empty person ids from what the product told us; never overwrite a link already recorded, and never fill a
+    PP account id another person already holds (the unique constraint would refuse the whole person's commit; the
+    mentee import refuses it the same way and the founder decides which person it belongs to)."""
     filled = {}
     for field_name, value in (links or {}).items():
         if value in (None, "") or not hasattr(person, field_name):
             continue
         if getattr(person, field_name) in (None, ""):
+            if db is not None and field_name in UNIQUE_LINKS:
+                column = getattr(Person, field_name)
+                if db.query(Person.id).filter(column == value, Person.id != person.id).first() is not None:
+                    continue
             setattr(person, field_name, value)
             filled[field_name] = value
     return filled
@@ -525,11 +584,19 @@ def _floor_refusal(action: str, ends_at: datetime | None) -> str:
     return ""
 
 
+def _merge_info(grant: EntitlementGrant, info: dict) -> None:
+    """Keep what the product told us about the grant (ConnectorResult.info) on remote_info, key by key."""
+    if info:
+        grant.remote_info = _json({**(grant.remote_info or {}), **info})
+
+
 def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Target, action: str,
              ends_at: datetime | None, *, dry_run: bool, connectors: dict[str, BaseConnector], actor,
-             reason: str = "") -> Decision:
-    key = (revoke_key(grant.id, ends_at, _regrant_since_revoke(db, grant)) if action == "revoke"
-           else grant_key(grant.id, ends_at, _last_succeeded_revoke(db, grant)))
+             reason: str = "", key: str = "") -> Decision:
+    """One decided call through the outbox. `key` is given for a "link" call (link_key); otherwise it is worked out
+    from the action and the end."""
+    key = key or (revoke_key(grant.id, ends_at, _regrant_since_revoke(db, grant)) if action == "revoke"
+                  else grant_key(grant.id, ends_at, _last_succeeded_revoke(db, grant)))
     decision = Decision(person_id=person.id, person_key=person.person_key, grant_id=grant.id, product=grant.product,
                         kind=grant.kind, value=grant.value, action=action, outcome="skipped", ends_at=ends_at, key=key,
                         dry_run=dry_run)
@@ -568,6 +635,8 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
         during the call only; _execute writes it for good once the product has confirmed it."""
         if action == "revoke":
             return connector.revoke(grant, person, reason=reason)
+        if action == "link":
+            return connector.link(grant, person)       # PATCH {pp_account_id} only: never re-opens or re-shares
         held = (grant.starts_at, grant.ends_at)
         grant.ends_at = ends_at
         if target.starts is not None:
@@ -615,18 +684,49 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
             row.attempts = MAX_ATTEMPTS        # never retried on its own
             decision.action, decision.outcome, decision.detail = "blocked", "blocked", BLOCKED_ERROR
             audit(db, actor, "grant.block", f"grant:{grant.id}", before=before, after=_snapshot(grant))
+        elif error.reason == MISMATCH_REASON and grant.product == "kp" and action != "revoke":
+            # Key Properties holds another PP account on this sourcer. Sending the same id again cannot help, so it is
+            # never retried on its own: a failed grant with a plain message until someone puts the ids right.
+            grant.state = "failed"
+            grant.last_error = MISMATCH_ERROR
+            row.attempts = MAX_ATTEMPTS
+            decision.outcome, decision.detail = "failed", MISMATCH_ERROR
+            audit(db, actor, "grant.fail", f"grant:{grant.id}", before=before,
+                  after={**_snapshot(grant), "attempts": row.attempts, "action": action, "reason": MISMATCH_REASON,
+                         "pp_account_id": person.pp_account_id})
         else:
             grant.last_error = error.summary()[:1000]
+            if grant.kind == "affiliate" and route_missing(error):
+                # The product has not deployed its side of the contract yet: the mentee has done nothing wrong, so the
+                # attempt is not counted and the grant never gives up on it; the next run asks again.
+                row.attempts = max(0, row.attempts - 1)
+                grant.last_error = (NOT_DEPLOYED.format(name=settings.product_name(grant.product)) + error.summary())[:1000]
             # A first grant that failed is failed, and so is anything that has used up its attempts. An
             # active grant whose extension or revoke failed stays active until the retry: the product
-            # still holds the old window and the person still has access.
-            if row.attempts >= MAX_ATTEMPTS or grant.state != "active":
+            # still holds the old window and the person still has access. A "link" call never changes the
+            # state: the sourcer is active in Key Properties either way.
+            if action != "link" and (row.attempts >= MAX_ATTEMPTS or grant.state != "active"):
                 grant.state = "failed"
             decision.outcome, decision.detail = "failed", grant.last_error
             audit(db, actor, "grant.fail", f"grant:{grant.id}", before=before,
                   after={**_snapshot(grant), "attempts": row.attempts, "action": action})
         grant.last_sync_at = utcnow()
         db.add(grant)
+        return decision
+
+    if action == "link" and str((result.info or {}).get("pp_account_id") or "") != str(person.pp_account_id or ""):
+        # Key Properties answered 200 but its row does not carry the id (a build without contract 4 drops the field):
+        # the link has not taken, so it is a failed attempt, tried again on the next run until MAX_ATTEMPTS.
+        row.status = "failed"
+        row.response = _stored_response({**result.as_dict(), "unconfirmed": True})
+        if result.plan:
+            row.payload = _json({**row.payload, "request": result.plan})
+        grant.last_error = LINK_UNCONFIRMED
+        grant.last_sync_at = utcnow()
+        db.add_all([row, grant])
+        decision.outcome, decision.detail, decision.plan = "failed", LINK_UNCONFIRMED, result.plan
+        audit(db, actor, "grant.fail", f"grant:{grant.id}", before=before,
+              after={**_snapshot(grant), "attempts": row.attempts, "action": action, "reason": "unconfirmed"})
         return decision
 
     row.status = "succeeded"
@@ -644,7 +744,8 @@ def _execute(db: Session, grant: EntitlementGrant, person: Person, target: _Targ
     grant.last_sync_at = utcnow()
     if result.remote_ref:
         grant.remote_ref = result.remote_ref[:200]
-    filled = _apply_links(person, result.links)
+    _merge_info(grant, result.info)
+    filled = _apply_links(person, result.links, db)
     db.add_all([row, grant, person])
     decision.outcome = "sent"
     decision.detail = result.noop or "sent"
@@ -712,9 +813,18 @@ def recompute_person(db: Session, person: Person, today: date | None = None, dry
             for grant in existing.values():     # no programme gives this any more: treat as nothing supports it
                 orphan = _Target(ends=None, mentee=grant.mentee, programme=None, item={})
                 decisions.append(_apply_one(db, person, grant, orphan, today, dry, connectors, actor))
-            for key, target in targets.items():
+            lookup = _lookup_pp_account(db, person, targets, connectors, actor)
+            if lookup is not None:
+                decisions.append(lookup)
+            hnh_grants: list[EntitlementGrant] = []
+            for key, target in ordered_targets(targets):
                 grant = _find_or_create_grant(db, person, key, target, reused.get(key))
                 decisions.append(_apply_one(db, person, grant, target, today, dry, connectors, actor))
+                if key[:2] == ("hnh", "partner_seat"):
+                    hnh_grants.append(grant)
+            for grant in hnh_grants:
+                refresh_partner_info(db, grant, person, connectors)
+            _ensure_seller(db, person, actor)
             db.commit()
             return decisions
     finally:
@@ -722,11 +832,102 @@ def recompute_person(db: Session, person: Person, today: date | None = None, dry
             pool_cm.__exit__(None, None, None)
 
 
+def ordered_targets(targets: dict[tuple, _Target]) -> list[tuple[tuple, _Target]]:
+    """The targets in the order a person's recompute sends them (TARGET_ORDER): every PP item, then Key Properties,
+    then the rest; template order is kept within each group (the sort is stable)."""
+    return sorted(targets.items(), key=lambda pair: TARGET_ORDER.get(pair[0][0], len(TARGET_ORDER)))
+
+
+def _lookup_pp_account(db: Session, person: Person, targets: dict[tuple, _Target], connectors: dict[str, BaseConnector],
+                       actor) -> Decision | None:
+    """Before any grant is sent: when the person will be sent a Key Properties sourcer link and Group HQ does not know
+    their PP account yet, ask PP (its account lookup, live and configured PP only) so the link can carry the id. The id
+    fills the empty person field (audited as person.links). No account (404) is not a failure. Any other failure is
+    reported as a skipped decision on the run page and the recompute goes on: the sourcer link is then sent without
+    the id, as it would have been before, and the next run asks again."""
+    if person.pp_account_id is not None or person.access_held_at is not None:
+        return None
+    if not any(key[:2] == ("kp", "sourcer_link") for key in targets):
+        return None
+    pp = connectors.get("pp")
+    if pp is None or pp.dry_run or not pp.configured:
+        return None
+    try:
+        result = pp.lookup(person.person_key)
+    except ConnectorError as error:
+        if error.status == 404:
+            return None
+        return Decision(person_id=person.id, person_key=person.person_key, grant_id=None, product="pp", kind="lookup",
+                        value="account", action="noop", outcome="skipped",
+                        detail=f"account lookup failed ({error.summary()[:200]}): Key Properties is sent no PP account id this time")
+    filled = _apply_links(person, result.links, db)
+    if filled:
+        db.add(person)
+        audit(db, actor, "person.links", f"person:{person.id}", before={k: None for k in filled},
+              after={**filled, "via": "recompute lookup"})
+    return None
+
+
+def refresh_partner_info(db: Session, grant: EntitlementGrant, person: Person, connectors: dict[str, BaseConnector]) -> None:
+    """After a person's decisions: an active, unheld Hello New Home partner seat is looked up (contract 3, live and
+    configured HNH only) and what HNH answers is kept on the grant's remote_info with checked_at, which is what the
+    "Needs a region" queue lists. A failed lookup keeps the last answer and records check_error; it never fails the
+    recompute."""
+    hnh = connectors.get("hnh")
+    if grant.state != "active" or hold_of(grant, person) is not None:
+        return
+    if hnh is None or hnh.dry_run or not hnh.configured:
+        return
+    stamp = utcnow().isoformat(timespec="seconds")
+    try:
+        result = hnh.partner_status(person.person_key)
+    except ConnectorError as error:
+        grant.remote_info = _json({**(grant.remote_info or {}), "check_error": error.summary()[:300], "check_failed_at": stamp})
+    except Exception as error:  # noqa: BLE001  (a display cache must never undo the grants decided above)
+        grant.remote_info = _json({**(grant.remote_info or {}), "check_error": f"unexpected: {type(error).__name__}"[:300],
+                                   "check_failed_at": stamp})
+    else:
+        kept = {k: v for k, v in (grant.remote_info or {}).items() if k not in PARTNER_INFO_KEYS}
+        grant.remote_info = _json({**kept, **result.info, "checked_at": stamp, "check_error": None})
+    db.add(grant)
+
+
+# Everything refresh_partner_info replaces on each successful lookup (the connector's partner_info keys).
+PARTNER_INFO_KEYS = ("found", "partner_id", "referral_code", "referral_link", "portal_url", "admin_url", "tier", "status",
+                     "area", "area_known", "needs_region", "check_error", "check_failed_at")
+
+
+def _ensure_seller(db: Session, person: Person, actor) -> None:
+    """A person with an active mentee row and no seller gets one (kind mentee), so they hold a franchise referral code.
+    Statements stay held until self-billing is agreed (the existing rule in app.services.commission)."""
+    active = db.query(Mentee.id).filter(Mentee.person_id == person.id, Mentee.status == "active").first()
+    if active is not None:
+        commission.ensure_mentee_seller(db, person, actor=actor)
+
+
+def _kp_link_due(db: Session, grant: EntitlementGrant, person: Person) -> str:
+    """The link_key to send when an active Key Properties sourcer link has not had the person's current PP account id
+    confirmed by Key Properties (remote_info.pp_account_id, compared as text), or "" when nothing is due: no id known,
+    already confirmed, or that very call already went through or used up its attempts (an unconfirmed answer counts
+    as a failed attempt, so it is tried again until then)."""
+    if (grant.product, grant.kind) != ("kp", "sourcer_link") or grant.state != "active" or not grant.remote_ref:
+        return ""
+    pp_account_id = person.pp_account_id
+    confirmed = (grant.remote_info or {}).get("pp_account_id")
+    if not pp_account_id or (confirmed is not None and str(confirmed) == str(pp_account_id)):
+        return ""
+    key = link_key(grant.id, pp_account_id)
+    row = db.query(ConnectorCall.status, ConnectorCall.attempts).filter(ConnectorCall.idempotency_key == key).first()
+    if row is not None and (row.status == "succeeded" or row.attempts >= MAX_ATTEMPTS):
+        return ""
+    return key
+
+
 def _apply_one(db: Session, person: Person, grant: EntitlementGrant, target: _Target, today: date, dry: bool,
                connectors: dict[str, BaseConnector], actor) -> Decision:
     hold = hold_of(grant, person)
     held = _hold_since(grant, person)
-    remote = held is not None and grant.state != "active" and _product_holds(db, grant)
+    remote = grant.state != "active" and (held is not None or is_mismatch(grant)) and _product_holds(db, grant)
     action, ends_at = _decide(grant, target, today, held, remote)
     db.add(grant)
     why = "paused" if hold and hold["scope"] == "grant" else "all access paused"
@@ -736,10 +937,17 @@ def _apply_one(db: Session, person: Person, grant: EntitlementGrant, target: _Ta
     # form stays in Group HQ (the grant, the person and the audit rows), since products such as Hello New Home
     # belong to another company and keep what they are sent.
     reason = f"Group HQ: {why} (grant {grant.id})" if hold is not None and action == "revoke" else ""
+    if action == "blocked" and is_mismatch(grant):
+        return _skip(person, grant, action, ends_at, "Key Properties holds another PP account: not retried automatically", dry)
     if action == "blocked":
         return _skip(person, grant, action, ends_at, BLOCKED_ERROR + ": not retried automatically", dry)
     if action == "not_started":
         return _skip(person, grant, action, ends_at, f"starts {target.starts.isoformat()}", dry)
+    if action == "noop" and hold is None and grant.product in connectors:
+        key = _kp_link_due(db, grant, person)
+        if key:
+            return _execute(db, grant, person, target, "link", grant.ends_at, dry_run=dry, connectors=connectors,
+                            actor=actor, key=key)
     if action == "noop":
         why = grant.last_error if "ceiling" in (grant.last_error or "") else "nothing to change"
         return _skip(person, grant, action, ends_at, why, dry)
@@ -825,20 +1033,28 @@ def revoke_person(db: Session, person: Person, today: date | None = None, dry_ru
             target = _Target(ends=enforced.date(), mentee=grant.mentee, programme=None, item={})
             decision = _execute(db, grant, person, target, "revoke", enforced, dry_run=dry, connectors=connectors,
                                 actor=actor, reason=reason)
+            if decision.outcome == "sent" and decision.detail == AFFILIATE_KEPT:
+                counts[KEPT_LABEL] += 1         # an affiliate: recorded here, the public programme keeps the member
+                continue
             counts[{"sent": "revoked", "planned": "planned", "failed": "failed", "blocked": "blocked"}.get(decision.outcome, "unchanged")] += 1
         db.commit()
     return dict(counts)
 
 
 def reset_for_retry(db: Session, grant: EntitlementGrant, *, actor: User | str) -> None:
-    """Clear a failed or blocked grant so the next recompute tries it again. Caller commits."""
+    """Clear a failed or blocked grant so the next recompute tries it again. Caller commits. A Key Properties sourcer
+    link that failed on its link call (pp_account_mismatch) goes back to active rather than pending when the portal
+    still holds the sourcer: the link call is what is retried, and an active grant is what sends it (_kp_link_due)."""
     before = _snapshot(grant)
+    failed_link = False
     for row in db.query(ConnectorCall).filter(ConnectorCall.grant_id == grant.id, ConnectorCall.status == "failed").all():
+        failed_link = failed_link or row.action == "link"
         row.status = "pending"
         row.attempts = 0
         db.add(row)
     if grant.state == "failed":
-        grant.state = "pending"
+        holds = failed_link and bool(grant.remote_ref) and _product_holds(db, grant)
+        grant.state = "active" if holds else "pending"
     grant.last_error = ""
     db.add(grant)
     audit(db, actor, "grant.retry", f"grant:{grant.id}", before=before, after=_snapshot(grant))
@@ -886,6 +1102,8 @@ def _hold_counts(decisions: list[Decision]) -> dict:
     labels = {"sent": "revoked", "planned": "planned", "failed": "failed", "blocked": "blocked"}
 
     def label(d: Decision) -> str:
+        if d.outcome == "sent" and d.detail == AFFILIATE_KEPT:
+            return KEPT_LABEL
         if d.outcome in labels:
             return labels[d.outcome]
         if d.action == "gave_up":

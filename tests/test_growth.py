@@ -133,7 +133,11 @@ def switch_on(*sources: str) -> None:
 
 # ---- schema ----------------------------------------------------------------------------------------------------
 def test_the_database_is_at_the_growth_head():
-    assert migrate.current_revision() == migrate.head_revision() == "0007_growth"
+    """At the head, and the head is at or after 0007_growth (later packets add their own revisions on top)."""
+    from alembic.script import ScriptDirectory
+    assert migrate.current_revision() == migrate.head_revision()
+    script = ScriptDirectory.from_config(migrate.alembic_config())
+    assert "0007_growth" in {rev.revision for rev in script.walk_revisions()}
 
 
 def _migration():
@@ -680,7 +684,7 @@ def test_the_job_refuses_a_database_its_build_does_not_match(monkeypatch):
     with respx.mock(assert_all_called=False) as mock:
         assert job.main(["--tier", "all"], out=out) == 1
         assert mock.calls.call_count == 0
-    assert "growth_pull refused" in out.getvalue() and "0007_growth" in out.getvalue()
+    assert "growth_pull refused" in out.getvalue() and migrate.head_revision() in out.getvalue()
     with session() as fresh:
         assert fresh.query(MetricRun).count() == 0 and fresh.query(AuditLog).count() == 0
 

@@ -28,9 +28,11 @@ lower-cased email through the Clerk backend API.
 
 ## 2. The shared person id: `pp_account_id`
 
-PP's `users.id` is the group-wide person id. KP already stores it as `users.pp_account_id`; Group HQ
-stores it as `people.pp_account_id` (unique, nullable) and fills it from the PP connector's
-`account_id` (the comp response or `GET /api/partner/grouphq/account?email=`).
+PP's `users.id` is the group-wide person id, a UUID string. KP already stores it as `users.pp_account_id` (TEXT);
+Group HQ stores it as `people.pp_account_id` (unique, nullable, VARCHAR(80) since migration 0008; it was an integer
+column that a real PP id could never fill) and fills it from the PP connector's `account_id` (the comp, flags and
+affiliate responses or `GET /api/partner/grouphq/account?email=`), never over an id already recorded and never with an
+id another person already holds.
 
 - A product never invents a `pp_account_id`. It stores one that PP or Group HQ handed it, or none.
 - A person with no PP account has no `pp_account_id`; the person key is then the only key, and Group

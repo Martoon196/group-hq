@@ -13,9 +13,11 @@ without a product being reachable.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -30,8 +32,14 @@ MAX_BODY_CHARS = 4000
 REDACTED = "Bearer [redacted]"
 USER_AGENT = "GroupHQ/1.0"
 
+MAX_URL_CHARS = 500
+MAX_TEXT_CHARS = 120
+MAX_ACCOUNT_CHARS = 80              # people.pp_account_id is VARCHAR(80) (alembic/versions/0008_mentee_earnings.py)
+_WHOLE_RE = re.compile(r"^-?\d{1,15}$")
+_ACCOUNT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
+
 __all__ = ["BaseConnector", "ConnectorError", "ConnectorResult", "CLIENT_HEADER", "REDACTED", "TIMEOUT_SECONDS",
-           "iso_utc", "normalise_email"]
+           "account_ref", "iso_utc", "normalise_email", "route_missing", "safe_url", "short_text", "whole_number"]
 
 
 def iso_utc(value: datetime | date | None) -> str | None:
@@ -50,6 +58,59 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def whole_number(value: Any) -> int | None:
+    """A count or a pence figure a product answered, or None when it is missing or not a whole number (a bool, a
+    float with a fraction or text is never read as a figure)."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        text = value.strip()
+        return int(text) if _WHOLE_RE.match(text) else None
+    return value if isinstance(value, int) else None
+
+
+def account_ref(value: Any) -> str | None:
+    """A Property Predator account id as text, or None. PP's users.id is a UUID string (str(uuid.uuid4())), so it is
+    never read as a number: a whole number is accepted only for what it says (77 is "77"), and anything with a space,
+    a bool or an over-long string is not an id. Key Properties stores the same id as TEXT and answers it as text."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        value = str(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text if _ACCOUNT_RE.match(text) else None
+
+
+def safe_url(value: Any) -> str | None:
+    """A link a product answered, kept only when it is a plain http(s) URL: anything else (javascript:, data:, a
+    relative path, an over-long string) is dropped, because these links are put in front of the founder as buttons
+    and copied into messages."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or len(text) > MAX_URL_CHARS or any(ch.isspace() or ord(ch) < 32 for ch in text):
+        return None
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    return text
+
+
+def short_text(value: Any, limit: int = MAX_TEXT_CHARS) -> str | None:
+    """A code, slug or name a product answered, trimmed and cut to `limit`; None when it is not text or is blank."""
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split())
+    return text[:limit] if text else None
 
 
 class ConnectorError(Exception):
@@ -84,7 +145,9 @@ class ConnectorResult:
     filled into the person row when empty; `noop` says why nothing needed sending. `once` is a message
     for the person who pressed the button (a temporary password HNH issued, for example): it is shown on
     the run page once and is never part of as_dict(), so it never reaches a connector_calls row, an audit
-    row or the job's log."""
+    row or the job's log. `info` is what is worth showing about the grant afterwards (an affiliate's code and
+    link, the PP account Key Properties confirmed): the recompute merges it into entitlement_grants.remote_info.
+    It is read out of `data`, which the stored row already carries, so it is not repeated in as_dict()."""
     ok: bool = True
     status: int | None = None
     data: Any = None
@@ -94,6 +157,7 @@ class ConnectorResult:
     dry_run: bool = False
     plan: dict | None = None
     once: str = ""
+    info: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         out: dict = {"ok": self.ok}
@@ -153,6 +217,16 @@ def _detail(body: Any) -> str:
     if isinstance(body, dict) and isinstance(body.get("raw"), str):
         return body["raw"][:120]
     return ""
+
+
+def route_missing(error: "ConnectorError") -> bool:
+    """A 404 that is not one of the product's own refusals: every contract refuses with {ok: false, reason, message},
+    so a 404 without ok false (FastAPI's {"detail": "Not Found"}, an HTML page, a proxy's answer) means the route is
+    not there, usually because the product has not deployed its side of a contract yet."""
+    if error.status != 404:
+        return False
+    body = error.body
+    return not (isinstance(body, dict) and (body.get("ok") is False or _unwrap(body).get("ok") is False))
 
 
 def _safe_exc(exc: BaseException) -> str:

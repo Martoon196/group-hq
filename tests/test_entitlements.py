@@ -168,7 +168,7 @@ def test_full_paid_grants_hunter_for_twelve_months(db, live):
     assert grant.remote_ref == "77" and grant.last_error == "" and grant.last_sync_at is not None
     assert grant.source == "programme:test_pp" and grant.mentee_id == mentee.id
     db.refresh(person)
-    assert person.pp_account_id == 77, "the account id PP returned fills the shared person id"
+    assert person.pp_account_id == "77", "the account id PP returned fills the shared person id (as text: PP's ids are UUIDs)"
     [call] = calls_of(db, grant)
     assert call.status == "succeeded" and call.attempts == 1 and call.idempotency_key == grant_key(grant.id, grant.ends_at)
     assert call.idempotency_key == f"grant:{grant.id}:2027-10-01T00:00:00"

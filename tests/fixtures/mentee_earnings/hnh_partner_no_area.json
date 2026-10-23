@@ -1,0 +1,5 @@
+{"ok": true, "found": true, "partner": {"id": 9, "name": "Amy Archer", "email": "amy@example.test", "tier": "area",
+ "status": "active", "franchise": {"fee_waived": true, "reason": "Group HQ: Mentorship"}, "areas": [], "user_id": 31,
+ "referral_code": "AMY9", "referral_link": "https://hnh.example.test/?ref=AMY9", "area": null,
+ "portal_url": "https://hnh.example.test/partners/login", "admin_url": "https://hnh.example.test/admin/partners/9",
+ "created_at": "2026-10-20T17:40:00Z"}}

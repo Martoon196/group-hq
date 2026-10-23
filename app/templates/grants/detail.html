@@ -44,6 +44,7 @@
       <dt>Starts</dt><dd>{{ grant.starts_at | date }}</dd>
       <dt>Ends</dt><dd>{% if grant.ends_at %}{{ grant.ends_at | date }} (access through the day before){% if grant.ends_at.date() <= today and grant.state == "active" %} <strong>due for revoke</strong>{% endif %}{% else %}<span class="muted">not set: nothing cleared supports access yet</span>{% endif %}</dd>
       <dt>Remote ref</dt><dd>{{ grant.remote_ref or "" }}</dd>
+      {% if grant.remote_info %}<dt>From the product</dt><dd><details><summary>{% if grant.remote_info.link %}{{ grant.remote_info.link }}{% elif grant.remote_info.needs_region %}needs a region{% elif grant.remote_info.area %}area {{ grant.remote_info.area.name or grant.remote_info.area.slug }}{% else %}details{% endif %}</summary><pre class="json">{{ grant.remote_info | tojson(indent=2) }}</pre></details></dd>{% endif %}
       <dt>Last sync</dt><dd>{{ grant.last_sync_at | uk }}</dd>
       {% if grant.last_error %}<dt>Last error</dt><dd class="status-lapsed" style="display:inline-block">{{ grant.last_error }}</dd>{% endif %}
       <dt>Source</dt><dd>{{ grant.source }}</dd>

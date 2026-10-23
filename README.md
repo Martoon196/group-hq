@@ -37,8 +37,10 @@ Alembic owns the schema: `alembic upgrade head` runs as Render's pre-deploy comm
 boot. Change `app/models.py`, then `alembic revision --autogenerate -m "..."` and review the file.
 The tables are the ones in the plan: people, organisations, person_organisations, programmes,
 mentees, payments, entitlement_grants, connector_calls, audit_log, users, plus app_settings for the switches set
-on the Settings screen (0006), and the Growth tables (0007: metric_sources, metric_snapshots, ad_spend,
-product_purchases, promo_channel_map, metric_runs and the sales_attribution view; docs/growth.md).
+on the Settings screen (0006), the Growth tables (0007: metric_sources, metric_snapshots, ad_spend,
+product_purchases, promo_channel_map, metric_runs and the sales_attribution view; docs/growth.md), and mentee earnings
+(0008: the affiliate grant kind, entitlement_grants.remote_info, people.pp_account_id as text since Property Predator's
+ids are UUID strings, and the two affiliate items appended once to the Mentorship template; docs/mentee-earnings.md).
 
 The four programmes (mentorship, hnh_franchise, kp_mentee, ordris_pro_bundle) are seeded at boot
 with their grant templates and never overwritten; edit them in the app.
@@ -81,6 +83,17 @@ in `render.yaml` above the growth crons) and sync, press Test on Growth > Source
 On but not configured where its cron runs fails that cron's run and names the variable. Neon's organisation key can
 change and delete projects: it lives on the web service and the daily growth cron only and is never logged or shown.
 The Neon rates on Settings start blank and are never assumed. The module's contract and run book: `docs/growth.md`.
+
+## Mentee earnings
+
+Every mentee is enrolled in each scheme the group runs: the Property Predator affiliate programme and the Ordris partner
+programme (the `affiliate` grant kind; both public, so a revoke is recorded and nothing is sent), the Key Properties
+sourcer fee share (the sourcer link now carries their Property Predator account), the Hello New Home partner seat, and a
+Group HQ seller code created for every active mentee who has none. The mentee and person pages show an **Earning links**
+panel, asked of each product after the page loads, and the mentee page copies a plain **WhatsApp welcome** with every
+link. **Needs a region** on the dashboard (and the Mentees filter of that name) lists active mentees whose Hello New
+Home partner has no area yet, with a button to the Hello New Home page where the founder assigns it. What each mentee
+gets, where the links show and the region process: `docs/mentee-earnings.md`; the four contracts: `docs/connectors.md`.
 
 ## Guards worth knowing about
 
