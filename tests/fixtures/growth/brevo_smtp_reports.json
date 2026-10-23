@@ -1,0 +1,19 @@
+{
+  "reports": [
+    {
+      "date": "2026-10-20",
+      "requests": 50,
+      "delivered": 49,
+      "hardBounces": 0,
+      "softBounces": 1,
+      "clicks": 3,
+      "uniqueClicks": 2,
+      "opens": 30,
+      "uniqueOpens": 20,
+      "spamReports": 0,
+      "blocked": 0,
+      "invalid": 0,
+      "unsubscribed": 0
+    }
+  ]
+}

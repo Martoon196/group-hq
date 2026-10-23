@@ -10,10 +10,15 @@ CONNECTORS_DRY_RUN=1 holds every product in dry run whatever the switches say; o
 decides once it has been set, and the per-product CONNECTORS_DRY_RUN list is only the default for a product
 whose switch has never been set. A product without its token or base URL sends nothing whatever the switch
 says (not configured).
+
+The Growth module adds two kinds of row (app.services.growth): growth_source.<source> ("on" or "off", every source
+starting Off) and running_cost_rate.neon.<metric> (what the founder's Neon plan charges per unit, blank until set:
+Group HQ never invents a price). Both are audited like the product switches.
 """
 from __future__ import annotations
 
 import os
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -128,3 +133,143 @@ def set_product_switch(db: Session, product: str, mode: str, *, actor: User | st
              "floor": bool(config.CONNECTORS_DRY_RUN) or None}
     audit(db, actor, "settings.product_switch", f"product:{product}", before=before, after=after)
     return True
+
+
+# ---- the growth source switches (Growth > Sources) ------------------------------------------------------------
+# growth_source.<source> is "on" or "off". Every source starts Off: a source switched On is collected by the growth
+# crons and by Pull now, and must then be configured where it runs, or the job fails its run and names the variable.
+GROWTH_PREFIX = "growth_source."
+
+
+def growth_switch_key(source: str) -> str:
+    return GROWTH_PREFIX + source
+
+
+def growth_source_switches(db: Session) -> dict[str, str]:
+    """{source: "on" | "off"} for every source whose switch has been set; read fresh on every call, like the product
+    switches, so the web service and the crons agree."""
+    from ..models import SOURCES
+    from .growth.collectors import SWITCH_MODES as GROWTH_MODES
+
+    rows = db.query(AppSetting).filter(AppSetting.key.like(GROWTH_PREFIX + "%")).all()
+    out: dict[str, str] = {}
+    for row in rows:
+        source = row.key[len(GROWTH_PREFIX):]
+        if source in SOURCES and row.value in GROWTH_MODES:
+            out[source] = str(row.value)
+    return out
+
+
+def set_growth_source_switch(db: Session, source: str, mode: str, *, actor: User | str) -> bool:
+    """Switch a growth source on or off. Writes the app_settings row, moves the source's health row to "off" (or back
+    from it), and one audit row (growth.source_switch on source:<name>) with the switch and state before and after.
+    Returns False when nothing changed. The caller commits."""
+    from ..models import SOURCES
+    from .growth.collectors import SWITCH_MODES as GROWTH_MODES
+    from .growth.collectors import source_mode
+    from .growth.runner import source_row
+
+    if source not in SOURCES:
+        raise ValueError(f"unknown source {source!r}")
+    if mode not in GROWTH_MODES:
+        raise ValueError(f"a growth switch is on or off, not {mode!r}")
+    switches = growth_source_switches(db)
+    before = source_mode(source, switches=switches)
+    if before["switch"] == mode:
+        return False
+    key = growth_switch_key(source)
+    statement = insert(AppSetting).values(key=key, value=mode, updated_at=utcnow(), updated_by=_actor_label(actor))
+    db.execute(statement.on_conflict_do_update(index_elements=[AppSetting.key], set_={
+        "value": statement.excluded.value, "updated_at": statement.excluded.updated_at,
+        "updated_by": statement.excluded.updated_by}))
+    row = db.get(AppSetting, key)
+    if row is not None:
+        db.expire(row)
+    switches[source] = mode
+    after = source_mode(source, switches=switches)
+    health = source_row(db, source)
+    if mode == "off":
+        health.status = "off"
+    elif health.status == "off":
+        health.status = "never_run" if health.last_run_at is None else (
+            "ok" if health.last_ok_at and health.last_ok_at >= health.last_run_at else "failing")
+    health.updated_by = _actor_label(actor)[:200]
+    audit(db, actor, "growth.source_switch", f"source:{source}",
+          before={"switch": before["switch"], "state": before["state"]},
+          after={"switch": mode, "state": after["state"], "floor": bool(config.CONNECTORS_DRY_RUN) or None})
+    return True
+
+
+# ---- running-cost rates (Settings > Running costs) --------------------------------------------------------------
+# What the founder's Neon plan charges per unit, typed on the Settings screen. Every rate starts blank: Group HQ never
+# invents a price, and the Costs screen shows usage without an estimate until a rate is set. Rates are in US dollars,
+# the currency Neon prices in.
+RATE_PREFIX = "running_cost_rate."
+RATE_MAX = Decimal("10000")
+
+
+def rate_fields() -> list[dict]:
+    from .growth.registry import NEON_UNITS
+    return [{"key": f"neon.{u.api_name}", "label": u.label, "unit": u.billing_unit, "metric": u.metric} for u in NEON_UNITS]
+
+
+def running_cost_rates(db: Session) -> dict[str, Decimal | None]:
+    """{rate key: dollars per billing unit, or None when not set}."""
+    stored = {row.key[len(RATE_PREFIX):]: row.value
+              for row in db.query(AppSetting).filter(AppSetting.key.like(RATE_PREFIX + "%")).all()}
+    out: dict[str, Decimal | None] = {}
+    for field in rate_fields():
+        raw = stored.get(field["key"])
+        try:
+            out[field["key"]] = Decimal(str(raw)) if raw not in (None, "") else None
+        except (InvalidOperation, ValueError):
+            out[field["key"]] = None
+    return out
+
+
+def parse_rate(raw: str) -> Decimal | None:
+    """A typed rate: blank clears it; otherwise a number from 0 to 10,000 with at most 6 decimal places."""
+    text = (raw or "").strip().replace("$", "").replace(",", "")
+    if not text:
+        return None
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        raise ValueError(f"{raw[:20]!r} is not a number") from None
+    if not value.is_finite() or value < 0 or value > RATE_MAX:
+        raise ValueError(f"{raw[:20]!r} is not a rate between 0 and {RATE_MAX}")
+    if value.as_tuple().exponent < -6:
+        raise ValueError(f"{raw[:20]!r} has more than six decimal places")
+    return value
+
+
+def set_running_cost_rates(db: Session, typed: dict[str, str], *, actor: User | str) -> list[str]:
+    """Store the typed rates (blank clears one). Raises ValueError naming the first unreadable rate, before anything
+    is written. One audit row (settings.running_cost_rates on running_costs:neon) carries every rate that changed,
+    before and after. Returns the changed keys. The caller commits."""
+    current = running_cost_rates(db)
+    wanted: dict[str, Decimal | None] = {}
+    for field in rate_fields():
+        key = field["key"]
+        if key not in typed:
+            continue
+        try:
+            wanted[key] = parse_rate(typed[key])
+        except ValueError as exc:
+            raise ValueError(f"{field['label']} (per {field['unit']}): {exc}") from None
+    changed = [key for key, value in wanted.items() if value != current.get(key)]
+    for key in changed:
+        value = wanted[key]
+        if value is None:
+            db.query(AppSetting).filter(AppSetting.key == RATE_PREFIX + key).delete(synchronize_session=False)
+            continue
+        statement = insert(AppSetting).values(key=RATE_PREFIX + key, value=str(value), updated_at=utcnow(),
+                                              updated_by=_actor_label(actor))
+        db.execute(statement.on_conflict_do_update(index_elements=[AppSetting.key], set_={
+            "value": statement.excluded.value, "updated_at": statement.excluded.updated_at,
+            "updated_by": statement.excluded.updated_by}))
+    if changed:
+        audit(db, actor, "settings.running_cost_rates", "running_costs:neon",
+              before={k: (str(current[k]) if current.get(k) is not None else None) for k in changed},
+              after={k: (str(wanted[k]) if wanted[k] is not None else None) for k in changed})
+    return changed

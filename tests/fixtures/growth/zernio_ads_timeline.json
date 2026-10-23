@@ -1,0 +1,21 @@
+{
+  "rows": [
+    {
+      "date": "2026-10-20",
+      "currency": "GBP",
+      "spend": 12.34,
+      "impressions": 2000,
+      "reach": 1500,
+      "clicks": 30,
+      "conversions": 1.5
+    },
+    {
+      "date": "2026-10-21",
+      "currency": "USD",
+      "spend": 5,
+      "impressions": 100,
+      "clicks": 1,
+      "conversions": 0
+    }
+  ]
+}

@@ -8,6 +8,7 @@ markupsafe==3.0.4
 python-multipart==0.0.32
 itsdangerous==2.2.0
 httpx==0.28.1
+google-auth==2.41.1
 pyotp==2.10.0
 argon2-cffi==25.1.0
 qrcode==8.2

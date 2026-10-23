@@ -1,0 +1,45 @@
+{
+  "dailyData": [
+    {
+      "date": "2026-10-20",
+      "postCount": 2,
+      "platforms": {
+        "instagram": 2
+      },
+      "metrics": {
+        "impressions": 1200,
+        "reach": 900,
+        "likes": 40,
+        "comments": 5,
+        "shares": 3,
+        "saves": 2,
+        "clicks": 12,
+        "views": 300
+      }
+    },
+    {
+      "date": "2026-10-21",
+      "postCount": 0,
+      "platforms": {},
+      "metrics": {
+        "impressions": 300,
+        "reach": 250,
+        "likes": 10,
+        "comments": 0,
+        "shares": 0,
+        "saves": 0,
+        "clicks": 2,
+        "views": 80
+      }
+    }
+  ],
+  "platformBreakdown": [
+    {
+      "platform": "instagram",
+      "postCount": 2,
+      "impressions": 1500,
+      "reach": 1150,
+      "likes": 50
+    }
+  ]
+}

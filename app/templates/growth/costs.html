@@ -1,0 +1,55 @@
+{% extends "app_base.html" %}
+{% import "growth/_shared.html" as g %}
+{% set title = "Costs | Growth | Group HQ" %}
+{% block head %}{{ g.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Growth</span>
+  <h1>Running costs</h1>
+  {{ g.as_of(neon, "Neon") }}
+</div>
+{{ g.tabs(sub, period, product) }}
+{{ g.filters("/growth/costs", period, product, periods, products, with_product=False) }}
+{{ g.floor_note(floor) }}
+
+<p class="help">What each Neon database used, from Neon's consumption API (one row per project per day; Neon keeps daily figures for 60 days). {% if data.rates_set %}Estimates use the rates on <a href="/settings#running-costs">Settings</a>, in US dollars, before any allowance your plan includes (included transfer, included branches); a unit without a rate is listed as unpriced. Neon's invoice is the truth.{% else %}No rates are set, so there is no estimate: <a href="/settings#running-costs">set your plan's rates</a>. Group HQ never assumes a price.{% endif %} A project is named by its label in NEON_PROJECT_PRODUCTS as it is now (pp, kp, ordris, hnh and grouphq show as names, any other label as typed), or by its Neon name when it has none. The days are Neon's, UTC.</p>
+
+<section class="panel mt-1">
+  <div class="panel-head"><h2>{{ data.month_start | date("%B %Y") }} to date</h2></div>
+  {% if data.month %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Database</th><th>Usage</th><th class="num">Estimate</th></tr></thead>
+    <tbody>
+    {% for m in data.month %}
+    <tr><td><strong>{{ m.label }}</strong></td>
+      <td class="small">{% for u in m.usage %}{{ u.label }}: {{ u.amount }} {{ u.unit }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+      <td class="num">{% if m.cost %}{{ m.cost }}{% if m.unpriced %}<br><span class="help">unpriced: {{ m.unpriced | join(", ") }}</span>{% endif %}{% else %}<span class="muted">set your plan's rates</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+    {% if data.rates_set %}<tfoot><tr><th>All databases</th><th></th><th class="num">{{ data.total.cost }}</th></tr></tfoot>{% endif %}
+  </table>
+  </div>
+  {% else %}
+  <p class="empty-note">No Neon figures for this month yet. Set NEON_API_KEY, NEON_ORG_ID and NEON_PROJECT_PRODUCTS on the web service and the daily growth cron, press Test on <a href="/growth/sources#neon">Sources</a>, then switch Neon on.</p>
+  {% endif %}
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>By day</h2><span class="help">{{ period.label }}</span></div>
+  {% if data.by_day %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Day</th><th>Database</th><th>Usage</th><th class="num">Estimate</th></tr></thead>
+    <tbody>
+    {% for d in data.by_day %}
+    <tr><td class="nowrap">{{ d.date | date }}</td><td>{{ d.label }}</td>
+      <td class="small">{% for u in d.usage %}{{ u.label }} {{ u.amount }} {{ u.unit }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+      <td class="num">{% if d.cost %}{{ d.cost }}{% else %}<span class="muted">—</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="empty-note">Nothing in this period yet.</p>{% endif %}
+</section>
+{% endblock %}

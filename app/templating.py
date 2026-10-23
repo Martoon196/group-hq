@@ -64,5 +64,7 @@ def render(request: Request, template: str, ctx: dict | None = None, status_code
 
 def go(path: str, *, ok: str = "", err: str = "") -> RedirectResponse:
     if ok or err:
+        path, hash_, fragment = path.partition("#")       # the flash goes in the query, before any #fragment
         path += ("&" if "?" in path else "?") + urlencode({"err": err} if err else {"ok": ok})
+        path += hash_ + fragment
     return RedirectResponse(path, status_code=303)

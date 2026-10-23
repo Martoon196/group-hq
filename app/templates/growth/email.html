@@ -1,0 +1,61 @@
+{% extends "app_base.html" %}
+{% import "growth/_shared.html" as g %}
+{% set title = "Email | Growth | Group HQ" %}
+{% block head %}{{ g.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Growth</span>
+  <h1>Email</h1>
+  {{ g.as_of(brevo, "Brevo") }}
+</div>
+{{ g.tabs(sub, period, product) }}
+{{ g.filters("/growth/email", period, product, periods, products) }}
+{{ g.floor_note(floor) }}
+
+<div class="two-col-growth">
+<section class="panel">
+  <div class="panel-head"><h2>Lists</h2>{% if data.lists_as_of %}<span class="help">contacts on {{ data.lists_as_of | date }}</span>{% endif %}</div>
+  {% if data.lists %}
+  <table class="data">
+    <thead><tr><th>List</th><th>Product</th><th class="num">Contacts</th></tr></thead>
+    <tbody>{% for l in data.lists %}<tr><td>{{ l.name }}</td><td>{{ product_name(l.product) if l.product != "group" else "Group" }}</td><td class="num">{{ l.contacts }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty-note">No lists pulled yet.</p>{% endif %}
+  <p class="help mt-1">New contacts in the period: <strong>{{ data.new_total }}</strong>{% for code, n in data.new_contacts.items() %}{% if code != "group" %} · {{ product_name(code) }} {{ n }}{% endif %}{% endfor %}. Products come from the list map (BREVO_LIST_PRODUCTS).</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>Transactional, last 7 days</h2></div>
+  {% set tx = data.transactional %}
+  <table class="data">
+    <tbody>
+      <tr><td>Requests</td><td class="num">{{ "{:,.0f}".format(tx.email_sent) }}</td></tr>
+      <tr><td>Delivered</td><td class="num">{{ "{:,.0f}".format(tx.email_delivered) }}</td></tr>
+      <tr><td>Bounces</td><td class="num">{{ "{:,.0f}".format(tx.email_bounces) }}</td></tr>
+      <tr><td>Spam reports</td><td class="num">{{ "{:,.0f}".format(tx.email_spam_reports) }}</td></tr>
+    </tbody>
+  </table>
+</section>
+</div>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>Campaigns sent</h2><span class="help">{{ period.label }}; figures keep moving for weeks after a send and are re-pulled for 30 days.</span></div>
+  {% if data.campaigns %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Sent</th><th>Campaign</th><th>Product</th><th class="num">Sent</th><th class="num">Delivered</th><th class="num">Unique opens</th><th class="num">Open rate</th><th class="num">Unique clicks</th><th class="num">Click rate</th><th class="num">Unsubscribes</th><th class="num">Bounces</th></tr></thead>
+    <tbody>
+    {% for c in data.campaigns %}
+    <tr><td class="nowrap">{{ c.date | date }}</td><td class="detail">{{ c.name }}</td><td>{{ product_name(c.product) if c.product != "group" else "Group" }}</td>
+      <td class="num">{{ "{:,.0f}".format(c.email_sent) }}</td><td class="num">{{ "{:,.0f}".format(c.email_delivered) }}</td>
+      <td class="num">{{ "{:,.0f}".format(c.email_opens_unique) }}</td><td class="num">{{ c.open_rate }}</td>
+      <td class="num">{{ "{:,.0f}".format(c.email_clicks_unique) }}</td><td class="num">{{ c.click_rate }}</td>
+      <td class="num">{{ "{:,.0f}".format(c.email_unsubscribed) }}</td><td class="num">{{ "{:,.0f}".format(c.email_bounces) }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="empty-note">No campaign sent in this period.</p>{% endif %}
+  <p class="help mt-1">Brevo counts only: no address, no per-person open history is kept in Group HQ.</p>
+</section>
+{% endblock %}

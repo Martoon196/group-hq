@@ -1,0 +1,101 @@
+{
+  "projects": [
+    {
+      "project_id": "proj-pp-111",
+      "periods": [
+        {
+          "period_id": "79ec829f-1828-4006-ac82-9f1828a0067d",
+          "period_plan": "launch",
+          "period_start": "2026-10-01T00:00:00Z",
+          "consumption": [
+            {
+              "timeframe_start": "2026-10-20T00:00:00Z",
+              "timeframe_end": "2026-10-21T00:00:00Z",
+              "metrics": [
+                {
+                  "metric_name": "compute_unit_seconds",
+                  "value": 7200
+                },
+                {
+                  "metric_name": "root_branch_bytes_month",
+                  "value": 1500000000
+                },
+                {
+                  "metric_name": "child_branch_bytes_month",
+                  "value": 0
+                },
+                {
+                  "metric_name": "instant_restore_bytes_month",
+                  "value": 250000000
+                },
+                {
+                  "metric_name": "public_network_transfer_bytes",
+                  "value": 2000000000
+                },
+                {
+                  "metric_name": "private_network_transfer_bytes",
+                  "value": 0
+                },
+                {
+                  "metric_name": "extra_branches_month",
+                  "value": 0
+                },
+                {
+                  "metric_name": "snapshot_storage_bytes_month",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "timeframe_start": "2026-10-21T00:00:00Z",
+              "timeframe_end": "2026-10-22T00:00:00Z",
+              "metrics": [
+                {
+                  "metric_name": "compute_unit_seconds",
+                  "value": 3600
+                },
+                {
+                  "metric_name": "root_branch_bytes_month",
+                  "value": 1500000000
+                },
+                {
+                  "metric_name": "extra_branches_month",
+                  "value": 744
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "project_id": "proj-hq-222",
+      "periods": [
+        {
+          "period_id": "79ec829f-1828-4006-ac82-9f1828a0067d",
+          "period_plan": "launch",
+          "period_start": "2026-10-01T00:00:00Z",
+          "consumption": [
+            {
+              "timeframe_start": "2026-10-20T00:00:00Z",
+              "timeframe_end": "2026-10-21T00:00:00Z",
+              "metrics": [
+                {
+                  "metric_name": "compute_unit_seconds",
+                  "value": 1800
+                },
+                {
+                  "metric_name": "root_branch_bytes_month",
+                  "value": 100000000
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "cursor": "proj-hq-222"
+  }
+}

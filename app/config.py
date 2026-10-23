@@ -86,6 +86,45 @@ SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 SMTP_STARTTLS = _bool("SMTP_STARTTLS", True)
 MAIL_FROM = (os.environ.get("MAIL_FROM") or "").strip()
+# Growth (app.services.growth): the read-only collectors behind the Growth screens. Every credential is an environment
+# variable on the web service, copied to the growth cron that reads it by a fromService entry added once it is set
+# there (render.yaml); none has a default, and none is ever logged, stored or shown (a recorded plan reads
+# "[redacted]"). The *_PRODUCTS and *_IDS values are not secret: they map a platform's id to a product code,
+# "id=code,id=code".
+GOOGLE_SA_JSON = os.environ.get("GOOGLE_SA_JSON", "")                  # the service-account key file's JSON, one line
+GA4_PROPERTY_IDS = os.environ.get("GA4_PROPERTY_IDS", "")              # pp=123456789,kp=...
+GSC_SITES = os.environ.get("GSC_SITES", "")                            # pp=sc-domain:propertypredator.com,...
+STRIPE_RK_MH196 = os.environ.get("STRIPE_RK_MH196", "")                # restricted key, read only (MH196 2026 Ltd)
+STRIPE_RK_HNH = os.environ.get("STRIPE_RK_HNH", "")                    # restricted key, read only (Hello New Home 2 Ltd)
+STRIPE_PRODUCT_MAP = os.environ.get("STRIPE_PRODUCT_MAP", "")          # prod_...=pp,price_...=ordris (metadata.product wins)
+BREVO_API_KEY_HQ = os.environ.get("BREVO_API_KEY_HQ", "")
+BREVO_LIST_PRODUCTS = os.environ.get("BREVO_LIST_PRODUCTS", "")        # 123=kp,456=pp
+ZERNIO_API_KEY = os.environ.get("ZERNIO_API_KEY", "")                  # read-only scoped key
+ZERNIO_PROFILE_PRODUCTS = os.environ.get("ZERNIO_PROFILE_PRODUCTS", "")  # <profileId>=pp,...
+ZERNIO_AD_ACCOUNTS = os.environ.get("ZERNIO_AD_ACCOUNTS", "")          # <accountId>=tiktok,<accountId>=x, once connected
+# Not recommended (DASHBOARD-SPEC 3.13): Clerk's backend key can delete Ordris users. Off unless switched on, and absent
+# from render.yaml on purpose.
+CLERK_SECRET_KEY_ORDRIS = os.environ.get("CLERK_SECRET_KEY_ORDRIS", "")
+# Neon's organisation API key can change and delete projects: it lives on the web service and the daily growth cron
+# only, and is never logged, stored or shown. NEON_PROJECT_PRODUCTS labels each project, "projectId=label,...";
+# a label is free text (pp, kp, ordris, hnh and grouphq show as names, anything else as typed).
+NEON_API_KEY = os.environ.get("NEON_API_KEY", "")
+NEON_ORG_ID = os.environ.get("NEON_ORG_ID", "")
+NEON_PROJECT_PRODUCTS = os.environ.get("NEON_PROJECT_PRODUCTS", "")
+
+
+def pairs(raw: str) -> dict[str, str]:
+    """"a=pp,b=kp" as {"a": "pp", "b": "kp"}: blanks and entries without "=" are dropped, keys and values trimmed.
+    The value is everything after the first "=", so a key may not contain one but a value may."""
+    out: dict[str, str] = {}
+    for part in (raw or "").split(","):
+        key, sep, value = part.partition("=")
+        key, value = key.strip(), value.strip()
+        if sep and key and value:
+            out[key] = value
+    return out
+
+
 # CONNECTORS_DRY_RUN: "1" records every outbound connector call instead of sending it (tests and rehearsals
 # run this way), a hard floor no switch on the Settings screen can lift. Otherwise each product follows its Live /
 # Dry run switch on the Settings screen once that has been set, and this value is only the default for a product

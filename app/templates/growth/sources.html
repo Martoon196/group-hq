@@ -1,0 +1,109 @@
+{% extends "app_base.html" %}
+{% import "growth/_shared.html" as g %}
+{% set title = "Sources | Growth | Group HQ" %}
+{% block head %}{{ g.styles() }}
+<style>
+  .switch-form { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+  .switch-form form { margin: 0; }
+  .switch-form .btn[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); cursor: default; transform: none; }
+  td.src { min-width: 14rem; }
+  .runs { margin: .3rem 0 0; padding: 0; list-style: none; font-size: .8rem; color: var(--muted); }
+  .warn-line { color: #7A3E00; font-weight: 700; font-size: .85rem; }
+  .map-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .6rem; align-items: end; }
+  .map-form .field input, .map-form .field select, #import .field input, #import .field select { padding: .5rem .65rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Growth</span>
+  <h1>Sources</h1>
+</div>
+{{ g.tabs(sub, period, product) }}
+{% if floor %}<div class="floor-note">CONNECTORS_DRY_RUN=1 on this server: every pull and every Test is a dry run that shows its plan and fetches nothing.</div>{% endif %}
+
+<section class="panel">
+  <div class="panel-head"><h2>Health</h2><a class="btn btn-ghost btn-sm" href="/audit?q=growth.">Change history</a></div>
+  <p class="help">Every source starts Off. To start one: set its variables on the web service, add their fromService lines to the growth cron it runs on (render.yaml lists them) and sync the Blueprint, press <strong>Test</strong> here, then switch it <strong>On</strong>. A source that is On but not configured where the cron runs makes that cron's run fail on Render, naming the variable. Credentials are listed by name only: their values are never shown, stored or logged. The hourly cron runs at :07, the daily one at 06:10 UTC.</p>
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Source</th><th>Now</th><th>Switch</th><th>Last run</th><th>Variables</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    {% set m = r.mode %}{% set h = r.health %}
+    <tr id="{{ r.source }}">
+      <td class="src"><strong>{{ r.info.name }}</strong><br><span class="help">{{ r.info.scope }} · {{ r.info.tier }}</span>
+        {% if r.info.waiting %}<br><span class="help">{{ r.info.waiting }}</span>{% endif %}
+        {% if r.info.warning %}<br><span class="warn-line">{{ r.info.warning }}</span>{% endif %}
+        {% if h and h.config and h.config.note and not r.info.waiting %}<br><span class="help">{{ h.config.note }}</span>{% endif %}</td>
+      <td>{% set shown = "dry_run" if m.state == "dry_run" else ("live" if m.state == "live" else ("held" if m.state == "off" else m.state)) %}
+        <span class="status status-{{ shown }}">{{ state_labels[m.state] }}</span>
+        {% if h and m.state in ("live", "dry_run") %}<br><span class="status status-{{ h.status }} mt-1">{{ h.status | replace("_", " ") }}</span>{% endif %}
+        {% if r.built and not m.configured and m.state != "not_configured" %}<br><span class="status status-not_configured mt-1">Not configured</span>{% endif %}</td>
+      <td>{% if r.built %}
+        <div class="switch-form">
+          <form method="post" action="/growth/sources/{{ r.source }}/switch" data-confirm="Switch {{ r.info.name }} on? The {{ r.info.tier }} growth cron collects it from its next run{% if not m.configured %}, but this server has no {{ m.missing | join(', ') }} yet{% endif %}."><input type="hidden" name="mode" value="on"><button class="btn btn-ghost btn-sm" type="submit"{% if m.switch == "on" %} aria-pressed="true"{% endif %}>On</button></form>
+          <form method="post" action="/growth/sources/{{ r.source }}/switch"><input type="hidden" name="mode" value="off"><button class="btn btn-ghost btn-sm" type="submit"{% if m.switch == "off" %} aria-pressed="true"{% endif %}>Off</button></form>
+        </div>{% else %}<span class="muted small">not built yet</span>{% endif %}</td>
+      <td class="small nowrap">
+        {% if h and h.last_run_at %}{{ h.last_run_at | uk }}<br>{{ h.last_rows }} rows{% if h.last_ok_at %}<br><span class="muted">last good {{ h.last_ok_at | uk }}</span>{% endif %}{% else %}<span class="muted">never</span>{% endif %}
+        {% if h and h.next_due_at and m.switch == "on" %}<br><span class="muted">next {{ h.next_due_at | uk }}</span>{% endif %}
+        {% if h and h.last_error %}<br><span class="bad-text">{{ h.last_error }}</span>{% endif %}
+        {% if r.runs %}<details class="plan"><summary>last {{ r.runs | length }} runs</summary><ul class="runs">{% for run in r.runs %}<li>{{ run.started_at | uk("%d %b %H:%M") }} · {{ "dry run" if run.dry_run else ("ok" if run.ok else "failed") }} · {{ run.rows }} rows · {{ run.actor }}{% if run.error %} · {{ run.error }}{% endif %}</li>{% endfor %}</ul></details>{% endif %}
+      </td>
+      <td class="small">{% for e in r.env %}<code>{{ e.name }}</code> {% if e.set %}<span class="ok-text">set</span>{% else %}<span class="bad-text">missing</span>{% endif %}<br>{% endfor %}
+        {% if r.built %}Cron: {% if r.cron %}<span class="ok-text">set</span>{% elif r.cron is sameas false %}<span class="bad-text">missing at its last run</span>{% else %}<span class="muted">not seen yet</span>{% endif %}{% endif %}</td>
+      <td>{% if r.built %}
+        <div class="switch-form">
+          <form method="post" action="/growth/sources/{{ r.source }}/test"><button class="btn btn-ghost btn-sm" type="submit">Test</button></form>
+          <form method="post" action="/growth/sources/{{ r.source }}/pull"><button class="btn btn-ghost btn-sm" type="submit">Pull now</button></form>
+          <form method="post" action="/growth/sources/{{ r.source }}/pull"><input type="hidden" name="dry_run" value="1"><button class="btn btn-ghost btn-sm" type="submit">Dry run</button></form>
+        </div>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="panel mt-2" id="promo">
+  <div class="panel-head"><h2>Promo code map</h2></div>
+  <p class="help">A sale with a mapped promo code is credited to the code's channel and campaign whatever the visitor's touches say; an unmapped code falls back to the UTM touch. One code per channel per product (PPMETA, KPGOOGLE, ...). Codes are stored in capitals.</p>
+  {% if unmapped %}<p class="warn-line">Seen but not mapped: {% for code_product, code in unmapped %}{{ code }} ({{ product_name(code_product) }}){% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  {% if promo %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Code</th><th>Product</th><th>Channel</th><th>Platform</th><th>Campaign</th><th>Note</th><th>Changed</th><th></th></tr></thead>
+    <tbody>
+    {% for m in promo %}
+    <tr><td><code>{{ m.code }}</code></td><td>{{ product_name(m.product) }}</td><td>{{ m.channel | replace("_", " ") }}</td><td>{{ m.platform or "—" }}</td><td class="detail">{{ m.campaign_name or "—" }}</td><td class="detail">{{ m.note }}</td><td class="small nowrap">{{ m.updated_at | uk }}<br><span class="muted">{{ m.created_by }}</span></td>
+      <td><form method="post" action="/growth/promo-map" data-confirm="Remove {{ m.code }}? Its sales fall back to their UTM touches."><input type="hidden" name="code" value="{{ m.code }}"><input type="hidden" name="product" value="{{ m.product }}"><input type="hidden" name="action" value="delete"><button class="btn btn-ghost btn-sm" type="submit">Remove</button></form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="empty-note">No code is mapped yet.</p>{% endif %}
+  <form method="post" action="/growth/promo-map" class="map-form mt-1">
+    <div class="field"><label for="pm-code">Code</label><input id="pm-code" name="code" required maxlength="40" placeholder="PPMETA"></div>
+    <div class="field"><label for="pm-product">Product</label><select id="pm-product" name="product">{% for code in product_codes %}<option value="{{ code }}">{{ product_name(code) }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="pm-channel">Channel</label><select id="pm-channel" name="channel">{% for c in channels_list %}<option value="{{ c }}">{{ c | replace("_", " ") }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="pm-platform">Platform</label><input id="pm-platform" name="platform" maxlength="20" placeholder="meta"></div>
+    <div class="field"><label for="pm-campaign">Campaign (utm_campaign)</label><input id="pm-campaign" name="campaign_name" maxlength="200" placeholder="pp-launch-202611-hmo"></div>
+    <div class="field"><label for="pm-note">Note</label><input id="pm-note" name="note" maxlength="200"></div>
+    <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Save the code</button></div>
+  </form>
+  <p class="help mt-1">Saving a code that is already mapped for that product changes it. Every change is an audit row (growth.promo_map).</p>
+</section>
+
+<section class="panel mt-2" id="import">
+  <div class="panel-head"><h2>Import a CSV</h2></div>
+  <p class="help">For a platform whose API is not connected yet (LinkedIn Campaign Manager, Meta, TikTok, Google Ads or X): export a daily campaign report and import it here. Each campaign-day becomes a spend row; importing the same days again replaces them. The product comes from the campaign name's prefix (pp-, kp-, ord-, hnh-). Tick dry run to see what would be written first.</p>
+  <form method="post" action="/growth/import" enctype="multipart/form-data" class="map-form">
+    <div class="field"><label for="imp-file">CSV file</label><input id="imp-file" type="file" name="file" accept=".csv,text/csv" required></div>
+    <div class="field"><label for="imp-platform">Platform</label><select id="imp-platform" name="platform">{% for p in ad_platforms %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="imp-account">Ad account id (if the file has none)</label><input id="imp-account" name="account_id" maxlength="60"></div>
+    <div class="field"><label for="imp-dates">Dates in the file</label><select id="imp-dates" name="date_format"><option value="iso">2026-11-03</option><option value="dmy">03/11/2026 (day first)</option><option value="mdy">11/03/2026 (month first)</option></select></div>
+    <div class="field field-check"><label for="imp-dry"><input id="imp-dry" type="checkbox" name="dry_run" value="1" checked> Dry run: show, write nothing</label></div>
+    <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Import</button></div>
+  </form>
+</section>
+{% endblock %}

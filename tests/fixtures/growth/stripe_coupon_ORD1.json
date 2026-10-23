@@ -1,0 +1,9 @@
+{
+  "object": "coupon",
+  "id": "ORD1",
+  "percent_off": null,
+  "amount_off": 100,
+  "currency": "gbp",
+  "duration": "forever",
+  "valid": true
+}

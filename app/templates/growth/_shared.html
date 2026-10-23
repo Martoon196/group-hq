@@ -1,0 +1,81 @@
+{# Styles and macros shared by the Growth screens: the tab row and filters, a tile, an inline-SVG sparkline (no chart
+   library: the app loads nothing from a CDN but the map page's Leaflet), status chips and the "as of" line. #}
+{% macro styles() -%}
+<style>
+  .growth-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1rem; }
+  .growth-tabs a { text-decoration: none; font-weight: 700; font-size: .9rem; padding: .35rem .8rem; border-radius: 999px; border: 1px solid var(--line); color: var(--ink); background: var(--paper); }
+  .growth-tabs a.is-active { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .growth-filters { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin: 0 0 1.2rem; }
+  .growth-filters .chips a { text-decoration: none; }
+  .growth-filters .chip.is-active { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .stats-6 { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 1000px) { .stats-6 { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .stats-6 { grid-template-columns: 1fr; } }
+  .stats-6 .stat strong { font-size: 1.6rem; }
+  .tile-note { display: block; font-size: .8rem; color: var(--muted); margin-top: .25rem; }
+  .tile-asof { display: block; font-size: .74rem; color: var(--muted); margin-top: .15rem; }
+  .sparkline { display: block; width: 120px; height: 28px; }
+  .sparkline polyline { fill: none; stroke: var(--pink-deep); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ok-text { color: var(--green-deep); font-weight: 700; }
+  .bad-text { color: #9B1C4B; font-weight: 700; }
+  .status-ok, .chip-ok { background: #E3F5EA; color: #17814A; border-color: #BFE3CD; }
+  .status-failing, .chip-failed { background: #FDE8EE; color: #9B1C4B; border-color: #F3C2D2; }
+  .status-off, .chip-off, .status-never_run, .chip-never_run, .status-not_built { background: #EEE; color: #666; }
+  .chip-warn { background: #FFF1C9; color: #7A5200; border-color: #F0DC9C; text-decoration: none; }
+  .floor-note { border-radius: 10px; padding: .7rem 1rem; margin: 0 0 1rem; background: #E8EEFF; color: #2B4A9B; font-weight: 700; }
+  .empty-note { border: 1px dashed var(--line); border-radius: 10px; padding: .9rem 1rem; color: var(--muted); }
+  .two-col-growth { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+  @media (max-width: 1000px) { .two-col-growth { grid-template-columns: 1fr; } }
+  details.plan summary { cursor: pointer; font-size: .82rem; color: var(--muted); }
+  details.plan pre { margin: .3rem 0 0; font-size: .78rem; background: var(--mist); padding: .6rem; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+</style>
+{%- endmacro %}
+
+{% macro tabs(sub, period, product) -%}
+{% set q = "?period=" ~ period.key ~ "&product=" ~ product %}
+<nav class="growth-tabs" aria-label="Growth">
+  {% for key, label, href in [("overview", "Overview", "/growth"), ("channels", "Channels", "/growth/channels"), ("email", "Email", "/growth/email"), ("social", "Social", "/growth/social"), ("search", "Search", "/growth/search"), ("costs", "Costs", "/growth/costs"), ("sources", "Sources", "/growth/sources")] %}
+  <a href="{{ href }}{{ q }}"{% if sub == key %} class="is-active" aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</nav>
+{%- endmacro %}
+
+{% macro filters(path, period, product, periods, products, with_product=True) -%}
+<div class="growth-filters">
+  <div class="chips" aria-label="Period">
+    {% for key, label in periods.items() %}<a class="chip{% if period.key == key %} is-active{% endif %}" href="{{ path }}?period={{ key }}&product={{ product }}">{{ label }}</a>{% endfor %}
+  </div>
+  {% if with_product %}
+  <div class="chips" aria-label="Product">
+    <a class="chip{% if product == 'all' %} is-active{% endif %}" href="{{ path }}?period={{ period.key }}&product=all">All products</a>
+    {% for code in products %}<a class="chip{% if product == code %} is-active{% endif %}" href="{{ path }}?period={{ period.key }}&product={{ code }}">{{ product_name(code) }}</a>{% endfor %}
+  </div>
+  {% endif %}
+  <span class="help">{{ period.start | date }} to {{ period.end | date }} (UK dates)</span>
+</div>
+{%- endmacro %}
+
+{% macro tile(label, value, note="", as_of=None, settling="") -%}
+<div class="stat">
+  <strong>{{ value }}</strong><span>{{ label }}</span>
+  {% if note %}<span class="tile-note">{{ note }}</span>{% endif %}
+  {% if as_of %}<span class="tile-asof">as of {{ as_of | uk }}{% if settling %} · {{ settling }}{% endif %}</span>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro sparkline(values, label="") -%}
+{% if values and values|length > 1 %}
+{% set top = (values|max) or 1 %}
+{% set step = 120 / (values|length - 1) %}
+<svg class="sparkline" viewBox="0 0 120 28" role="img" aria-label="{{ label or 'trend' }}, last {{ values|length }} days"><polyline points="{% for v in values %}{{ '%.1f'|format(loop.index0 * step) }},{{ '%.1f'|format(26 - (v / top) * 24) }} {% endfor %}"/></svg>
+{% else %}<span class="muted small">no data</span>{% endif %}
+{%- endmacro %}
+
+{% macro as_of(row, what="") -%}
+{% if row and row.last_ok_at %}<span class="help">{{ what }} as of {{ row.last_ok_at | uk }}</span>{% elif row and row.status == "not_configured" %}<span class="help">{{ what }} not configured: see <a href="/growth/sources">Sources</a></span>{% else %}<span class="help">{{ what }} not pulled yet: see <a href="/growth/sources">Sources</a></span>{% endif %}
+{%- endmacro %}
+
+{% macro floor_note(floor) -%}
+{% if floor %}<div class="floor-note">CONNECTORS_DRY_RUN=1 on this server: every pull is a dry run, nothing is fetched and the figures below do not move.</div>{% endif %}
+{%- endmacro %}

@@ -1,0 +1,23 @@
+{
+  "object": "list",
+  "has_more": false,
+  "data": [
+    {
+      "id": "promo_1",
+      "code": "ORDMETA",
+      "active": true,
+      "times_redeemed": 3,
+      "metadata": {
+        "product": "ordris",
+        "channel": "meta"
+      }
+    },
+    {
+      "id": "promo_2",
+      "code": "kpgoogle",
+      "active": true,
+      "times_redeemed": 0,
+      "metadata": {}
+    }
+  ]
+}

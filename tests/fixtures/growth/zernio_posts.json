@@ -1,0 +1,65 @@
+{
+  "overview": {
+    "totalPosts": 3,
+    "publishedPosts": 3,
+    "lastSync": "2026-10-22T05:00:00Z"
+  },
+  "posts": [
+    {
+      "_id": "p1",
+      "platform": "instagram",
+      "status": "published",
+      "publishedAt": "2026-10-20T12:00:00Z",
+      "platformPostUrl": "https://www.instagram.com/p/abc/",
+      "isExternal": false,
+      "isAd": false,
+      "analytics": {
+        "impressions": 800,
+        "reach": 600,
+        "likes": 30,
+        "comments": 4,
+        "shares": 2,
+        "saves": 1,
+        "clicks": 9,
+        "views": 0
+      }
+    },
+    {
+      "_id": "p2",
+      "platform": "tiktok",
+      "status": "published",
+      "publishedAt": "2026-10-21T18:00:00Z",
+      "platformPostUrl": "https://www.tiktok.com/@ukpropertyinvestment/video/1",
+      "isExternal": true,
+      "isAd": false,
+      "analytics": {
+        "impressions": 400,
+        "reach": 380,
+        "likes": 12,
+        "comments": 1,
+        "shares": 0,
+        "saves": 0,
+        "clicks": 1,
+        "views": 390
+      }
+    },
+    {
+      "_id": "p3",
+      "platform": "tiktok",
+      "status": "published",
+      "publishedAt": "2026-10-21T19:00:00Z",
+      "isAd": true,
+      "analytics": {
+        "impressions": 9000,
+        "likes": 100
+      }
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 50,
+    "total": 3,
+    "pages": 1
+  },
+  "hasAnalyticsAccess": true
+}

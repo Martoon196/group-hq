@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "keys": [
+        "2026-10-18",
+        "hmo calculator"
+      ],
+      "clicks": 4,
+      "impressions": 100,
+      "ctr": 0.04,
+      "position": 5.0
+    },
+    {
+      "keys": [
+        "2026-10-19",
+        "hmo calculator"
+      ],
+      "clicks": 2,
+      "impressions": 300,
+      "ctr": 0.0066666,
+      "position": 15.0
+    }
+  ]
+}

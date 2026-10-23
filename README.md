@@ -37,7 +37,8 @@ Alembic owns the schema: `alembic upgrade head` runs as Render's pre-deploy comm
 boot. Change `app/models.py`, then `alembic revision --autogenerate -m "..."` and review the file.
 The tables are the ones in the plan: people, organisations, person_organisations, programmes,
 mentees, payments, entitlement_grants, connector_calls, audit_log, users, plus app_settings for the switches set
-on the Settings screen (0006).
+on the Settings screen (0006), and the Growth tables (0007: metric_sources, metric_snapshots, ad_spend,
+product_purchases, promo_channel_map, metric_runs and the sales_attribution view; docs/growth.md).
 
 The four programmes (mentorship, hnh_franchise, kp_mentee, ordris_pro_bundle) are seeded at boot
 with their grant templates and never overwritten; edit them in the app.
@@ -45,11 +46,12 @@ with their grant templates and never overwritten; edit them in the app.
 ## Deploy
 
 `render.yaml` describes the web service (Frankfurt, starter), the nightly `group-hq-recompute`
-cron at 03:10 UTC and the `group-hq-statements` cron at 03:40 UTC. Set the secrets marked `sync: false`
+cron at 03:10 UTC, the `group-hq-statements` cron at 03:40 UTC and the two Growth crons (below). Set the secrets marked `sync: false`
 in the Render dashboard. The crons copy their settings from the web service, and Render can only copy a
-variable the web service actually holds, so `PP_SERVICE_TOKEN` is not copied yet (the Ordris, Key Properties and
-Hello New Home tokens are). When a product goes live: set its token on the web service first, then add its
-`fromService` entry to the recompute cron and sync, and only then switch it to Live on Settings. `CONNECTORS_DRY_RUN`
+variable the web service actually holds, so a `fromService` entry always follows the variable, never the other way
+round. All four product tokens are now set on the web service and copied to the recompute cron (`PP_SERVICE_TOKEN`
+since 23 October 2026) and to the hourly growth cron. When a product goes live: set its token on the web service first,
+then add its `fromService` entry to the recompute cron and sync, and only then switch it to Live on Settings. `CONNECTORS_DRY_RUN`
 takes `1` (everything in dry run), `0` (everything live by default) or a list of products that default to dry
 run (`ordris,kp,hnh`, for example) while the others default to live; it ships as `pp`. Since 0006 the list is only the
 default: each product has a Live / Dry run switch on **Settings** (side navigation), stored in the database, and
@@ -64,6 +66,21 @@ Deploy `group-hq-recompute` from the same commit as the web service and check it
 the job refuses to run (exit 1, nothing sent) when the database is not at its own Alembic head, but a cron still
 on a build from before 0006 would ignore the switches and every hold, and rolling the database back past 0006
 releases every hold and switch. `ORDRIS_BASE_URL` is `https://ordris.io`, which stays true after Ordris moves to Render.
+
+## Growth
+
+**Growth** in the side navigation is one section fed by APIs: visitors (GA4), sign-ups, trials, paying, MRR and
+purchases from each product's own ledger, Stripe, ad spend (and a CSV import until the ad platforms' APIs are
+approved), cost per sale by channel with promo-code and UTM attribution, email (Brevo), social (Zernio), search
+(Search Console) and the running costs of every Neon database. Screens read Postgres only; two crons pull:
+`group-hq-growth-hourly` (`7 * * * *`) and `group-hq-growth-daily` (`10 6 * * *`), both `python -m
+app.jobs.growth_pull`, deployed from the same commit as the web service. Every source starts Off, and the crons ship
+copying only what the web service already holds (the database, the app's settings and the product tokens). To start a
+source: set its variables on the web service, then add their `fromService` lines to the cron that reads them (listed
+in `render.yaml` above the growth crons) and sync, press Test on Growth > Sources, then switch it On. A source that is
+On but not configured where its cron runs fails that cron's run and names the variable. Neon's organisation key can
+change and delete projects: it lives on the web service and the daily growth cron only and is never logged or shown.
+The Neon rates on Settings start blank and are never assumed. The module's contract and run book: `docs/growth.md`.
 
 ## Guards worth knowing about
 

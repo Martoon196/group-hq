@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "purchases": [
+    {
+      "ref": "cs_test_a2",
+      "occurred_at": "2026-10-21T09:00:00+01:00",
+      "kind": "one_off",
+      "plan": "report",
+      "amount_pence": 3900,
+      "currency": "gbp",
+      "status": "paid",
+      "promo_code": "",
+      "affiliate_ref": "aff-77",
+      "first_touch": {},
+      "last_touch": {},
+      "account_key": "buyer2@example.test",
+      "stripe_customer_id": "cus_test_2"
+    },
+    {
+      "ref": "cs_test_a3",
+      "occurred_at": "2026-10-21T12:00:00Z",
+      "kind": "mystery",
+      "amount_pence": 100,
+      "status": "paid"
+    }
+  ],
+  "next_cursor": null
+}

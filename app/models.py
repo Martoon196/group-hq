@@ -616,3 +616,180 @@ class FranchisePayment(TimestampMixin, Base):
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     opportunity: Mapped[FranchiseOpportunity] = relationship()
+
+
+# =====================================================================================================
+# Growth: the metrics the Growth screens read (alembic/versions/0007_growth.py). Every row is an aggregate
+# pulled from a platform's own API or a product's partner API, keyed so a re-pull upserts the same row.
+# Counts, campaign names, hashed account keys and Stripe ids only: no email, no IP, no per-person history.
+# =====================================================================================================
+
+# ---- Growth vocabularies (mirrored by the CheckConstraints in alembic/versions/0007_growth.py) ----
+SOURCES = ("ga4", "search_console", "google_ads", "meta_ads", "meta_pages_instagram", "linkedin", "tiktok",
+           "stripe_mh196", "stripe_hnh", "brevo", "zernio", "clerk_ordris",
+           "product_pp", "product_kp", "product_ordris", "product_hnh", "neon")
+SOURCE_STATUSES = ("ok", "failing", "not_configured", "off", "never_run")
+SOURCE_TIERS = ("hourly", "daily")
+METRIC_PRODUCTS = ("pp", "kp", "ordris", "hnh", "group")        # "group" for group-wide rows
+AD_PLATFORMS = ("google", "meta", "tiktok", "linkedin", "x")
+PURCHASE_KINDS = ("subscription", "one_off", "renewal", "reservation", "instruction", "refund")
+PURCHASE_STATUSES = ("paid", "refunded", "trialing")
+CHANNELS = ("paid_social", "paid_search", "social", "email", "affiliate", "partner", "direct", "other")
+ATTRIBUTION_BASES = ("promo", "last_touch", "affiliate", "first_touch", "direct")
+DIMENSION_MAX = 200             # a dimension value is cut here BEFORE the upsert key is computed
+
+
+class MetricSource(TimestampMixin, Base):
+    """One collector's health row, seeded by app.seed (never overwritten once edited). The on/off switch itself is
+    the app_settings row growth_source.<source>, read fresh on every call like product_switch.<product>; status is
+    what the last run left: ok, failing, not_configured, off or never_run. credential_env lists the environment
+    variable NAMES the collector reads, for the Sources screen; never a value. config holds non-secret settings
+    (property ids, list ids, profile ids) the founder may edit later."""
+    __tablename__ = "metric_sources"
+    __table_args__ = (
+        _one_of("source", SOURCES, "ck_metric_sources_source"),
+        _one_of("status", SOURCE_STATUSES, "ck_metric_sources_status"),
+        _one_of("tier", SOURCE_TIERS, "ck_metric_sources_tier"),
+    )
+    source: Mapped[str] = mapped_column(String(40), primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), default="never_run", nullable=False)
+    tier: Mapped[str] = mapped_column(String(10), default="daily", nullable=False)
+    credential_env: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    config: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    last_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+
+
+class MetricSnapshot(Base):
+    """The one table every Growth screen reads: daily grain, one row per (date, source, product, metric, dimension).
+    dimension is "" for the total, otherwise kind:value (campaign:pp-launch-202611-hmo, source_medium:meta/paid_social,
+    list:KPUK Investors, query:hmo calculator, page:/valuation, account:ig:propertypredator, post:zernio:abc123), cut
+    at DIMENSION_MAX characters before the key is computed. value is pence for *_pence metrics, counts otherwise.
+    meta carries {"thresholded": true}, {"restating_until": "2026-11-20"} and platform ids."""
+    __tablename__ = "metric_snapshots"
+    __table_args__ = (
+        _one_of("source", SOURCES, "ck_metric_snapshots_source"),
+        _one_of("product", METRIC_PRODUCTS, "ck_metric_snapshots_product"),
+        UniqueConstraint("date", "source", "product", "metric", "dimension", name="uq_metric_snapshots_key"),
+        Index("ix_metric_snapshots_product_metric_date", "product", "metric", "date"),
+        Index("ix_metric_snapshots_source_date", "source", "date"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    product: Mapped[str] = mapped_column(String(10), nullable=False)
+    metric: Mapped[str] = mapped_column(String(60), nullable=False)
+    dimension: Mapped[str] = mapped_column(String(DIMENSION_MAX), default="", nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"), nullable=False)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    pulled_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class AdSpend(Base):
+    """Campaign-grain cost and platform-reported results, one row per platform campaign per day. campaign_name is
+    the utm_campaign string by convention, so the Channels screen can join it to sales; product is derived from the
+    campaign name prefix (pp-, kp-, ord-, hnh-), else group. spend_pence is cost_micros / 10000 (Google),
+    spend x 100 (Meta), the decimal string x 100 (LinkedIn). raw is the platform row as received, bounded."""
+    __tablename__ = "ad_spend"
+    __table_args__ = (
+        _one_of("platform", AD_PLATFORMS, "ck_ad_spend_platform"),
+        _one_of("product", METRIC_PRODUCTS, "ck_ad_spend_product"),
+        UniqueConstraint("platform", "account_id", "campaign_id", "date", name="uq_ad_spend_key"),
+        Index("ix_ad_spend_product_date", "product", "date"),
+        Index("ix_ad_spend_campaign_name_date", "campaign_name", "date"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    platform: Mapped[str] = mapped_column(String(20), nullable=False)
+    account_id: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    campaign_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    campaign_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    product: Mapped[str] = mapped_column(String(10), default="group", nullable=False)
+    spend_pence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    impressions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    clicks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    conversions: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0"), nullable=False)
+    conversions_sign_up: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0"), nullable=False)
+    conversions_lead: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0"), nullable=False)
+    conversions_purchase: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0"), nullable=False)
+    conversions_trial: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0"), nullable=False)
+    conversion_value_pence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    raw: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    pulled_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class ProductPurchase(Base):
+    """One purchase as a product's partner API reports it (GET .../purchases): a Stripe Checkout Session id, a
+    reservation id or an instruction reference, unique with the product. amount_pence is negative for a refund.
+    first_touch and last_touch are the touch records (utm_*, landing, referrer host) as TRACKING-SPEC 2.1;
+    account_key is sha256(person_key), hashed on the product side so no email crosses the wire."""
+    __tablename__ = "product_purchases"
+    __table_args__ = (
+        _one_of("product", PRODUCTS, "ck_product_purchases_product"),
+        _one_of("kind", PURCHASE_KINDS, "ck_product_purchases_kind"),
+        _one_of("status", PURCHASE_STATUSES, "ck_product_purchases_status"),
+        UniqueConstraint("product", "purchase_ref", name="uq_product_purchases_ref"),
+        Index("ix_product_purchases_product_occurred_at", "product", "occurred_at"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product: Mapped[str] = mapped_column(String(10), nullable=False)
+    purchase_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    plan: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    amount_pence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="gbp", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="paid", nullable=False)
+    promo_code: Mapped[str] = mapped_column(String(40), default="", nullable=False)       # upper case
+    affiliate_ref: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    first_touch: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    last_touch: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    account_key: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    stripe_customer_id: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    raw: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    pulled_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class PromoChannelMap(TimestampMixin, Base):
+    """code -> channel, platform and campaign for one product, edited on the Sources screen. The first rule of the
+    sales_attribution view: a purchase whose promo code is mapped here is credited to that channel whatever its
+    touches say. Seeded empty; every change is a growth.promo_map audit row."""
+    __tablename__ = "promo_channel_map"
+    __table_args__ = (
+        _one_of("product", PRODUCTS, "ck_promo_channel_map_product"),
+        _one_of("channel", CHANNELS, "ck_promo_channel_map_channel"),
+    )
+    code: Mapped[str] = mapped_column(String(40), primary_key=True)
+    product: Mapped[str] = mapped_column(String(10), primary_key=True)
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    platform: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    campaign_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    note: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    created_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+
+
+class MetricRun(Base):
+    """The health history: one row per collector run (the cron, a Pull now, a dry run). plan holds the redacted
+    request plans of a dry run only; error is the ConnectorError summary, redacted. The Sources screen shows the
+    last ten per source."""
+    __tablename__ = "metric_runs"
+    __table_args__ = (
+        _one_of("source", SOURCES, "ck_metric_runs_source"),
+        _one_of("tier", SOURCE_TIERS, "ck_metric_runs_tier"),
+        Index("ix_metric_runs_source_started_at", "source", "started_at"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    tier: Mapped[str] = mapped_column(String(10), default="daily", nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    actor: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    plan: Mapped[list | dict | None] = mapped_column(JSONB, nullable=True)

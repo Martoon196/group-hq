@@ -65,4 +65,16 @@
   {% endif %}
   <p class="help mt-1">The nightly job runs as its own Render cron with its own copy of the environment. It reads the same switches, but a product's token reaches it only once that token is copied to the cron (its <code>fromService</code> entry in render.yaml). A product live here whose token the job lacks is named on its row above, and the job's run then shows as failed on Render. A run of the job with <code>--dry-run</code> is passed over here, unless every recent run was one.</p>
 </section>
+
+<section class="panel mt-2" id="running-costs">
+  <div class="panel-head"><h2>Running costs: your Neon plan's rates</h2><a class="btn btn-ghost btn-sm" href="/audit?q=running_costs">Change history</a></div>
+  <p class="help">What your Neon plan charges per unit, in US dollars, as your plan or invoice shows them. Every rate starts blank and Group HQ never assumes one: until a rate is set, Growth &gt; Costs shows the usage with no estimate ("set your plan's rates"). Leave a rate blank to clear it. Allowances your plan includes (transfer, branches) are not deducted, so the estimate is an upper figure; Neon's invoice is the truth.</p>
+  <form method="post" action="/settings/running-costs" class="form-grid">
+    {% for f in rate_fields %}
+    <div class="field"><label for="rate-{{ loop.index }}">{{ f.label }} ($ per {{ f.unit }})</label>
+      <input id="rate-{{ loop.index }}" name="{{ f.key }}" inputmode="decimal" value="{{ rates[f.key] if rates[f.key] is not none else '' }}" placeholder="set your plan's rate"></div>
+    {% endfor %}
+    <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Save the rates</button></div>
+  </form>
+</section>
 {% endblock %}

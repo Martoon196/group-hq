@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "purchases": [
+    {
+      "ref": "cs_test_a1",
+      "occurred_at": "2026-10-20T10:15:00Z",
+      "kind": "subscription",
+      "plan": "pro_buyer",
+      "amount_pence": 1900,
+      "currency": "gbp",
+      "status": "paid",
+      "promo_code": "ppmeta",
+      "affiliate_ref": "",
+      "first_touch": {
+        "utm_source": "meta",
+        "utm_medium": "paid_social",
+        "utm_campaign": "pp-launch-202611-hmo",
+        "utm_content": "video1-ppmeta",
+        "fbclid": "IwAR-not-kept",
+        "landing": "/landing.html",
+        "referrer": "l.facebook.com"
+      },
+      "last_touch": {
+        "utm_source": "meta",
+        "utm_medium": "paid_social",
+        "utm_campaign": "pp-launch-202611-hmo"
+      },
+      "account_key": "abababababababababababababababababababababababababababababababab",
+      "stripe_customer_id": "cus_test_1",
+      "email": "buyer@example.test"
+    }
+  ],
+  "next_cursor": "c2"
+}

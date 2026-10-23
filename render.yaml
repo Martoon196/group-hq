@@ -68,6 +68,48 @@ services:
       # Bearer token Hello New Home presents to GET /api/territories.json (district, area, state only).
       - key: TERRITORY_EXPORT_TOKEN
         sync: false
+      # Growth (docs/growth.md): read-only credentials for the Growth screens, each set in the dashboard on THIS
+      # service when its source is started. None is ever logged or shown; Growth > Sources lists them by name.
+      # A growth cron gets a variable only through a fromService entry, and Render can copy only a variable this
+      # service already holds: so the entry follows the variable, never the other way round. Set it here first,
+      # then add its fromService line to the cron that reads it (the list is above group-hq-growth-hourly below),
+      # sync, press Test on Growth > Sources, and only then switch the source On.
+      # GOOGLE_SA_JSON is the service-account key file's JSON as one line (an env var, not a secret file, so it can
+      # be copied to the crons). The *_PRODUCTS / *_IDS / *_SITES values map a platform's id to a product code.
+      # STRIPE_RK_HNH waits for Hello New Home 2 Ltd's Stripe account, ZERNIO_AD_ACCOUNTS for an ad account connected
+      # in Zernio: leave both unset (and out of the crons) until then.
+      - key: GOOGLE_SA_JSON
+        sync: false
+      - key: GA4_PROPERTY_IDS
+        sync: false
+      - key: GSC_SITES
+        sync: false
+      - key: STRIPE_RK_MH196
+        sync: false
+      - key: STRIPE_RK_HNH
+        sync: false
+      - key: STRIPE_PRODUCT_MAP
+        sync: false
+      - key: BREVO_API_KEY_HQ
+        sync: false
+      - key: BREVO_LIST_PRODUCTS
+        sync: false
+      - key: ZERNIO_API_KEY
+        sync: false
+      - key: ZERNIO_PROFILE_PRODUCTS
+        sync: false
+      - key: ZERNIO_AD_ACCOUNTS
+        sync: false
+      # Neon's ORGANISATION key can change and delete projects: it lives on this service and the daily growth cron
+      # only (never the hourly one), and is used only to read the project list and the consumption history.
+      # NEON_PROJECT_PRODUCTS labels each project, projectId=label (pp, kp, ordris, hnh, grouphq, or any free text).
+      - key: NEON_API_KEY
+        sync: false
+      - key: NEON_ORG_ID
+        sync: false
+      - key: NEON_PROJECT_PRODUCTS
+        sync: false
+      # CLERK_SECRET_KEY_ORDRIS is deliberately absent: Clerk's backend key can delete Ordris users (docs/growth.md).
 
   - type: cron
     name: group-hq-recompute
@@ -171,3 +213,122 @@ services:
           type: web
           name: group-hq
           envVarKey: BASE_URL
+
+  # Growth pulls (app/jobs/growth_pull.py, docs/growth.md). Read-only: nothing is ever sent to a platform. Every source
+  # starts Off on Growth > Sources, so both crons ship with only what the web service holds today: the database, the
+  # app's settings, the dry-run floor and (hourly) the product base URLs and tokens. A source's own variables are
+  # copied here by a fromService entry added once the web service holds them (Render can only copy a variable the
+  # web service holds, and an entry naming one it does not hold fails the Blueprint sync), then the source is
+  # switched On. A source that is On but missing here makes the run exit 1 (failed on Render), naming the variable.
+  # Deploy both crons from the same commit as the web service: the job refuses to run (exit 1, nothing done) when
+  # the database is not at its Alembic head.
+  #
+  # The fromService lines to add, each once its variable is set on the web service:
+  #   group-hq-growth-hourly: STRIPE_RK_MH196 and STRIPE_PRODUCT_MAP (stripe_mh196); STRIPE_RK_HNH (stripe_hnh, once
+  #     Hello New Home 2 Ltd has a Stripe account); GOOGLE_SA_JSON and GA4_PROPERTY_IDS (ga4's realtime read).
+  #   group-hq-growth-daily: GOOGLE_SA_JSON and GA4_PROPERTY_IDS (ga4); GSC_SITES (search_console); BREVO_API_KEY_HQ
+  #     and BREVO_LIST_PRODUCTS (brevo); ZERNIO_API_KEY and ZERNIO_PROFILE_PRODUCTS (zernio), ZERNIO_AD_ACCOUNTS once
+  #     an ad account is connected in Zernio; NEON_API_KEY, NEON_ORG_ID and NEON_PROJECT_PRODUCTS (neon). The Neon
+  #     organisation key goes on the daily cron only, never the hourly one.
+  #   Each in the same form as DATABASE_URL below. The non-secret mappings (GA4_PROPERTY_IDS, GSC_SITES, the
+  #   *_PRODUCTS lists, STRIPE_PRODUCT_MAP, NEON_ORG_ID) may be plain value: entries instead, once known.
+  #   CLERK_SECRET_KEY_ORDRIS is never added (docs/growth.md).
+  - type: cron
+    name: group-hq-growth-hourly
+    runtime: python
+    region: frankfurt
+    plan: starter
+    schedule: "7 * * * *"           # Stripe, the four product ledgers and GA4 realtime users; about 20 calls
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.jobs.growth_pull --tier hourly
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: DATABASE_URL
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: SECRET_KEY
+      - key: BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: BASE_URL
+      - key: CONNECTORS_DRY_RUN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: CONNECTORS_DRY_RUN
+      - key: PP_BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: PP_BASE_URL
+      - key: PP_SERVICE_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: PP_SERVICE_TOKEN
+      - key: ORDRIS_BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: ORDRIS_BASE_URL
+      - key: ORDRIS_PARTNER_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: ORDRIS_PARTNER_TOKEN
+      - key: KP_BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: KP_BASE_URL
+      - key: KP_PARTNER_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: KP_PARTNER_TOKEN
+      - key: HNH_BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: HNH_BASE_URL
+      - key: HNH_PARTNER_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: HNH_PARTNER_TOKEN
+
+  - type: cron
+    name: group-hq-growth-daily
+    runtime: python
+    region: frankfurt
+    plan: starter
+    schedule: "10 6 * * *"          # 06:10 UTC: GA4 (after the Pacific-midnight quota reset), Search Console, Brevo, Zernio, Neon
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.jobs.growth_pull --tier daily
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: DATABASE_URL
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: SECRET_KEY
+      - key: BASE_URL
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: BASE_URL
+      - key: CONNECTORS_DRY_RUN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: CONNECTORS_DRY_RUN

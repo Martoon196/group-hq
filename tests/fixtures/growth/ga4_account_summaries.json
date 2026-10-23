@@ -1,0 +1,14 @@
+{
+  "accountSummaries": [
+    {
+      "account": "accounts/1",
+      "displayName": "MH196 2026 Ltd",
+      "propertySummaries": [
+        {
+          "property": "properties/111111111",
+          "displayName": "Property Predator"
+        }
+      ]
+    }
+  ]
+}

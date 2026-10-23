@@ -1,0 +1,57 @@
+{
+  "object": "list",
+  "has_more": false,
+  "data": [
+    {
+      "id": "cs_live_1",
+      "object": "checkout.session",
+      "status": "complete",
+      "payment_status": "paid",
+      "created": 1792490700,
+      "amount_total": 1900,
+      "currency": "gbp",
+      "metadata": {
+        "product": "pp",
+        "promo_code": "ppmeta",
+        "utm_campaign": "pp-launch-202611-hmo"
+      },
+      "customer_details": {
+        "email": "buyer@example.test",
+        "name": "A Buyer"
+      },
+      "customer_email": "buyer@example.test"
+    },
+    {
+      "id": "cs_live_2",
+      "object": "checkout.session",
+      "status": "complete",
+      "payment_status": "no_payment_required",
+      "created": 1792580400,
+      "amount_total": 0,
+      "currency": "gbp",
+      "metadata": {
+        "product": "ordris"
+      }
+    },
+    {
+      "id": "cs_live_3",
+      "object": "checkout.session",
+      "status": "open",
+      "payment_status": "unpaid",
+      "created": 1792584000,
+      "metadata": {
+        "product": "pp"
+      }
+    },
+    {
+      "id": "cs_live_4",
+      "object": "checkout.session",
+      "status": "complete",
+      "payment_status": "paid",
+      "created": 1791633600,
+      "metadata": {
+        "product": "pp"
+      }
+    }
+  ]
+}

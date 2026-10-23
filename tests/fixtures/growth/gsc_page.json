@@ -1,0 +1,34 @@
+{
+  "rows": [
+    {
+      "keys": [
+        "2026-10-18",
+        "https://propertypredator.com/valuation?utm=x"
+      ],
+      "clicks": 3,
+      "impressions": 90,
+      "ctr": 0.0333,
+      "position": 7.2
+    },
+    {
+      "keys": [
+        "2026-10-18",
+        "https://www.propertypredator.com/valuation"
+      ],
+      "clicks": 2,
+      "impressions": 30,
+      "ctr": 0.0667,
+      "position": 5.0
+    },
+    {
+      "keys": [
+        "2026-10-18",
+        "https://blog.propertypredator.com/hmo"
+      ],
+      "clicks": 1,
+      "impressions": 10,
+      "ctr": 0.1,
+      "position": 3.0
+    }
+  ]
+}

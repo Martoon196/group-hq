@@ -1,0 +1,7 @@
+Campaign Performance Report
+"Report Start: 10/19/2026, Report End: 10/21/2026"
+Start Date (in UTC),Account ID,Campaign Name,Campaign ID,Total Spent,Impressions,Clicks,Conversions
+10/20/2026,508000001,pp-launch-202611-hmo,6100001,"1,234.50",15000,120,3
+10/21/2026,508000001,pp-launch-202611-hmo,6100001,£20.00,1000,8,0
+10/21/2026,508000001,Brand awareness,6100002,5,200,1,
+Total,,,,"1,259.50",16200,129,3

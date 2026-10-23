@@ -1,0 +1,47 @@
+{
+  "object": "list",
+  "has_more": false,
+  "data": [
+    {
+      "id": "txn_1",
+      "type": "charge",
+      "amount": 1900,
+      "fee": 49,
+      "net": 1851,
+      "currency": "gbp",
+      "created": 1792490760
+    },
+    {
+      "id": "txn_2",
+      "type": "payment",
+      "amount": 3900,
+      "fee": 79,
+      "net": 3821,
+      "currency": "gbp",
+      "created": 1792569600
+    },
+    {
+      "id": "txn_3",
+      "type": "refund",
+      "amount": -1900,
+      "fee": 0,
+      "net": -1900,
+      "currency": "gbp",
+      "created": 1792598400
+    },
+    {
+      "id": "txn_4",
+      "type": "stripe_fee",
+      "amount": -500,
+      "currency": "gbp",
+      "created": 1792598400
+    },
+    {
+      "id": "txn_5",
+      "type": "charge",
+      "amount": 1000,
+      "currency": "usd",
+      "created": 1792598400
+    }
+  ]
+}

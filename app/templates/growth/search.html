@@ -1,0 +1,51 @@
+{% extends "app_base.html" %}
+{% import "growth/_shared.html" as g %}
+{% set title = "Search | Growth | Group HQ" %}
+{% block head %}{{ g.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Growth</span>
+  <h1>Search</h1>
+  {{ g.as_of(gsc, "Search Console") }}
+</div>
+{{ g.tabs(sub, period, product) }}
+{{ g.filters("/growth/search", period, product, periods, products) }}
+{{ g.floor_note(floor) }}
+<p class="help">Google supplies this 3 days late; anonymised queries are in the totals but not in the query rows. CTR is clicks over impressions and position is weighted by impressions, both worked out again for every total. The days are Search Console's own, Pacific Time, not London's: a day here can be up to eight hours off the sign-ups beside it.</p>
+
+<section class="panel mt-1">
+  <div class="panel-head"><h2>Per site</h2><span class="help">{{ period.label }}; "before" is the same number of days just before ({{ period.prev_start | date }} to {{ period.prev_end | date }})</span></div>
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Site</th><th class="num">Clicks</th><th class="num">Impressions</th><th class="num">CTR</th><th class="num">Position</th><th class="num">Clicks before</th><th class="num">Impressions before</th><th class="num">CTR before</th><th class="num">Position before</th></tr></thead>
+    <tbody>{% for s in data.sites %}<tr><td><strong>{{ s.name }}</strong></td><td class="num">{{ s.now.clicks }}</td><td class="num">{{ s.now.impressions }}</td><td class="num">{{ s.now.ctr }}</td><td class="num">{{ s.now.position }}</td><td class="num">{{ s.before.clicks }}</td><td class="num">{{ s.before.impressions }}</td><td class="num">{{ s.before.ctr }}</td><td class="num">{{ s.before.position }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+</section>
+
+<div class="two-col-growth mt-2">
+{% for heading, rows in [("Top 20 queries", data.queries), ("Top 20 pages", data.pages)] %}
+<section class="panel">
+  <h2>{{ heading }}</h2>
+  {% if rows %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>{{ "Query" if loop.first else "Page" }}</th><th>Site</th><th class="num">Clicks</th><th class="num">Impr.</th><th class="num">CTR</th><th class="num">Pos.</th></tr></thead>
+    <tbody>{% for r in rows %}<tr><td class="detail">{{ r.value }}</td><td>{{ product_name(r.product) }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.position }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  {% else %}<p class="empty-note">Nothing in this period yet.</p>{% endif %}
+</section>
+{% endfor %}
+</div>
+
+<section class="panel mt-2">
+  <h2>Devices</h2>
+  {% if data.devices %}
+  <table class="data">
+    <thead><tr><th>Device</th><th>Site</th><th class="num">Clicks</th><th class="num">Impressions</th><th class="num">CTR</th><th class="num">Position</th></tr></thead>
+    <tbody>{% for r in data.devices %}<tr><td>{{ r.value | lower }}</td><td>{{ product_name(r.product) }}</td><td class="num">{{ r.clicks }}</td><td class="num">{{ r.impressions }}</td><td class="num">{{ r.ctr }}</td><td class="num">{{ r.position }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty-note">Nothing in this period yet.</p>{% endif %}
+</section>
+{% endblock %}

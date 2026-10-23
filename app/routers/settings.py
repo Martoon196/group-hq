@@ -1,7 +1,8 @@
 """Settings: the switches the founder flips in the app.
 
-    GET  /settings                         each product's Live / Dry run switch, what it is now and why
+    GET  /settings                         each product's Live / Dry run switch, what it is now and why; the running-cost rates
     POST /settings/products/{product}      set a product's switch (mode=live or dry_run; mode=default clears it)
+    POST /settings/running-costs           the founder's Neon plan rates, per billing unit (blank clears one)
 
 The rule a switch takes part in (connectors.product_dry_run): CONNECTORS_DRY_RUN=1 on the server holds every
 product in dry run whatever the switches say; otherwise a product's switch decides once it has been set, and the
@@ -114,8 +115,25 @@ def settings_page(request: Request, db: Session = Depends(get_db), user: User = 
     ctx = {"user": user, "section": "settings", "modes": modes, "floor": floor,
            "env_list": ",".join(sorted(config.CONNECTORS_DRY_RUN_PRODUCTS)), "state_labels": STATE_LABELS,
            "switch_labels": settings.SWITCH_LABELS, "last_run": last,
-           "last_products": (last.after or {}).get("products") if last is not None and isinstance(last.after, dict) else None}
+           "last_products": (last.after or {}).get("products") if last is not None and isinstance(last.after, dict) else None,
+           "rate_fields": settings.rate_fields(), "rates": settings.running_cost_rates(db)}
     return render(request, "settings.html", ctx)
+
+
+@router.post("/running-costs", response_class=HTMLResponse)
+async def set_rates(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    form = await request.form()
+    typed = {f["key"]: str(form.get(f["key"], "")) for f in settings.rate_fields() if f["key"] in form}
+    try:
+        changed = settings.set_running_cost_rates(db, typed, actor=user)
+    except ValueError as exc:
+        db.rollback()
+        return go("/settings#running-costs", err=f"Nothing was saved: {exc}")
+    db.commit()
+    if not changed:
+        return go("/settings#running-costs", ok="The rates were already set that way. Nothing changed.")
+    return go("/settings#running-costs", ok=f"Saved {len(changed)} rate{'s' if len(changed) != 1 else ''}: the Costs screen "
+                                            "estimates from them now.")
 
 
 @router.post("/products/{product}", response_class=HTMLResponse)

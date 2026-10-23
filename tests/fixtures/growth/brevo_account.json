@@ -1,0 +1,12 @@
+{
+  "email": "founder@example.test",
+  "firstName": "F",
+  "companyName": "MH196",
+  "plan": [
+    {
+      "type": "free",
+      "credits": 300,
+      "creditsType": "sendLimit"
+    }
+  ]
+}

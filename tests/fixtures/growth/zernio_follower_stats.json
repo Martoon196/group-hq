@@ -1,0 +1,39 @@
+{
+  "accounts": [
+    {
+      "_id": "acc1",
+      "platform": "instagram",
+      "username": "propertypredator",
+      "currentFollowers": 1012
+    },
+    {
+      "_id": "acc2",
+      "platform": "tiktok",
+      "username": "ukpropertyinvestment",
+      "currentFollowers": 500
+    }
+  ],
+  "stats": {
+    "acc1": [
+      {
+        "date": "2026-10-20",
+        "followers": 1000
+      },
+      {
+        "date": "2026-10-21",
+        "followers": 1012
+      }
+    ],
+    "acc2": [
+      {
+        "date": "2026-10-21",
+        "followers": 500
+      }
+    ]
+  },
+  "dateRange": {
+    "from": "2026-10-19T00:00:00.000Z",
+    "to": "2026-10-22T00:00:00.000Z"
+  },
+  "granularity": "daily"
+}

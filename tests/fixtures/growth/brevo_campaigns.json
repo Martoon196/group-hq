@@ -1,0 +1,70 @@
+{
+  "campaigns": [
+    {
+      "id": 11,
+      "name": "kp-launch-202611-brief",
+      "status": "sent",
+      "sentDate": "2026-10-20T08:00:00.000Z",
+      "recipients": {
+        "lists": [
+          3
+        ]
+      },
+      "statistics": {
+        "globalStats": {
+          "sent": 400,
+          "delivered": 396,
+          "viewed": 230,
+          "uniqueViews": 180,
+          "clickers": 45,
+          "uniqueClicks": 40,
+          "unsubscriptions": 2,
+          "hardBounces": 1,
+          "softBounces": 3,
+          "complaints": 0
+        }
+      }
+    },
+    {
+      "id": 12,
+      "name": "October update",
+      "status": "sent",
+      "sentDate": "2026-10-21T08:00:00.000Z",
+      "recipients": {
+        "lists": [
+          7
+        ]
+      },
+      "statistics": {
+        "globalStats": {
+          "sent": 50,
+          "delivered": 50,
+          "uniqueViews": 20,
+          "uniqueClicks": 5,
+          "unsubscriptions": 0,
+          "hardBounces": 0,
+          "softBounces": 0,
+          "complaints": 1
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "Summer note",
+      "status": "sent",
+      "sentDate": "2026-08-01T08:00:00.000Z",
+      "recipients": {
+        "lists": [
+          3
+        ]
+      },
+      "statistics": {
+        "globalStats": {
+          "sent": 10,
+          "delivered": 10
+        }
+      }
+    }
+  ],
+  "count": 3
+}

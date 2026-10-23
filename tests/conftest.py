@@ -6,8 +6,8 @@ with Alembic, truncates every table between tests and re-seeds the programmes an
 authenticator secret is known (TEST_TOTP_SECRET), so admin_client can log in with a real code.
 
 The environment is fixed at import time, BEFORE app.config (which reads the variables once) is
-imported. Product tokens are replaced with test values so a developer's shell can never leak a real
-one into a test, and CONNECTORS_DRY_RUN is forced on.
+imported. Product tokens are replaced with test values, and the growth credentials blanked, so a developer's
+shell can never leak a real one into a test, and CONNECTORS_DRY_RUN is forced on.
 """
 from __future__ import annotations
 
@@ -79,6 +79,12 @@ os.environ["ADMIN_PASSWORD"] = ADMIN_PASSWORD
 os.environ["CONNECTORS_DRY_RUN"] = "1"
 for _key in ("PP_SERVICE_TOKEN", "ORDRIS_PARTNER_TOKEN", "KP_PARTNER_TOKEN", "HNH_PARTNER_TOKEN"):
     os.environ[_key] = f"test-{_key.lower()}"
+# The growth credentials are blanked for the same reason: a developer's real key must never reach a test. Tests that
+# need one set a test value on app.config (tests/test_growth.py, the creds fixture).
+for _key in ("GOOGLE_SA_JSON", "GA4_PROPERTY_IDS", "GSC_SITES", "STRIPE_RK_MH196", "STRIPE_RK_HNH", "STRIPE_PRODUCT_MAP",
+             "BREVO_API_KEY_HQ", "BREVO_LIST_PRODUCTS", "ZERNIO_API_KEY", "ZERNIO_PROFILE_PRODUCTS", "ZERNIO_AD_ACCOUNTS",
+             "CLERK_SECRET_KEY_ORDRIS", "NEON_API_KEY", "NEON_ORG_ID", "NEON_PROJECT_PRODUCTS"):
+    os.environ[_key] = ""
 for _key, _value in (("PP_BASE_URL", "https://pp.example.test"), ("ORDRIS_BASE_URL", "https://ordris.example.test"),
                      ("KP_BASE_URL", "https://kp.example.test"), ("HNH_BASE_URL", "https://hnh.example.test")):
     os.environ[_key] = _value

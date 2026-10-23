@@ -1,0 +1,19 @@
+{
+  "lists": [
+    {
+      "id": 3,
+      "name": "KPUK Investors",
+      "uniqueSubscribers": 412,
+      "totalSubscribers": 0,
+      "folderId": 1
+    },
+    {
+      "id": 7,
+      "name": "PP launch",
+      "uniqueSubscribers": 55,
+      "totalSubscribers": 0,
+      "folderId": 1
+    }
+  ],
+  "count": 2
+}

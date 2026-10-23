@@ -1,0 +1,57 @@
+{% extends "app_base.html" %}
+{% import "growth/_shared.html" as g %}
+{% set title = "Channels | Growth | Group HQ" %}
+{% block head %}{{ g.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Growth</span>
+  <h1>Channels</h1>
+</div>
+{{ g.tabs(sub, period, product) }}
+{{ g.filters("/growth/channels", period, product, periods, products) }}
+{{ g.floor_note(floor) }}
+
+{% if data.unmapped %}
+<div class="panel">
+  <h2>Promo codes with no channel</h2>
+  <p class="help">These codes were redeemed or bought with but are not in the promo code map, so their sales fall back to the visitor's UTM touch. Map them on Sources.</p>
+  <div class="chips">{% for code_product, code in data.unmapped %}<a class="chip chip-warn" href="/growth/sources#promo">{{ code }} ({{ product_name(code_product) }})</a>{% endfor %}</div>
+</div>
+{% endif %}
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>Spend beside sales</h2><span class="help">{{ period.label }}</span></div>
+  <p class="help">"Pixel says" is what the ad platform reports (only visitors who accepted cookies, view-through included, ad blockers not); "money says" is each product's own paid purchases (a refunded or trialing one is not a sale), each on its London day, credited by promo code first, then the visitor's last UTM touch, then an affiliate reference, then the first touch, else direct. The two differ: consent refusals, blockers and view-through all move them apart. Sign-ups attributed are promo-code redemptions mapped to the campaign.</p>
+  {% if data.rows %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Platform / channel</th><th>Campaign</th><th class="num">Spend</th><th class="num">Impr.</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">CPC</th><th class="num">Sign-ups (pixel)</th><th class="num">Purchases (pixel)</th><th class="num">Sign-ups attributed</th><th class="num">Purchases (money)</th><th class="num">Promo-code purchases</th><th class="num">Revenue</th><th class="num">CPA, pixel says</th><th class="num">CPA, money says</th><th class="num">ROAS</th></tr></thead>
+    <tbody>
+    {% for r in data.rows %}
+    <tr>
+      <td>{% if r.platform %}<strong>{{ r.platform }}</strong>{% endif %}{% if r.channel %}<br><span class="help">{{ r.channel | replace("_", " ") }}</span>{% endif %}</td>
+      <td class="detail">{{ r.campaign or "—" }}</td>
+      <td class="num">£{{ "{:,.0f}".format(r.spend / 100) }}</td>
+      <td class="num">{{ "{:,}".format(r.impressions) }}</td>
+      <td class="num">{{ "{:,}".format(r.clicks) }}</td>
+      <td class="num">{{ r.ctr }}</td>
+      <td class="num">{{ r.cpc }}</td>
+      <td class="num">{{ r.pixel_sign_ups | int }}</td>
+      <td class="num">{{ r.pixel_purchases | int }}</td>
+      <td class="num">{{ r.sign_ups | int }}</td>
+      <td class="num">{{ r.money_purchases }}</td>
+      <td class="num">{{ r.promo_purchases }}</td>
+      <td class="num">£{{ "{:,.0f}".format(r.revenue / 100) }}</td>
+      <td class="num">{{ r.cpa_pixel }}</td>
+      <td class="num">{{ r.cpa_money }}</td>
+      <td class="num">{{ r.roas }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="empty-note">No spend and no purchases in this period. Spend arrives from the ad platforms' collectors or a CSV import on <a href="/growth/sources#import">Sources</a>; purchases from each product's ledger.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,31 @@
+{
+  "projects": [
+    {
+      "id": "proj-pp-111",
+      "name": "propertypredator-prod",
+      "region_id": "aws-eu-central-1",
+      "platform_id": "aws"
+    },
+    {
+      "id": "proj-hq-222",
+      "name": "group-hq",
+      "region_id": "aws-eu-central-1",
+      "platform_id": "aws"
+    },
+    {
+      "id": "proj-alpha-333",
+      "name": "alphastack",
+      "region_id": "aws-eu-central-1",
+      "platform_id": "aws"
+    },
+    {
+      "id": "proj-test-444",
+      "name": "disposable-test",
+      "region_id": "aws-eu-central-1",
+      "platform_id": "aws"
+    }
+  ],
+  "pagination": {
+    "cursor": "proj-test-444"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "instructions": [
+    {
+      "ref": "INS-1001",
+      "occurred_at": "2026-10-20T14:00:00Z",
+      "plan": "full_management",
+      "amount_pence": 0,
+      "status": "paid",
+      "last_touch": {
+        "utm_source": "brevo",
+        "utm_medium": "email",
+        "utm_campaign": "hnh-launch-202611-landlords"
+      }
+    }
+  ],
+  "next_cursor": null
+}

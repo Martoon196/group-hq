@@ -1,0 +1,88 @@
+{% extends "app_base.html" %}
+{% import "growth/_shared.html" as g %}
+{% set title = "Growth | Group HQ" %}
+{% block head %}{{ g.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Growth</span>
+  <h1>Overview</h1>
+</div>
+{{ g.tabs(sub, period, product) }}
+{{ g.filters("/growth", period, product, periods, products) }}
+{{ g.floor_note(floor) }}
+
+{% set t = data.tiles %}
+<div class="stats stats-6">
+  {{ g.tile("visitors (GA4)", t.visitors.value, t.visitors.note, t.visitors.as_of, t.visitors.settling) }}
+  {{ g.tile("sign-ups", t.sign_ups.value, t.sign_ups.note, t.sign_ups.as_of) }}
+  {{ g.tile("trials", t.trials.value, t.trials.note, t.trials.as_of) }}
+  {{ g.tile("paying", t.paying.value, t.paying.note, t.paying.as_of) }}
+  {{ g.tile("MRR (products' own figure)", t.mrr.value, t.mrr.note, t.mrr.as_of) }}
+  {{ g.tile("ad spend", t.spend.value, t.spend.note) }}
+  {{ g.tile("cost per sign-up", t.cpa.value, t.cpa.note) }}
+  {{ g.tile("purchases", t.purchases.value, t.purchases.note) }}
+</div>
+<p class="help mt-1">Sign-ups, trials, paying, MRR and purchases are each product's own ledger, read through its partner API. The pixel's figures (GA4) sit in the notes: they count only visitors who accepted cookies, so they are always lower. A figure shows "—" until its source has been pulled.</p>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>By product</h2><span class="help">{{ period.label }}; the lines are sign-ups and visitors over the last 30 days.</span></div>
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Product</th><th class="num">Visitors</th><th class="num">Sign-ups</th><th>Sign-ups, 30 days</th><th class="num">Trials</th><th class="num">Paying</th><th class="num">MRR</th><th class="num">Spend</th><th class="num">Cost per sign-up</th><th class="num">Purchases</th><th>Visitors, 30 days</th></tr></thead>
+    <tbody>
+    {% for row in data.table %}
+    <tr>
+      <td><strong>{{ row.name }}</strong></td>
+      <td class="num">{{ row.visitors }}</td>
+      <td class="num">{{ row.sign_ups }}</td>
+      <td>{{ g.sparkline(row.spark, row.name ~ " sign-ups") }}</td>
+      <td class="num">{{ row.trials }}</td>
+      <td class="num">{{ row.paying }}</td>
+      <td class="num">{{ row.mrr }}</td>
+      <td class="num">{{ row.spend }}</td>
+      <td class="num">{{ row.cpa }}</td>
+      <td class="num">{{ row.purchases }}{% if row.promo %} <span class="help">({{ row.promo }} promo)</span>{% endif %}</td>
+      <td>{{ g.sparkline(row.visitor_spark, row.name ~ " visitors") }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<div class="two-col-growth mt-2">
+<section class="panel">
+  <div class="panel-head"><h2>Data freshness</h2><a class="btn btn-ghost btn-sm" href="/growth/sources">Sources</a></div>
+  {% if data.freshness %}
+  <div class="chips">
+    {% for f in data.freshness %}<a class="chip chip-{{ f.chip }}" href="/growth/sources#{{ f.source }}" title="{% if f.last_ok_at %}last good pull {{ f.last_ok_at | uk }}{% else %}no good pull yet{% endif %}">{{ f.name }}: {{ f.chip | replace("_", " ") }}</a>{% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-note">Every source is off. Set its credentials, press Test on <a href="/growth/sources">Sources</a>, then switch it on.</p>
+  {% endif %}
+</section>
+
+<section class="panel" id="running-costs">
+  {% set c = data.costs %}
+  <div class="panel-head"><h2>Running costs</h2><a class="btn btn-ghost btn-sm" href="/growth/costs">Costs</a></div>
+  <p class="help">Neon databases, {{ c.month_start | date("%B %Y") }} to date. {% if not c.rates_set %}No rates yet: <a href="/settings#running-costs">set your plan's rates</a> to see an estimate.{% else %}Estimates from the rates on <a href="/settings#running-costs">Settings</a>, before any allowance your plan includes; Neon's invoice is the truth.{% endif %}</p>
+  {% if c.month %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Database</th><th>Usage</th><th class="num">Estimate</th></tr></thead>
+    <tbody>
+    {% for m in c.month %}
+    <tr><td><strong>{{ m.label }}</strong></td>
+      <td class="small">{% for u in m.usage %}{{ u.label }} {{ u.amount }} {{ u.unit }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+      <td class="num">{% if m.cost %}{{ m.cost }}{% if m.unpriced %} <span class="help">+ unpriced</span>{% endif %}{% else %}<span class="muted">set your plan's rates</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+    {% if c.rates_set %}<tfoot><tr><th>All databases</th><th></th><th class="num">{{ c.total.cost }}</th></tr></tfoot>{% endif %}
+  </table>
+  </div>
+  {% else %}
+  <p class="empty-note">No Neon figures yet: set NEON_API_KEY, NEON_ORG_ID and NEON_PROJECT_PRODUCTS on the web service and the daily cron, then switch Neon on in <a href="/growth/sources#neon">Sources</a>.</p>
+  {% endif %}
+</section>
+</div>
+{% endblock %}

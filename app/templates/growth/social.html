@@ -1,0 +1,52 @@
+{% extends "app_base.html" %}
+{% import "growth/_shared.html" as g %}
+{% set title = "Social | Growth | Group HQ" %}
+{% block head %}{{ g.styles() }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Growth</span>
+  <h1>Social</h1>
+  {{ g.as_of(zernio, "Zernio") }}
+</div>
+{{ g.tabs(sub, period, product) }}
+{{ g.filters("/growth/social", period, product, periods, products) }}
+{{ g.floor_note(floor) }}
+
+<section class="panel">
+  <div class="panel-head"><h2>By product</h2><span class="help">{{ period.label }}; engagement counted on the day it arrived</span></div>
+  {% if data.by_product %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Product</th><th class="num">Posts</th><th class="num">Impressions</th><th class="num">Reach</th><th class="num">Engagements</th><th class="num">Clicks</th><th class="num">Video views</th></tr></thead>
+    <tbody>{% for r in data.by_product %}<tr><td><strong>{{ product_name(r.product) if r.product != "group" else "Group" }}</strong></td><td class="num">{{ r.posts }}</td><td class="num">{{ r.post_impressions }}</td><td class="num">{{ r.post_reach }}</td><td class="num">{{ r.post_engagements }}</td><td class="num">{{ r.post_clicks }}</td><td class="num">{{ r.video_views }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  <p class="help mt-1">Reach is per day and does not add up across days: a person reached on two days counts twice.</p>
+  {% else %}<p class="empty-note">No social figures in this period yet.</p>{% endif %}
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>Accounts</h2></div>
+  {% if data.accounts %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Platform</th><th>Account</th><th>Product</th><th class="num">Followers</th><th class="num">New in period</th><th>Followers, 30 days</th></tr></thead>
+    <tbody>{% for a in data.accounts %}<tr><td>{{ a.platform }}</td><td>{{ a.handle }}</td><td>{{ product_name(a.product) if a.product != "group" else "Group" }}</td><td class="num">{{ a.followers }}</td><td class="num">{{ a.new }}</td><td>{{ g.sparkline(a.spark, a.handle ~ " followers") }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  {% else %}<p class="empty-note">No follower figures yet.</p>{% endif %}
+</section>
+
+<section class="panel mt-2">
+  <div class="panel-head"><h2>Top posts</h2><span class="help">by engagements, published in the period</span></div>
+  {% if data.top_posts %}
+  <div class="table-scroll">
+  <table class="data">
+    <thead><tr><th>Published</th><th>Platform</th><th>Product</th><th class="num">Engagements</th><th class="num">Impressions</th><th class="num">Reach</th><th class="num">Clicks</th><th class="num">Views</th><th>Post</th></tr></thead>
+    <tbody>{% for p in data.top_posts %}<tr><td class="nowrap">{{ p.date | date }}</td><td>{{ p.platform }}</td><td>{{ product_name(p.product) if p.product != "group" else "Group" }}</td><td class="num">{{ p.post_engagements }}</td><td class="num">{{ p.post_impressions }}</td><td class="num">{{ p.post_reach }}</td><td class="num">{{ p.post_clicks }}</td><td class="num">{{ p.video_views }}</td><td>{% if p.url and p.url.startswith("https://") %}<a href="{{ p.url }}" rel="noopener noreferrer" target="_blank">open</a>{% else %}<span class="muted">{{ p.id }}</span>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  {% if data.external %}<p class="help mt-1">External posts included: posts published natively on a platform, not through Zernio, are counted too.</p>{% endif %}
+  {% else %}<p class="empty-note">No post published in this period.</p>{% endif %}
+</section>
+{% endblock %}

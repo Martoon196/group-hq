@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "product": "pp",
+  "generated_at": "2026-10-22T06:10:02Z",
+  "timezone": "Europe/London",
+  "days": [
+    {
+      "date": "2026-10-20",
+      "sign_ups": 12,
+      "sign_ups_by_method": {
+        "email": 9,
+        "google": 3
+      },
+      "leads": 4,
+      "leads_by_kind": {
+        "valuation": 3,
+        "calculator": 1
+      },
+      "trials_started": 0,
+      "trials_active": 0,
+      "paying_new": 2,
+      "paying_active": 31,
+      "cancelled": 0,
+      "mrr_pence": 68900,
+      "revenue_pence": 3800,
+      "refunds_pence": 0,
+      "purchases": 2,
+      "reservations": 0,
+      "instructions": 0,
+      "promo_redemptions": {
+        "PPMETA": 1
+      },
+      "affiliate_sign_ups": 1
+    },
+    {
+      "date": "2026-10-21",
+      "sign_ups": 7,
+      "paying_active": 32,
+      "mrr_pence": 70800,
+      "purchases": 1,
+      "leads": null,
+      "promo_redemptions": {
+        "ppgoogle": 1
+      }
+    }
+  ]
+}

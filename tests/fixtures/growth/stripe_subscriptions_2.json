@@ -1,0 +1,122 @@
+{
+  "object": "list",
+  "url": "/v1/subscriptions",
+  "has_more": false,
+  "data": [
+    {
+      "id": "sub_4",
+      "object": "subscription",
+      "status": "trialing",
+      "metadata": {
+        "product": "ordris"
+      },
+      "start_date": 1792573200,
+      "trial_end": 1893456000,
+      "ended_at": null,
+      "canceled_at": null,
+      "discounts": [],
+      "items": {
+        "data": [
+          {
+            "quantity": 1,
+            "price": {
+              "id": "price_ord_m",
+              "object": "price",
+              "product": "prod_ordris",
+              "unit_amount": 4900,
+              "currency": "gbp",
+              "metadata": {},
+              "recurring": {
+                "interval": "month",
+                "interval_count": 1,
+                "usage_type": "licensed"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sub_5",
+      "object": "subscription",
+      "status": "canceled",
+      "metadata": {
+        "product": "pp"
+      },
+      "start_date": 1782896400,
+      "trial_end": null,
+      "ended_at": 1792594800,
+      "canceled_at": 1792594800,
+      "discounts": [],
+      "items": {
+        "data": [
+          {
+            "quantity": 1,
+            "price": {
+              "id": "price_hunter_m",
+              "object": "price",
+              "product": "prod_pp",
+              "unit_amount": 1900,
+              "currency": "gbp",
+              "metadata": {},
+              "recurring": {
+                "interval": "month",
+                "interval_count": 1,
+                "usage_type": "licensed"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sub_6",
+      "object": "subscription",
+      "status": "active",
+      "metadata": {
+        "product": "kp"
+      },
+      "start_date": 1780304400,
+      "trial_end": null,
+      "ended_at": null,
+      "canceled_at": null,
+      "discounts": [],
+      "items": {
+        "data": [
+          {
+            "quantity": 1,
+            "price": {
+              "id": "price_kp_metered",
+              "object": "price",
+              "product": "prod_kp",
+              "unit_amount": 10,
+              "currency": "gbp",
+              "metadata": {},
+              "recurring": {
+                "interval": "month",
+                "interval_count": 1,
+                "usage_type": "metered"
+              }
+            }
+          },
+          {
+            "quantity": 1,
+            "price": {
+              "id": "price_kp_usd",
+              "object": "price",
+              "product": "prod_kp",
+              "unit_amount": 2500,
+              "currency": "usd",
+              "metadata": {},
+              "recurring": {
+                "interval": "month",
+                "interval_count": 1,
+                "usage_type": "licensed"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

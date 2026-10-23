@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "product": "hnh",
+  "generated_at": "2026-10-22T06:10:02Z",
+  "timezone": "Europe/London",
+  "days": [
+    {
+      "date": "2026-10-20",
+      "leads": 5,
+      "leads_by_kind": {
+        "landlord": 3,
+        "tenant": 2
+      },
+      "instructions": 1
+    }
+  ]
+}

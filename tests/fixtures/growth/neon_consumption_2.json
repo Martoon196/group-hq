@@ -1,0 +1,77 @@
+{
+  "projects": [
+    {
+      "project_id": "proj-alpha-333",
+      "periods": [
+        {
+          "period_id": "79ec829f-1828-4006-ac82-9f1828a0067d",
+          "period_plan": "launch",
+          "period_start": "2026-10-01T00:00:00Z",
+          "consumption": [
+            {
+              "timeframe_start": "2026-10-20T00:00:00Z",
+              "timeframe_end": "2026-10-21T00:00:00Z",
+              "metrics": [
+                {
+                  "metric_name": "compute_unit_seconds",
+                  "value": 360
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "project_id": "proj-test-444",
+      "periods": [
+        {
+          "period_id": "79ec829f-1828-4006-ac82-9f1828a0067d",
+          "period_plan": "launch",
+          "period_start": "2026-10-01T00:00:00Z",
+          "consumption": [
+            {
+              "timeframe_start": "2026-10-21T00:00:00Z",
+              "timeframe_end": "2026-10-22T00:00:00Z",
+              "metrics": [
+                {
+                  "metric_name": "compute_unit_seconds",
+                  "value": 36
+                },
+                {
+                  "metric_name": "future_metric_x",
+                  "value": 5
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "project_id": "proj-gone-555",
+      "periods": [
+        {
+          "period_id": "79ec829f-1828-4006-ac82-9f1828a0067d",
+          "period_plan": "launch",
+          "period_start": "2026-10-01T00:00:00Z",
+          "consumption": [
+            {
+              "timeframe_start": "2026-10-21T00:00:00Z",
+              "timeframe_end": "2026-10-22T00:00:00Z",
+              "metrics": [
+                {
+                  "metric_name": "compute_unit_seconds",
+                  "value": 72
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "cursor": "proj-gone-555"
+  }
+}

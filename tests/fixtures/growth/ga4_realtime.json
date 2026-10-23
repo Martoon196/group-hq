@@ -1,0 +1,20 @@
+{
+  "dimensionHeaders": [],
+  "metricHeaders": [
+    {
+      "name": "activeUsers",
+      "type": "TYPE_INTEGER"
+    }
+  ],
+  "rows": [
+    {
+      "metricValues": [
+        {
+          "value": "4"
+        }
+      ]
+    }
+  ],
+  "rowCount": 1,
+  "kind": "analyticsData#runRealtimeReport"
+}

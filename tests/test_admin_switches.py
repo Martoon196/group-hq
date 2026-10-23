@@ -536,7 +536,7 @@ def test_the_nightly_job_refuses_a_database_its_build_does_not_match(db, live, m
         assert job.main([], out=out) == 1
         assert mock.calls.call_count == 0
     assert "recompute refused" in out.getvalue() and "0005_district_cost_share" in out.getvalue()
-    assert "0006_admin_switches" in out.getvalue()
+    assert "0007_growth" in out.getvalue(), "the build's own head is named"
     assert grants_of(db, person) == []
     with session() as fresh:
         assert fresh.query(AuditLog).filter(AuditLog.action == "recompute.run").count() == 0
