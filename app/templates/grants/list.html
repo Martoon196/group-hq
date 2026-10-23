@@ -9,9 +9,10 @@
   .filters .form-actions { margin: 0; }
   .pager { display: flex; gap: .8rem; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 1rem; }
   .pager .btn[aria-disabled="true"] { opacity: .4; pointer-events: none; }
-  .run-form { display: grid; grid-template-columns: 1fr auto; gap: .8rem 1.2rem; align-items: end; }
-  .run-form .form-actions { grid-column: 1 / -1; margin-top: .4rem; }
-  @media (max-width: 720px) { .run-form { grid-template-columns: 1fr; } }
+  /* One column: the panel sits beside "By state", and two columns squeezed the dry-run label into a sliver. */
+  .run-form { display: grid; grid-template-columns: 1fr; gap: .8rem; }
+  .run-form .form-actions { margin-top: .4rem; }
+  .run-form .field input[type="date"] { max-width: 16rem; }
   .status-blocked { background: #FFE2C2; color: #7A3E00; }
   .state-counts { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1rem; }
   .state-counts a { text-decoration: none; }
