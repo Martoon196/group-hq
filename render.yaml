@@ -77,10 +77,10 @@ services:
     schedule: "10 3 * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python -m app.jobs.recompute
-    # PP_SERVICE_TOKEN is not copied here yet. Render can only copy a variable the web service actually holds, so
-    # when Property Predator goes live: set PP_SERVICE_TOKEN on the web service first, then add its fromService
-    # entry below and sync, and only then switch PP to Live on the Settings screen. A product that is not in dry
-    # run but has no token here is sent nothing at night, and the job then exits 1 so the run shows as failed.
+    # Render can only copy a variable the web service actually holds. PP_SERVICE_TOKEN was set on the web
+    # service on 23 Oct 2026 and is copied below; sync the Blueprint before switching PP to Live on the
+    # Settings screen. A product that is not in dry run but has no token here is sent nothing at night, and
+    # the job then exits 1 so the run shows as failed.
     # Deploy this cron from the same commit as the web service: the job refuses to run (exit 1, nothing sent)
     # when the database is not at its own Alembic head.
     envVars:
@@ -104,6 +104,11 @@ services:
           type: web
           name: group-hq
           envVarKey: PP_BASE_URL
+      - key: PP_SERVICE_TOKEN
+        fromService:
+          type: web
+          name: group-hq
+          envVarKey: PP_SERVICE_TOKEN
       - key: ORDRIS_BASE_URL
         fromService:
           type: web
