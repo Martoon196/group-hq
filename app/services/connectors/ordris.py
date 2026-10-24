@@ -62,8 +62,8 @@ def partner_terms(data: dict) -> dict:
 
 def partner_info(data: dict) -> dict:
     """What the partner routes answer that is worth showing: the partner id, referral code and link, whether the
-    partner was created just now, and (GET) the referral count and the three pence figures. Missing or malformed
-    values are left out; a link that is not a plain http(s) URL is dropped."""
+    partner was created just now, and (GET) the referral count, the three pence figures and the partner's status.
+    Missing or malformed values are left out; a link that is not a plain http(s) URL is dropped."""
     info: dict = {}
     if isinstance(data.get("partner"), bool):
         info["partner"] = data["partner"]
@@ -84,6 +84,9 @@ def partner_info(data: dict) -> dict:
         value = whole_number(data.get(key))
         if value is not None:
             info[key] = value
+    status = short_text(data.get("status"), 40)
+    if status:
+        info["status"] = status.lower()
     info.update(partner_terms(data))
     return info
 

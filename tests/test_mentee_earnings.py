@@ -29,6 +29,7 @@ from app.services import entitlements as ent
 from app.services.connectors import ConnectorError, HNHConnector, KPConnector, OrdrisConnector, PPConnector
 from app.services.connectors.hnh import partner_info
 from app.services.connectors.kp import link_refusal
+from app.services.connectors.ordris import partner_info as ordris_partner_info
 from app.services.connectors.ordris import partner_terms as ordris_partner_terms
 from app.services.connectors.pp import AFFILIATE_KEPT
 from app.services.entitlements import (IN_USE_CREATE_ERROR, IN_USE_ERROR, LINK_UNCONFIRMED, MAX_ATTEMPTS, MISMATCH_ERROR,
@@ -1316,3 +1317,30 @@ def test_the_ordris_card_shows_contract_two_and_the_terms_only_when_ordris_says(
         assert values["Partner terms"] == row and headline in card, extra
     assert ordris_partner_terms({"terms_version": "2026-10"}) == {}, "a version alone says nothing about acceptance"
     assert ordris_partner_terms({"terms_accepted": "yes", "terms_accepted_at": 7}) == {"terms_accepted": False}
+
+
+def test_a_suspended_or_terminated_ordris_partner_shows_its_status_and_its_link_stays_out_of_the_welcome(
+        admin_client, db, live):
+    person, mentee = _mentee(db)
+    for status, earning in (("active", True), ("suspended", False), ("terminated", False), ("pending_approval", False),
+                            (None, True)):
+        answer = {**fixture("ordris_partner_status")}
+        answer.pop("status", None)
+        if status is not None:
+            answer["status"] = status
+        with respx.mock() as mock:
+            routes = mock_panel(mock)
+            routes.ordris.mock(return_value=httpx.Response(200, json=answer))
+            html = admin_client.get(f"/people/{person.id}/earnings?fragment=1&mentee={mentee.id}").text
+        card = html.split("<strong>Ordris</strong>")[1].split('<div class="earn-card">')[0]
+        values = dict(re.findall(r"<dt>(.*?)</dt>\s*<dd>(.*?)</dd>", card, re.S))
+        welcome = html.split('<textarea id="earn-welcome"')[1].split("</textarea>")[0] if "earn-welcome" in html else ""
+        if earning:
+            assert "Status" not in values and "earns nothing" not in card, status
+            assert "ordris.example.test/?ref=AMYA41" in welcome, status
+        else:
+            label = status.replace("_", " ")
+            assert values["Status"] == label and f"Partner programme: {label}, so the link earns nothing" in card, status
+            assert "ordris.example.test" not in welcome, f"a {status} partner's link never goes in the welcome"
+    assert ordris_partner_info({"status": " Suspended "})["status"] == "suspended"
+    assert "status" not in ordris_partner_info({"status": 7})

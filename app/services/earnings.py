@@ -187,12 +187,19 @@ def _ordris(info: dict, has_grant: bool) -> ProductEarnings:
                       else "Not a partner, and none of their programmes enrols them.")
         return p
     terms = _terms(info)
-    p.headline = "Partner programme" + (": terms not accepted" if terms == "Not accepted" else "")
+    status = info.get("status")
+    # Ordris credits active partners only, so any other status means the link earns nothing: the card says so and
+    # the link stays out of the welcome message. No status at all is an older Ordris build, read as active.
+    earning = status in (None, "active")
+    if earning:
+        p.headline = "Partner programme" + (": terms not accepted" if terms == "Not accepted" else "")
+    else:
+        p.headline = f"Partner programme: {status.replace('_', ' ')}, so the link earns nothing"
     p.rows = _rows(("Referral link", None, info.get("link")), ("Code", info.get("referral_code")),
                    ("Referrals", _count(info.get("referrals"))), ("Pending", _money(info.get("pending_pence"))),
                    ("Payable", _money(info.get("payable_pence"))), ("Paid", _money(info.get("paid_pence"))),
-                   ("Partner terms", terms))
-    p.links = {"ordris_partner": info.get("link")}
+                   ("Status", None if earning else status.replace("_", " ")), ("Partner terms", terms))
+    p.links = {"ordris_partner": info.get("link")} if earning else {}
     return p
 
 
