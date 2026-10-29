@@ -57,6 +57,8 @@ TOTP_ISSUER = os.environ.get("TOTP_ISSUER", "Group HQ")
 # Product connectors. Tokens are secrets and never have defaults; base URLs are the live hosts.
 PP_BASE_URL = os.environ.get("PP_BASE_URL", "https://propertypredator.com").rstrip("/")
 PP_SERVICE_TOKEN = os.environ.get("PP_SERVICE_TOKEN", "")
+# Founder CRM read bridge into Relaunch72. Distinct from the PP partner token.
+R72_CRM_TOKEN = os.environ.get("R72_CRM_TOKEN", "")
 ORDRIS_BASE_URL = os.environ.get("ORDRIS_BASE_URL", "").rstrip("/")
 ORDRIS_PARTNER_TOKEN = os.environ.get("ORDRIS_PARTNER_TOKEN", "")
 KP_BASE_URL = os.environ.get("KP_BASE_URL", "https://portal.keypropertiesuk.co.uk").rstrip("/")
