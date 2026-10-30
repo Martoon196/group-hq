@@ -18,9 +18,10 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -1145,14 +1146,18 @@ def test_an_hourly_realtime_read_never_hides_a_failed_daily_ga4_pull(creds, live
 
 
 def test_channels_count_paid_purchases_on_their_london_day(db):
-    today = reports.today_london()                                  # BST until 25 October 2026
-    midnight = datetime.combine(today, datetime.min.time())
+    today = reports.today_london()
+    london_midnight = datetime.combine(today, datetime.min.time(), tzinfo=ZoneInfo("Europe/London"))
+
+    def utc_naive(local_time):
+        return local_time.astimezone(timezone.utc).replace(tzinfo=None)
+
     db.add(PromoChannelMap(code="PPMETA", product="pp", channel="paid_social", platform="meta", campaign_name="pp-x",
                            created_by=ADMIN_EMAIL))
-    for ref, at, status in (("late", midnight - timedelta(minutes=30), "paid"),       # 00:30 London today
-                            ("refunded", midnight + timedelta(hours=12), "refunded"),
-                            ("trial", midnight + timedelta(hours=12), "trialing"),
-                            ("yesterday", midnight - timedelta(hours=2), "paid")):    # 23:00 London yesterday
+    for ref, at, status in (("late", utc_naive(london_midnight + timedelta(minutes=30)), "paid"),
+                            ("refunded", utc_naive(london_midnight + timedelta(hours=12)), "refunded"),
+                            ("trial", utc_naive(london_midnight + timedelta(hours=12)), "trialing"),
+                            ("yesterday", utc_naive(london_midnight - timedelta(hours=1)), "paid")):
         db.add(ProductPurchase(product="pp", purchase_ref=ref, occurred_at=at, kind="subscription", amount_pence=1900,
                                status=status, promo_code="PPMETA"))
     db.commit()

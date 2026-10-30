@@ -20,6 +20,7 @@ Add WhatsApp once the owned Meta account/number, template status and inbound web
 
 ## Current evidence and limits
 
+- **Release checkpoint, 30 October:** PR #2 first CI run `40984747269` on commit `8dc2a8f759b2e72008346e92d8f8a84b72e68e1e` finished 398 passed, 3 failed. Two failures were stale test assertions naming migration 0008 after additive migration 0009; one was an existing London-day fixture that assumed BST after the October clock change. Astra authorised only those three test corrections. Changed area/concern -> those exact tests plus syntax and whitespace checks -> about 5 minutes, followed by one exact-head CI run. No production growth calculation changed.
 - Group HQ `/crm` reads only PP names, stages and task/activity times through `app/services/relaunch72_crm.py`; the product endpoint is `GET /api/group-hq/crm/leads?brand=pp` on the PP host. It exposes no address, phone or consent decision. No MHP lead bridge exists.
 - Group HQ's `app/services/followups.py` is a Hello New Home franchise email flow. It is not a PP/MHP sender.
 - The prior PP one-lead SMS migration 0124 is unpublished and paused by this founder redirection. Do not deploy or repurpose it.

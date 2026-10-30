@@ -15,7 +15,7 @@ from tests.conftest import ADMIN_EMAIL, session
 
 
 def test_database_is_at_head():
-    assert migrate.current_revision() == migrate.head_revision() == "0008_mentee_earnings"
+    assert migrate.current_revision() == migrate.head_revision() == "0009_campaign_workspace"
 
 
 def test_grants_is_mounted_and_needs_a_login(client):
