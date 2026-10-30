@@ -14,7 +14,7 @@
     {% if status.availability == 'unavailable' %}<p>We couldn’t read this brand’s connection. Refresh to check again; an unavailable status doesn’t mean the sender is disconnected.</p>
     {% elif status.availability == 'not_connected' %}<p>This brand’s WhatsApp workspace hasn’t been connected to Group HQ yet.</p>
     {% elif status.connection_state in ('not_configured', 'not_composed') %}<p>The delivery foundation exists. Your business account and WhatsApp number still need connecting.</p>
-    {% else %}<p>The sender record is connected. The reply and sending checks below determine what can run.</p>{% endif %}
+    {% else %}<p>A sender record exists. The connection, reply and sending checks below determine what can run.</p>{% endif %}
     <dl class="wa-status">
       <div><dt>Sender connection</dt><dd>{{ status.label(status.connection_state) }}</dd></div>
       <div><dt>Incoming replies</dt><dd>{{ status.label(status.inbound_state) }}</dd></div>

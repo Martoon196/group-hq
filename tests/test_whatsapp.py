@@ -44,6 +44,13 @@ def test_unavailable_status_is_not_a_disconnected_or_live_claim(admin_client, mo
     assert 'type="password"' not in response.text
 
 
+def test_revoked_sender_never_claims_to_be_connected(admin_client, monkeypatch):
+    monkeypatch.setattr(crm, "fetch_status", lambda brand: WhatsAppStatus(brand, "available", connection_state="revoked"))
+    response = admin_client.get("/crm/channels/whatsapp")
+    assert "Connection revoked" in response.text and "A sender record exists" in response.text
+    assert "The sender record is connected" not in response.text
+
+
 def test_read_client_pins_host_and_brand_and_never_retries_or_follows_redirects():
     calls = []
     def transport(request):
