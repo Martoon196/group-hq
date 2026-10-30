@@ -9,10 +9,22 @@ from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import CampaignAction, CampaignLead, CampaignPlan, User, utcnow
 from ..services import campaigns
+from ..services.whatsapp import BRANDS, fetch_status
 from ..services.relaunch72_crm import CrmUnavailable, fetch_leads
 from ..templating import go, render
 
 router = APIRouter(dependencies=[Depends(check_origin)])
+
+
+@router.get("/crm/channels/whatsapp", response_class=HTMLResponse)
+def whatsapp(request: Request, user: User = Depends(require_admin)):
+    brand = request.query_params.get("brand", "pp")
+    if brand not in BRANDS or len(request.query_params.getlist("brand")) > 1 or any(key != "brand" for key in request.query_params):
+        raise HTTPException(status_code=400, detail="Choose Property Predator or Martin Howard Property")
+    response = render(request, "whatsapp.html", {"user": user, "section": "whatsapp", "brand": brand,
+                                                "brands": BRANDS, "status": fetch_status(brand)})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @router.get("/crm", response_class=HTMLResponse)

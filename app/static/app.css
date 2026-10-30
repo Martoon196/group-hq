@@ -215,3 +215,26 @@ table.data td.detail { max-width: 46ch; word-break: break-word; }
 .uri { font-size: .78rem; word-break: break-all; }
 .show-pw { display: inline-flex; align-items: center; gap: .45rem; font-size: .88rem; color: var(--muted); margin-top: .55rem; cursor: pointer; }
 .show-pw input { width: auto; margin: 0; }
+
+/* Brand WhatsApp setup and connection status. */
+.wa-intro { max-width: 68ch; font-size: 1.08rem; line-height: 1.7; }
+.wa-brands { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1.4rem; }
+.wa-layout { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(320px, 1.3fr); gap: 1.4rem; align-items: start; }
+.wa-connection, .wa-setup { min-width: 0; padding: 1.6rem; }
+.wa-connection h2, .wa-setup h2 { font-size: 1.6rem; line-height: 1.25; margin: .6rem 0 1rem; }
+.wa-connection p, .wa-steps p { font-size: 1rem; line-height: 1.65; }
+.wa-mark { display: grid; place-items: center; width: 3rem; height: 3rem; margin-bottom: 1.2rem; border-radius: 1rem; background: #DDF7E8; color: #12613B; font-weight: 900; font-size: 1.7rem; }
+.wa-status { margin: 1.5rem 0; }
+.wa-status > div { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding: .8rem 0; }
+.wa-status dt { color: var(--muted); }
+.wa-status dd { margin: 0; font-weight: 700; }
+.wa-number { display: grid; gap: .4rem; padding: 1.1rem; border-radius: .8rem; background: #EEF8F2; color: #173F2B; overflow-wrap: anywhere; }
+.wa-number span { font-size: 1.35rem; font-weight: 900; }
+.wa-number small { font-size: .95rem; line-height: 1.5; }
+.wa-boundary { border-left: 3px solid #18854E; padding-left: .8rem; }
+.wa-steps { padding-left: 1.6rem; margin: 1.4rem 0; }
+.wa-steps > li { padding: 0 0 1.3rem .5rem; }
+.wa-steps > li::marker { font-weight: 900; color: #12613B; }
+.wa-steps strong { font-size: 1.1rem; }
+.wa-steps p { margin: .45rem 0 .8rem; }
+@media (max-width: 1000px) { .wa-layout { grid-template-columns: 1fr; } }
