@@ -1,0 +1,42 @@
+{% extends "app_base.html" %}
+{% set title = "WhatsApp | Group HQ" %}
+{% block content %}
+<a class="help" href="/crm">← Back to CRM</a>
+<div class="page-title"><span class="eyebrow">Channels · WhatsApp</span><h1>Keep the conversation going.</h1></div>
+<p class="wa-intro">A personal follow-up, the right brand, and every reply attached to the lead. Connect each business here before adding WhatsApp to its journeys.</p>
+<nav class="wa-brands" aria-label="Choose WhatsApp brand">
+  {% for key, name in brands.items() %}<a href="/crm/channels/whatsapp?brand={{ key }}" class="btn{% if key == brand %} btn-primary{% endif %}"{% if key == brand %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}
+</nav>
+<div class="wa-layout mt-2">
+  <section class="panel wa-connection" aria-labelledby="connection-heading">
+    <span class="wa-mark" aria-hidden="true">W</span><span class="eyebrow">{{ brands[brand] }}</span>
+    <h2 id="connection-heading">{{ status.title }}</h2>
+    {% if status.availability == 'unavailable' %}<p>We couldn’t read this brand’s connection. Refresh to check again; an unavailable status doesn’t mean the sender is disconnected.</p>
+    {% elif status.availability == 'not_connected' %}<p>This brand’s WhatsApp workspace hasn’t been connected to Group HQ yet.</p>
+    {% elif status.connection_state in ('not_configured', 'not_composed') %}<p>The delivery foundation exists. Your business account and WhatsApp number still need connecting.</p>
+    {% else %}<p>The sender record is connected. The reply and sending checks below determine what can run.</p>{% endif %}
+    <dl class="wa-status">
+      <div><dt>Sender connection</dt><dd>{{ status.label(status.connection_state) }}</dd></div>
+      <div><dt>Incoming replies</dt><dd>{{ status.label(status.inbound_state) }}</dd></div>
+      <div><dt>Sending permissions</dt><dd>{{ status.label(status.outbound_state) }}</dd></div>
+      <div><dt>Latest message evidence</dt><dd>{{ status.label(status.receipt_state) }}</dd></div>
+    </dl>
+    {% if status.snapshot_at %}<p class="help">Connection checked: {{ status.snapshot_at }}. This reads the saved channel record; it does not check whether a delivery worker is currently running.</p>{% endif %}
+    {% if status.last_receipt_at %}<p class="help">Latest receipt: {{ status.last_receipt_at }}.</p>{% endif %}
+    {% if brand == 'pp' %}<div class="wa-number"><strong>Chosen PP number</strong><span>+44 7886 068757</span><small>Selected for setup. WhatsApp registration is still to be confirmed.</small></div>{% else %}<div class="wa-number"><strong>MHP sender</strong><span>Choose a number</span><small>MHP needs its own branded sender before customer follow-up.</small></div>{% endif %}
+    <p class="wa-boundary">Group HQ WhatsApp sending is awaiting the connection and send-and-reply pilot.</p>
+    <a class="btn" href="/crm/channels/whatsapp?brand={{ brand }}">Refresh connection</a>
+  </section>
+  <section class="panel wa-setup" aria-labelledby="setup-heading">
+    <span class="eyebrow">Your next step</span><h2 id="setup-heading">Connect {{ brands[brand] }} to Meta.</h2>
+    <ol class="wa-steps">
+      <li><strong>Open Meta’s direct WhatsApp setup.</strong><p>Sign in using the Facebook account that manages this business. Choose its business portfolio and WhatsApp Business account, or create them when prompted.</p><a class="btn btn-primary" href="https://developers.facebook.com/products/whatsapp/onboard/direct" target="_blank" rel="noopener noreferrer">Open Meta setup ↗</a></li>
+      <li><strong>Register your business number.</strong><p>{% if brand == 'pp' %}Use <b>+44 7886 068757</b>. The verification SMS will appear in Twilio’s Messaging Logs. Enter its code in Meta.{% else %}Use a number owned by MHP that can receive the verification SMS or call.{% endif %} Keep verification codes and tokens private.</p></li>
+      <li><strong>Connect the secure delivery settings.</strong><p>Once Meta shows your WhatsApp Business Account ID and Phone Number ID, those identify the sender. Credentials belong in Relaunch72’s secure delivery settings, never in a message or this page.</p></li>
+      <li><strong>Verify replies and the first template.</strong><p>Confirm Meta can reach the reply webhook and approve the message template for this brand.</p></li>
+      <li><strong>Run one send-and-reply test.</strong><p>Check the message arrives on the owner’s WhatsApp, the reply reaches the correct lead, and opt-outs stop further follow-up. Then connect the channel to the campaign journey.</p></li>
+    </ol>
+    <p class="help"><a href="https://whatsappbusiness.com/developers/developer-hub/" target="_blank" rel="noopener noreferrer">Meta’s setup guide ↗</a>{% if brand == 'pp' %} · <a href="https://hq.propertypredator.com/portal/channels/live">View the existing channel record ↗</a>{% endif %}</p>
+  </section>
+</div>
+{% endblock %}
