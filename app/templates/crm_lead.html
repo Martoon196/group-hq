@@ -1,0 +1,32 @@
+{% extends "app_base.html" %}
+{% set title = lead.display_name ~ " | Campaigns | Group HQ" %}
+{% block content %}
+<p><a href="/crm">← Back to CRM</a></p>
+<div class="page-title"><span class="eyebrow">Property Predator · founder plan</span><h1>{{ lead.display_name }}</h1>
+  <p class="help">{{ lead.stage or lead.lifecycle }}{% if lead.source %} · {{ lead.source }}{% endif %} · <a href="{{ source_url }}">Open source record</a></p>
+</div>
+<section class="panel campaign-notice" aria-label="Channel status">
+  <strong>Planning only.</strong> The source CRM owns contact details and permission. Group HQ has no email address or phone number from this feed, and these tasks cannot send an email, text or WhatsApp.
+</section>
+{% if not plan and lead.lifecycle == "lead" %}
+<section class="panel mt-2"><h2>Start a useful follow-up</h2><p>Six touchpoints across 14 days: a first call, a useful answer, a short check-in, a second call, a WhatsApp option and a clear close. Only call outcomes can be logged in this release.</p>
+  <form method="post" action="/crm/leads/{{ lead.id }}/start"><button class="btn btn-primary" type="submit">Create my follow-up plan</button></form>
+</section>
+{% elif not plan %}<section class="panel mt-2"><h2>Plan unavailable</h2><p>This source record is {{ lead.lifecycle }}. The first-conversation plan opens for active leads only.</p></section>
+{% else %}
+<section class="panel mt-2"><div class="panel-head"><h2>Follow-up plan</h2><span class="campaign-state campaign-state-{{ plan.state }}">{{ plan.state|capitalize }}</span></div>
+  <p class="help">Started {{ plan.started_at|uk }} · version {{ plan.blueprint_version }}</p>
+  {% if plan.state == "held" %}<p><strong>On hold:</strong> {{ plan.hold_reason }}</p><form method="post" action="/crm/plans/{{ plan.id }}/resume"><button class="btn btn-primary btn-sm" type="submit">Resume plan</button></form>
+  {% elif plan.state == "active" %}<form method="post" action="/crm/plans/{{ plan.id }}/hold" class="campaign-hold"><label for="reason">Hold reason</label><input id="reason" name="reason" required maxlength="500" placeholder="For example: asked for no further follow-up"><button class="btn btn-ghost btn-sm" type="submit">Hold all follow-up</button></form>{% endif %}
+</section>
+<section class="panel mt-2"><h2>The journey</h2><div class="campaign-timeline">
+  {% for action in plan.actions %}<article class="campaign-step"><div class="campaign-step-head"><span class="campaign-channel campaign-channel-{{ action.channel }}">{{ action.channel }}</span><strong>{{ action.title }}</strong><span class="help">{{ action.due_at|uk }}</span></div><p>{{ action.guidance }}</p>
+    {% if action.state == "done" %}<span class="ok-text">Call recorded {{ action.completed_at|uk }}</span>
+    {% elif action.channel == "call" and plan.state == "active" %}<form method="post" action="/crm/actions/{{ action.id }}/call" class="campaign-call-form"><label for="outcome-{{ action.id }}">Call outcome</label><textarea id="outcome-{{ action.id }}" name="outcome" required maxlength="2000" placeholder="What happened, what they need, and the next agreed step"></textarea><button class="btn btn-primary btn-sm" type="submit">Record call</button></form>
+    {% elif action.channel != "call" %}<span class="help">Draft prompt · delivery connection pending</span>
+    {% else %}<span class="help">Held</span>{% endif %}
+  </article>{% endfor %}
+</div></section>
+<section class="panel mt-2"><h2>Activity</h2>{% if plan.activities %}<ol class="campaign-activity">{% for activity in plan.activities|reverse %}<li><strong>{{ activity.kind|capitalize }}</strong> · {{ activity.at|uk }} · {{ activity.summary }}</li>{% endfor %}</ol>{% else %}<p class="muted">No call outcome recorded yet.</p>{% endif %}</section>
+{% endif %}
+{% endblock %}
