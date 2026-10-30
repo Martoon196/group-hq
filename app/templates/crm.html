@@ -1,22 +1,39 @@
 {% extends "app_base.html" %}
 {% set title = "CRM | Group HQ" %}
 {% block content %}
-<div class="page-title"><span class="eyebrow">Founder CRM</span><h1>Every brand, one starting point</h1></div>
-<p class="help">Open each brand’s own workspace. Property Predator leads appear here when its secure read connection is available.</p>
+<div class="page-title"><span class="eyebrow">Founder CRM</span><h1>One HQ. Each brand in its own lane.</h1></div>
+<p class="help">Plan the next useful move, see the calls due, and keep every conversation tied to its source. Email, text and WhatsApp here are planning prompts until their brand-specific permission and delivery connections are released.</p>
+<div class="campaign-metrics mt-2" aria-label="Campaign status">
+  <div class="campaign-metric"><span>Property Predator</span><strong>{{ leads|length }}</strong><small>leads on this HQ page</small></div>
+  <div class="campaign-metric"><span>Calls due</span><strong>{{ due_calls|length }}</strong><small>first 10 in your queue</small></div>
+  <div class="campaign-metric"><span>MHP</span><strong>Pending</strong><small>lead connection</small></div>
+</div>
 <section class="panel mt-2" aria-labelledby="brands-heading">
   <div class="panel-head"><h2 id="brands-heading">Brands</h2></div>
   <div class="table-scroll"><table class="data"><thead><tr><th>Brand</th><th>Current workspace</th><th>CRM connection</th></tr></thead><tbody>
-    <tr><td><strong>Property Predator</strong></td><td><a href="https://hq.propertypredator.com/portal/crm/contacts">Open CRM</a></td><td>{{ "Connected" if page else "Unavailable" }}</td></tr>
-    <tr><td><strong>Martin Howard Property</strong></td><td><a href="https://app.martinhowardproperty.co.uk/portal/investors">Open Your Desk</a></td><td>Member workspaces live; founder lead roll-up pending</td></tr>
+    <tr><td><strong>Property Predator</strong></td><td><a href="https://hq.propertypredator.com/portal/crm/contacts">Open source CRM</a></td><td>{{ "Read connection available" if page else "Read connection unavailable" }} · campaign plans in Group HQ</td></tr>
+    <tr><td><strong>Martin Howard Property</strong></td><td><a href="https://app.martinhowardproperty.co.uk/portal/investors">Open Your Desk</a></td><td>Lead connection pending; no campaign actions can start yet</td></tr>
     <tr><td><strong>Key Properties UK</strong></td><td>Existing product portal</td><td>Lead bridge not built</td></tr>
     <tr><td><strong>Hello New Home</strong></td><td><a href="/franchise">Open franchise pipeline</a></td><td>Local Group HQ workflow; lead bridge pending</td></tr>
   </tbody></table></div>
 </section>
+<section class="panel mt-2" aria-labelledby="call-queue-heading">
+  <div class="panel-head"><h2 id="call-queue-heading">Calls to make</h2><span class="help">Founder tasks · no automated dialling</span></div>
+  {% if due_calls %}<div class="table-scroll"><table class="data"><thead><tr><th>Due</th><th>Person</th><th>Reason</th><th>Action</th></tr></thead><tbody>
+  {% for action in due_calls %}<tr><td>{{ action.due_at|uk }}</td><td>{{ action.plan.lead.display_name }}</td><td>{{ action.title }}</td><td><a href="/crm/leads/{{ action.plan.lead_id }}">Open plan</a></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="muted">No calls are due in the current Property Predator plans.</p>{% endif %}
+</section>
+<section class="panel mt-2" aria-labelledby="plan-leads-heading">
+  <div class="panel-head"><h2 id="plan-leads-heading">Property Predator follow-up plans</h2><span class="help">Latest 50 projected leads · source remains in Relaunch72</span></div>
+  {% if leads %}<div class="table-scroll"><table class="data"><thead><tr><th>Lead</th><th>Stage</th><th>Plan</th><th>Source</th></tr></thead><tbody>
+  {% for lead in leads %}<tr><td><a href="/crm/leads/{{ lead.id }}"><strong>{{ lead.display_name }}</strong></a></td><td>{{ lead.stage or lead.lifecycle }}</td><td>{{ plan_by_lead[lead.id].state if lead.id in plan_by_lead else "Not started" }}</td><td>{{ lead.source or "—" }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="muted">Sync a page of Property Predator leads below to start planning.</p>{% endif %}
+</section>
 <section class="panel mt-2" aria-labelledby="pp-leads-heading">
-  <div class="panel-head"><h2 id="pp-leads-heading">Property Predator leads</h2><span class="help">Latest 50 per page · read only</span></div>
+  <div class="panel-head"><h2 id="pp-leads-heading">Live Property Predator feed</h2><span class="help">50 per page · read only source</span></div>
   {% if unavailable %}<p class="help">The lead connection is unavailable. Existing product CRMs and Group HQ grants are unaffected.</p>
   {% elif not page.leads %}<p class="help">No leads in this page.</p>
-  {% else %}<div class="table-scroll"><table class="data"><thead><tr><th>Person</th><th>Source</th><th>Stage</th><th>Next follow-up</th><th>Last activity</th></tr></thead><tbody>
+  {% else %}<form method="post" action="/crm/sync" class="campaign-sync"><input type="hidden" name="cursor" value="{{ request.query_params.get('cursor', '') }}"><button class="btn btn-primary btn-sm" type="submit">Bring this page into my plans</button><span class="help">Copies names and stages only. Nothing is sent.</span></form><div class="table-scroll"><table class="data"><thead><tr><th>Person</th><th>Source</th><th>Stage</th><th>Next follow-up</th><th>Last activity</th></tr></thead><tbody>
   {% for lead in page.leads %}<tr><td><a href="{{ lead.detail_url }}">{{ lead.name }}</a></td><td>{{ lead.source or "—" }}</td><td>{{ lead.stage or lead.lifecycle }}</td><td>{{ lead.next_task_at or "—" }}</td><td>{{ lead.last_activity_at or "—" }}</td></tr>{% endfor %}
   </tbody></table></div>{% if page.next_cursor %}<p class="mt-1"><a class="btn" href="/crm?cursor={{ page.next_cursor }}">More leads</a></p>{% endif %}{% endif %}
 </section>

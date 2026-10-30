@@ -90,6 +90,32 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; }
 .app-side-foot .side-link { color: #E4E0E6; font-size: .85rem; }
 .app-side-foot form { margin: 0; }
 .app-main { padding: 2rem clamp(1rem, 3vw, 2.5rem) 4rem; min-width: 0; }
+.campaign-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.campaign-metric { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.3rem; display: flex; flex-direction: column; }
+.campaign-metric span { color: var(--muted); font-size: .9rem; font-weight: 700; }
+.campaign-metric strong { font-size: clamp(1.35rem, 2.5vw, 2rem); line-height: 1.2; }
+.campaign-metric small { color: var(--muted); }
+.campaign-sync, .campaign-hold { display: flex; align-items: center; flex-wrap: wrap; gap: .7rem; margin: .8rem 0 1.2rem; }
+.campaign-hold input { min-width: min(100%, 300px); flex: 1; font: inherit; padding: .6rem .8rem; border: 2px solid var(--line); border-radius: 9px; }
+.campaign-notice { border-left: 5px solid var(--amber); background: #fffbf3; }
+.campaign-state, .campaign-channel { display: inline-block; border-radius: 999px; padding: .15rem .65rem; font-weight: 700; font-size: .8rem; text-transform: capitalize; }
+.campaign-state-active { color: var(--green-deep); background: #e5f6eb; }
+.campaign-state-held { color: #795114; background: #fff2d8; }
+.campaign-channel-call { background: #e5f6eb; color: #126639; }
+.campaign-channel-email { background: #eaf0fc; color: #294f97; }
+.campaign-channel-sms { background: #f5eafd; color: #713497; }
+.campaign-channel-whatsapp { background: #e8f6ef; color: #187d4c; }
+.campaign-timeline { display: grid; gap: .8rem; }
+.campaign-step { padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 10px; }
+.campaign-step-head { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; }
+.campaign-step-head .help { margin-left: auto; }
+.campaign-step p { margin: .7rem 0; }
+.campaign-call-form { display: grid; gap: .5rem; max-width: 680px; }
+.campaign-call-form textarea { font: inherit; width: 100%; min-height: 85px; padding: .7rem; border: 2px solid var(--line); border-radius: 9px; }
+.campaign-call-form button { justify-self: start; }
+.campaign-activity { padding-left: 1.4rem; }
+.campaign-activity li { margin-bottom: .7rem; }
+@media (max-width: 700px) { .campaign-metrics { grid-template-columns: 1fr; } .campaign-step-head .help { margin-left: 0; width: 100%; } }
 .page-title { margin-bottom: 1.4rem; }
 .page-title h1 { font-size: clamp(1.6rem, 3vw, 2.2rem); margin-bottom: .2rem; }
 .page-title .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .8rem; }

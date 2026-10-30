@@ -18,6 +18,10 @@ from .db import Base
 
 # ---- vocabularies (mirrored by the CheckConstraints in alembic/versions/0001_baseline.py) ----
 PRODUCTS = ("pp", "ordris", "kp", "hnh")
+CAMPAIGN_BRANDS = ("pp", "mhp")
+CAMPAIGN_PLAN_STATES = ("active", "held", "completed")
+CAMPAIGN_ACTION_STATES = ("open", "done", "skipped")
+CAMPAIGN_CHANNELS = ("call", "email", "sms", "whatsapp")
 # affiliate was added by alembic/versions/0008_mentee_earnings.py, which recreates ck_entitlement_grants_kind.
 GRANT_KINDS = ("comp_tier", "org_plan", "sourcer_link", "partner_seat", "flag", "affiliate")
 GRANT_STATES = ("pending", "active", "revoked", "failed")
@@ -279,6 +283,88 @@ class LoginAttempt(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     key: Mapped[str] = mapped_column(String(320), nullable=False)
     attempted_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+# Founder campaign workspace. These are projections and operator tasks, not a second product CRM.
+# Contact details and permission remain with the product authority; this slice has no sending path.
+class CampaignLead(TimestampMixin, Base):
+    __tablename__ = "campaign_leads"
+    __table_args__ = (
+        _one_of("brand", CAMPAIGN_BRANDS, "ck_campaign_leads_brand"),
+        UniqueConstraint("brand", "source_system", "external_id", name="uq_campaign_leads_source"),
+        Index("ix_campaign_leads_brand_synced", "brand", "synced_at"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    brand: Mapped[str] = mapped_column(String(8), nullable=False)
+    source_system: Mapped[str] = mapped_column(String(30), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    lifecycle: Mapped[str] = mapped_column(String(20), nullable=False)
+    stage: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    next_task_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_activity_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    plans: Mapped[list["CampaignPlan"]] = relationship(back_populates="lead")
+
+
+class CampaignPlan(TimestampMixin, Base):
+    __tablename__ = "campaign_plans"
+    __table_args__ = (
+        _one_of("state", CAMPAIGN_PLAN_STATES, "ck_campaign_plans_state"),
+        UniqueConstraint("lead_id", "blueprint_key", "blueprint_version", name="uq_campaign_plans_version"),
+        Index("ix_campaign_plans_state", "state"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("campaign_leads.id", ondelete="RESTRICT"), nullable=False)
+    blueprint_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    blueprint_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(12), default="active", nullable=False)
+    hold_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    held_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    lead: Mapped[CampaignLead] = relationship(back_populates="plans")
+    actions: Mapped[list["CampaignAction"]] = relationship(back_populates="plan", order_by="CampaignAction.due_at")
+    activities: Mapped[list["CampaignActivity"]] = relationship(back_populates="plan", order_by="CampaignActivity.at")
+
+
+class CampaignAction(Base):
+    __tablename__ = "campaign_actions"
+    __table_args__ = (
+        _one_of("channel", CAMPAIGN_CHANNELS, "ck_campaign_actions_channel"),
+        _one_of("state", CAMPAIGN_ACTION_STATES, "ck_campaign_actions_state"),
+        UniqueConstraint("plan_id", "step_key", name="uq_campaign_actions_step"),
+        Index("ix_campaign_actions_state_due", "state", "due_at"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("campaign_plans.id", ondelete="CASCADE"), nullable=False)
+    step_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    channel: Mapped[str] = mapped_column(String(10), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    guidance: Mapped[str] = mapped_column(Text, nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    state: Mapped[str] = mapped_column(String(10), default="open", nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    plan: Mapped[CampaignPlan] = relationship(back_populates="actions")
+
+
+class CampaignActivity(Base):
+    __tablename__ = "campaign_activities"
+    __table_args__ = (Index("ix_campaign_activities_plan_at", "plan_id", "at"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("campaign_plans.id", ondelete="CASCADE"), nullable=False)
+    action_id: Mapped[int | None] = mapped_column(ForeignKey("campaign_actions.id", ondelete="SET NULL"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    plan: Mapped[CampaignPlan] = relationship(back_populates="activities")
 
 
 # =====================================================================================================
