@@ -2,6 +2,7 @@
 {% set title = "Dashboard | Group HQ" %}
 {% block content %}
 <div class="page-title"><span class="eyebrow">{{ s.company_name }}</span><h1>Dashboard</h1></div>
+{% include "_crm_workspaces.html" %}
 {% if stats.grants_failed or stats.calls_failed %}
 <div class="flash flash-err">{{ stats.grants_failed }} grant{{ "s" if stats.grants_failed != 1 else "" }} and {{ stats.calls_failed }} connector call{{ "s" if stats.calls_failed != 1 else "" }} failed. <a href="/grants?state=failed">See them</a>.</div>
 {% endif %}

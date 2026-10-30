@@ -2,18 +2,19 @@
 {% set title = "CRM | Group HQ" %}
 {% block content %}
 <div class="page-title"><span class="eyebrow">Founder CRM</span><h1>One HQ. Each brand in its own lane.</h1></div>
-<p><a class="btn" href="/crm/channels/whatsapp">Connect WhatsApp →</a></p>
-<p class="help">Plan the next useful move, see the calls due, and keep every conversation tied to its source. Email, text and WhatsApp here are planning prompts until their brand-specific permission and delivery connections are released.</p>
+<p class="help">Start with the lead boards and conversations already in your brand workspaces. Group HQ also keeps the Property Predator planning and call queue below.</p>
+{% include "_crm_workspaces.html" %}
+<p class="mt-2"><a class="btn" href="/crm/channels/whatsapp">WhatsApp connection status →</a></p>
 <div class="campaign-metrics mt-2" aria-label="Campaign status">
   <div class="campaign-metric"><span>Property Predator</span><strong>{{ leads|length }}</strong><small>leads on this HQ page</small></div>
   <div class="campaign-metric"><span>Calls due</span><strong>{{ due_calls|length }}</strong><small>first 10 in your queue</small></div>
-  <div class="campaign-metric"><span>MHP</span><strong>Pending</strong><small>lead connection</small></div>
+  <div class="campaign-metric"><span>MHP</span><strong><a href="https://app.martinhowardproperty.co.uk/portal/crm/opportunities">Your Desk</a></strong><small>Existing CRM workspace</small></div>
 </div>
 <section class="panel mt-2" aria-labelledby="brands-heading">
   <div class="panel-head"><h2 id="brands-heading">Brands</h2></div>
   <div class="table-scroll"><table class="data"><thead><tr><th>Brand</th><th>Current workspace</th><th>CRM connection</th></tr></thead><tbody>
     <tr><td><strong>Property Predator</strong></td><td><a href="https://hq.propertypredator.com/portal/crm/contacts">Open source CRM</a></td><td>{{ "Read connection available" if page else "Read connection unavailable" }} · campaign plans in Group HQ</td></tr>
-    <tr><td><strong>Martin Howard Property</strong></td><td><a href="https://app.martinhowardproperty.co.uk/portal/investors">Open Your Desk</a></td><td>Lead connection pending; no campaign actions can start yet</td></tr>
+    <tr><td><strong>Martin Howard Property</strong></td><td><a href="https://app.martinhowardproperty.co.uk/portal/crm/opportunities">Open existing lead board</a></td><td>Manage leads in Your Desk · <a href="https://app.martinhowardproperty.co.uk/hq/growth">webinar email status</a></td></tr>
     <tr><td><strong>Key Properties UK</strong></td><td>Existing product portal</td><td>Lead bridge not built</td></tr>
     <tr><td><strong>Hello New Home</strong></td><td><a href="/franchise">Open franchise pipeline</a></td><td>Local Group HQ workflow; lead bridge pending</td></tr>
   </tbody></table></div>

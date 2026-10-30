@@ -219,6 +219,15 @@ table.data td.detail { max-width: 46ch; word-break: break-word; }
 /* Brand WhatsApp setup and connection status. */
 .wa-intro { max-width: 68ch; font-size: 1.08rem; line-height: 1.7; }
 .wa-brands { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1.4rem; }
+.workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.4rem; margin-bottom: 1.6rem; }
+.workspace-card h3 { font-size: 1.5rem; margin: .4rem 0 .7rem; }
+.workspace-card p { line-height: 1.6; }
+.workspace-card > .btn { margin: .4rem 0; }
+.workspace-card .btn { min-height: 44px; white-space: normal; }
+.workspace-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin: .7rem 0 1rem; }
+.workspace-card a:focus-visible { outline: 3px solid var(--green-deep); outline-offset: 3px; }
+@media (max-width: 1000px) { .workspace-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .workspace-actions .btn { flex: 1 1 140px; justify-content: center; } }
 .wa-layout { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(320px, 1.3fr); gap: 1.4rem; align-items: start; }
 .wa-connection, .wa-setup { min-width: 0; padding: 1.6rem; }
 .wa-connection h2, .wa-setup h2 { font-size: 1.6rem; line-height: 1.25; margin: .6rem 0 1rem; }
