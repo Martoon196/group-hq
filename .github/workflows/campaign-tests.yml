@@ -32,5 +32,10 @@ jobs:
           cache: pip
       - name: Install pinned dependencies
         run: pip install -r requirements-dev.txt
+      - name: Rehearse migration from the live 0008 head
+        run: |
+          alembic upgrade 0008_mentee_earnings
+          alembic upgrade head
+          python -c "from app import migrate; assert migrate.current_revision() == migrate.head_revision() == '0009_campaign_workspace'"
       - name: Run exact source suite
         run: pytest -q
