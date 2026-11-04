@@ -16,6 +16,13 @@ from ..templating import go, render
 router = APIRouter(dependencies=[Depends(check_origin)])
 
 
+@router.get("/calendar", response_class=HTMLResponse)
+def calendar(request: Request, user: User = Depends(require_admin)):
+    response = render(request, "calendar.html", {"user": user, "section": "calendar"})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @router.get("/crm/channels/whatsapp", response_class=HTMLResponse)
 def whatsapp(request: Request, user: User = Depends(require_admin)):
     brand = request.query_params.get("brand", "pp")

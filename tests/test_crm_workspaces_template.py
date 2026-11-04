@@ -17,6 +17,7 @@ class CrmWorkspaceTemplateTest(unittest.TestCase):
             "https://app.martinhowardproperty.co.uk/hq/marketing",
             "https://app.martinhowardproperty.co.uk/hq/growth",
             "https://app.martinhowardproperty.co.uk/hq/marketing",
+            "/calendar",
         ])
         self.assertIn('class="btn btn-primary" href="https://app.martinhowardproperty.co.uk/hq/marketing"', mhp)
         self.assertIn("Manage brand enquiries in MHP Marketing", mhp)
