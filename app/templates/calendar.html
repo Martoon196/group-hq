@@ -1,0 +1,22 @@
+{% extends "app_base.html" %}
+{% set title = "Meetings & bookings | Growth HQ" %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">Growth HQ</span><h1>Meetings &amp; bookings</h1></div>
+<p>Create meeting types, set your available hours, share booking links and manage your own meetings from each workspace.</p>
+<div class="workspace-grid">
+  <article class="panel workspace-card">
+    <span class="eyebrow">Martin Howard Property</span>
+    <h2>Your MHP calendar</h2>
+    <p>Set up Income Path Calls, connect your Google or Microsoft calendar, and see bookings alongside the people in Your Desk.</p>
+    <a class="btn btn-primary" href="https://app.martinhowardproperty.co.uk/portal/calendar">Open MHP calendar →</a>
+    <div class="workspace-actions"><a class="btn" href="https://app.martinhowardproperty.co.uk/portal/calendar?view=types">Booking links &amp; forms</a><a class="btn" href="https://app.martinhowardproperty.co.uk/portal/calendar?view=new">Create a meeting</a></div>
+  </article>
+  <article class="panel workspace-card">
+    <span class="eyebrow">Property Predator</span>
+    <h2>Your PP calendar</h2>
+    <p>Use the same calendar tools in your existing Property Predator workspace.</p>
+    <a class="btn btn-primary" href="https://hq.propertypredator.com/portal/calendar">Open PP calendar →</a>
+  </article>
+</div>
+<p class="help">Sign into the relevant brand when prompted. Meeting data and calendar permissions stay with that workspace. Each calendar has a link back to Growth HQ.</p>
+{% endblock %}
