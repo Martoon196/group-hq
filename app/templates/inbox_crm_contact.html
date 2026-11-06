@@ -1,0 +1,7 @@
+{% extends "app_base.html" %}
+{% block content %}<p class="eyebrow">{{ brands.get(crm_brand,crm_brand) }} CRM</p>
+{% if crm_error %}<div class="flash flash-err">{{ crm_error }}</div>{% endif %}
+{% if result %}<h1>{{ result.contact.name }}</h1><p>{{ result.contact.lifecycle }}</p><h2>Conversation history</h2>
+{% for item in result.activities %}<article class="card" style="padding:1rem;margin:1rem 0"><h3>{{ item.subject }}</h3>
+<p style="white-space:pre-wrap;font-size:1.1rem">{{ item.body or '' }}</p><small>{{ item.occurredAt }}</small></article>{% else %}<p>No activity recorded yet.</p>{% endfor %}{% endif %}
+<a class="btn btn-secondary" href="/inbox">Back to Growth HQ inbox</a>{% endblock %}

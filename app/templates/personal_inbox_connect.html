@@ -1,0 +1,16 @@
+{% extends "app_base.html" %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">Your personal connections</p><h1>Messenger &amp; LinkedIn</h1>
+<p>Connect your accounts once, then read and reply from Growth HQ.</p></div><a class="btn btn-secondary" href="/inbox">Back to inbox</a></div>
+<div class="card"><h2>Your desktop connector</h2>
+<p>The free Beeper on-device engine and Growth HQ connector need to be running on your PC. Keep it awake to receive new chats and send replies.</p>
+{% if not configured %}<p>The desktop connector is not configured yet.</p>{% elif not catalog.seen_at %}<p>Waiting for your desktop connector to check in.</p>
+{% else %}<p>Last check-in: {{ catalog.seen_at }} UTC.</p>{% endif %}
+<p>Sign into Messenger and LinkedIn using on-device connections in Beeper. No paid trial or Plus plan is needed for these two accounts. Select the accounts below after they appear.</p>
+</div>
+{% for a in catalog.accounts %}<form method="post" action="/inbox/connect" class="card" style="margin-top:1rem;padding:1.25rem">
+<h2>{{ a.label }}</h2><p>{{ a.channel }} · {{ a.status }}</p><input type="hidden" name="account_key" value="{{ a.key }}">
+<label>Default business <select name="brand">{% for key,name in brands.items() %}<option value="{{ key }}"{% if a.brand == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<label><input type="checkbox" name="enabled" value="true"{% if a.enabled %} checked{% endif %}> Show and sync this account in my Growth HQ inbox</label>
+<button class="btn btn-primary" type="submit">Save account</button></form>{% else %}<p>No personal accounts have been discovered yet.</p>{% endfor %}
+{% endblock %}

@@ -77,6 +77,7 @@ os.environ["SECURE_COOKIES"] = "0"       # TestClient speaks plain http; a Secur
 os.environ["ADMIN_EMAIL"] = ADMIN_EMAIL
 os.environ["ADMIN_PASSWORD"] = ADMIN_PASSWORD
 os.environ["CONNECTORS_DRY_RUN"] = "1"
+os.environ["GHQ_INBOX_ACCOUNTS"] = "[]"  # no real inbox is reachable from a test
 for _key in ("PP_SERVICE_TOKEN", "ORDRIS_PARTNER_TOKEN", "KP_PARTNER_TOKEN", "HNH_PARTNER_TOKEN"):
     os.environ[_key] = f"test-{_key.lower()}"
 # The growth credentials are blanked for the same reason: a developer's real key must never reach a test. Tests that
