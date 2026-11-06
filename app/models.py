@@ -258,6 +258,26 @@ class AppSetting(Base):
     updated_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
 
 
+class InboxReply(Base):
+    """One deliberate owner reply; an interrupted provider call is never retried automatically."""
+    __tablename__ = "inbox_replies"
+    __table_args__ = (
+        CheckConstraint("state IN ('calling','accepted','bridge_accepted','rejected','outcome_unknown')", name="ck_inbox_reply_state"),
+        Index("ix_inbox_reply_thread", "account_key", "thread_sha256", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    account_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    binding_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    thread_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(500))
+    reason: Mapped[str | None] = mapped_column(String(60))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class KeywordDelivery(Base):
     """Distinct-source group request/outbox, not a canonical verified CRM contact."""
     __tablename__ = "whatsapp_keyword_deliveries"

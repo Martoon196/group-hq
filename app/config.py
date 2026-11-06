@@ -15,6 +15,9 @@ APP_DIR = Path(__file__).resolve().parent
 
 # Dedicated group adapter only. Never reuse the read-only Relaunch72 bridge token.
 WHATSAPP_KEYWORD_ADAPTER_SECRET = os.environ.get("WHATSAPP_KEYWORD_ADAPTER_SECRET", "")
+# Explicit inbox account/brand mappings; credential values live in GHQ_INBOX_* env settings.
+# Do not reuse ZERNIO_API_KEY, which is the growth collector's read-only credential.
+GHQ_INBOX_ACCOUNTS = os.environ.get("GHQ_INBOX_ACCOUNTS", "[]")
 
 
 def _bool(name: str, default: bool) -> bool:

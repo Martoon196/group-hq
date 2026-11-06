@@ -2,7 +2,7 @@ name: Group HQ tests
 
 on:
   push:
-    branches: [codex/ghq-wa-pairing-20261106]
+    branches: [codex/ghq-wa-pairing-20261106, codex/ghq-unified-inbox-20261106]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -47,6 +47,8 @@ jobs:
         run: |
           alembic upgrade 0008_mentee_earnings
           alembic upgrade head
-          python -c "from app import migrate; assert migrate.current_revision() == migrate.head_revision() == '0010_whatsapp_keywords'"
+          python -c "from app import migrate; assert migrate.current_revision() == migrate.head_revision() == '0011_unified_inbox'"
+      - name: Check inbox transports without provider calls
+        run: python -m unittest discover -s unit_checks -p inbox_providers.py -v
       - name: Run exact source suite
         run: pytest -q
