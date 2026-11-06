@@ -19,7 +19,10 @@ over and erase previously cached history. Full archival pagination is not built.
 `sendOnce`) and reuses Growth HQ's HMAC ingestion, owner access, durable reply
 queue and canonical Relaunch72 CRM. Native and Beeper workers have distinct
 discovery and queue namespaces; default legacy calls remain Beeper-scoped.
-The initial private allowlist contains exactly the owner's two chosen threads.
+The private allowlist supports at most three explicitly chosen threads.
+An optional `textOnly: true` descriptor omits unsupported attachment/edited rows,
+marks that window incomplete and skips an entirely unsupported window without
+overwriting history. Native identities are still checked before filtering.
 No other inbox is imported. The actual configuration and histories stay outside
 Git. Additional channels need independent identity/history/send/receipt proof;
 the contract is reusable, not an implementation of every social network.
@@ -36,7 +39,7 @@ Install with `npm ci --ignore-scripts`. Set `GHQ_NATIVE_DATA_DIR` to a private
 absolute directory, `GHQ_NATIVE_BROWSER_PATH` to the installed official Edge
 binary, `GHQ_NATIVE_CONFIG` to a private JSON file, and
 `GHQ_INBOX_PERSONAL_SECRET` to the existing authorised local adapter key.
-The JSON contains `ownerUserId` and a `threads` array of exactly two objects
+The JSON contains `ownerUserId` and a `threads` array of one to three objects
 with `threadId`, `participantId`, `name`. Do not commit these values or secrets.
 
 Run `node login.cjs`. Open the URL saved in the private directory's

@@ -13,6 +13,19 @@ test('sender mismatch rejected instead of guessing direction',()=>{const a=fixtu
 test('unsupported dates and DST ambiguity rejected',()=>{assert.throws(()=>displayedTime('4 Nov at tea time','2026-11-06T19:00:00Z','Europe/London'));assert.throws(()=>displayedTime('Sunday 01:30','2026-10-25T12:00:00Z','Europe/London'));assert.throws(()=>displayedTime('Today 23:59','2026-11-06T19:00:00Z','Europe/London'));});
 test('virtualised or absent introduction remains a partial window',()=>{assert.equal(normalise({...fixture(),virtualised:true},expected,binding).thread.has_more,true);assert.equal(normalise({...fixture(),introductionVisible:false},expected,binding).thread.has_more,true);assert.equal(normalise(fixture(),expected,binding).thread.has_more,false);});
 test('empty or oversized windows cannot overwrite historic evidence',()=>{assert.throws(()=>normalise({...fixture(),messages:[]},expected,binding));assert.throws(()=>normalise({...fixture(),messages:Array(101).fill(fixture().messages[0])},expected,binding));});
+test('explicit text-only window retains text and marks omitted attachment/edited rows incomplete',()=>{
+  const observed=fixture();observed.messages.push({id:'98765@msgr.123456791',label:null,heading:'Example'},{id:'98765@msgr.123456792',label:'At Today 18:00, Example: Edited text',heading:'ExampleEdited'});
+  const packet=normalise(observed,{...expected,textOnly:true},binding);
+  assert.equal(packet.thread.messages.length,2);assert.equal(packet.thread.has_more,true);assert.equal(packet.evidence.omitted_rows,2);
+  assert.throws(()=>normalise(observed,expected,binding));
+});
+test('all-omitted text-only window is skipped instead of replacing history',()=>{
+  assert.equal(normalise({...fixture(),messages:[{id:'98765@msgr.123456791',label:null,heading:'Example'}]},{...expected,textOnly:true},binding),null);
+});
+test('text-only filtering never hides a foreign message identity',()=>{
+  const observed=fixture();observed.messages.push({id:'11111@msgr.123456791',label:null,heading:'Example'});
+  assert.throws(()=>normalise(observed,{...expected,textOnly:true},binding),/invalid_message_identity/);
+});
 test('browser navigation restricted to real Facebook HTTPS hosts',()=>{assert.equal(allowedUrl('https://www.facebook.com/messages/'),true);for(const url of ['http://www.facebook.com/','https://facebook.com.evil.test/','file:///tmp/a','https://127.0.0.1/'])assert.equal(allowedUrl(url),false);});
 test('remote controls bounded and no arbitrary command/evaluate surface',()=>{assert.equal(validateAction({action:'key',key:'Enter'}).key,'Enter');for(const v of [{action:'eval',text:'x'},{action:'click',x:-1,y:0},{action:'type',text:'a'.repeat(2001)},{action:'key',key:'Control+L'},{action:'navigate',url:'https://evil.test'}])assert.throws(()=>validateAction(v));});
 test('connection page JavaScript parses',()=>{new (require('node:vm').Script)(client);});

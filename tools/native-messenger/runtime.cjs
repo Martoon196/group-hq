@@ -88,7 +88,7 @@ async function settle(cloud,state){
   }
 }
 async function run({context,identity,directory,setStatus,isPaused,secret,threads}){
-  if(!Array.isArray(threads)||threads.length!==2||threads.some(t=>!/^\d+$/.test(t.threadId)||!/^\d+$/.test(t.participantId)))throw Error('named_thread_allowlist_required');
+  if(!Array.isArray(threads)||threads.length<1||threads.length>3||threads.some(t=>!/^\d+$/.test(t.threadId)||!/^\d+$/.test(t.participantId)))throw Error('named_thread_allowlist_required');
   const adapter=new MessengerAdapter(context,identity,threads),cloud=new GrowthHqClient(secret);
   const state=await openAuthState(path.join(directory,'journal'),{BufferJSON:{},initAuthCreds:()=>({deliveries:{}})});
   let stopped=false;context.on('close',()=>{stopped=true;});
@@ -105,12 +105,12 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
       if(!binding.enabled){setStatus('Facebook connected. Choose Key Properties UK and enable this account in Growth HQ → Inbox → Connections.');await sleep(10000);continue;}
       await settle(cloud,state);
       const counts=[];
-      for(const target of threads){const packet=await adapter.observe(target.threadId,binding);await cloud.request('threads',{connector_id:CONNECTOR,...packet});counts.push({threadId:target.threadId,count:packet.thread.messages.length,hasMore:packet.thread.has_more});}
+      for(const target of threads){const packet=await adapter.observe(target.threadId,binding);if(!packet){counts.push({threadId:target.threadId,count:0,skipped:'no_supported_text'});continue;}await cloud.request('threads',{connector_id:CONNECTOR,...packet});counts.push({threadId:target.threadId,count:packet.thread.messages.length,hasMore:packet.thread.has_more});}
       if(isPaused())continue;
       const pending=await cloud.request('pending',{connector_id:CONNECTOR});
       for(const id of pending.reply_ids??[]){if(isPaused())break;await dispatch(adapter,cloud,state,binding,id,isPaused);}
       const result={at:new Date().toISOString(),state:'connected',counts};await fs.writeFile(statusFile,JSON.stringify(result),{mode:0o600});
-      setStatus('Connected. Sabir and Emma are syncing to Growth HQ. Replies use this Facebook account.');
+      setStatus('Connected. Your selected conversations are syncing to Growth HQ. Replies use this Facebook account.');
     }catch(error){
       const reason=/^[a-z_]+$/.test(error.message)?error.message:'connection_needs_attention';
       await fs.writeFile(statusFile,JSON.stringify({at:new Date().toISOString(),state:'attention_required',reason}),{mode:0o600});

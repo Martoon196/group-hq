@@ -55,9 +55,20 @@ function normalise(observed, expected, binding) {
   if(binding.channel!=='facebook'||!/^[0-9]+$/.test(binding.user_id)||binding.account_id!==`facebook-web:${binding.user_id}`)throw Error('wrong_account_binding');
   if(!Array.isArray(observed.messages)||observed.messages.length===0||observed.messages.length>100)throw Error('unsupported_message_window');
   const ids=new Set();
-  const messages=observed.messages.map(m=>{
+  for(const m of observed.messages){
     if(typeof m.id!=='string'||!m.id.startsWith(expected.participantId+'@msgr.')||!/^\d+@msgr\.\d+$/.test(m.id)||ids.has(m.id))throw Error('invalid_message_identity');
     ids.add(m.id);
+  }
+  const selected=expected.textOnly===true?observed.messages.filter(m=>{
+    if(typeof m.label!=='string'||m.label.length>22000)return false;
+    const parsed=m.label.match(/^At (.+?), ([^:]+): ([\s\S]+)$/);
+    return !!parsed&&(m.heading==='You sent'?parsed[2]==='You':parsed[2]===m.heading&&expected.name.split(' ').includes(m.heading));
+  }):observed.messages;
+  // A text-only account may have only attachments in its current window.
+  // Do not replace any cached history with an empty snapshot.
+  if(!selected.length)return null;
+  const omitted=observed.messages.length-selected.length;
+  const messages=selected.map(m=>{
     if(typeof m.label!=='string'||m.label.length>22000)throw Error('invalid_message_label');
     const parsed=m.label.match(/^At (.+?), ([^:]+): ([\s\S]+)$/);
     if(!parsed)throw Error('unsupported_message');
@@ -71,7 +82,7 @@ function normalise(observed, expected, binding) {
   if(messages.some((m,i)=>i&&m.occurred_at<messages[i-1].occurred_at))throw Error('nonchronological_window');
   return {account_key:binding.key,account_id:binding.account_id,user_id:binding.user_id,observed_at:observed.observedAt,
     thread:{id:expected.threadId,participant_id:expected.participantId,name:expected.name,preview:messages.at(-1).body,
-      updated_at:messages.at(-1).occurred_at,is_group:false,is_merged:false,messages,has_more:observed.introductionVisible!==true||observed.virtualised===true},
-    evidence:{transport:'growth-hq-browser',history:'rendered_window',time_precision:'minute',composer_ready:observed.composerReady===true}};
+      updated_at:messages.at(-1).occurred_at,is_group:false,is_merged:false,messages,has_more:omitted>0||observed.introductionVisible!==true||observed.virtualised===true},
+    evidence:{transport:'growth-hq-browser',history:'rendered_window',omitted_rows:omitted,time_precision:'minute',composer_ready:observed.composerReady===true}};
 }
 module.exports={readConversation,normalise,displayedTime};
