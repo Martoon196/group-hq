@@ -1,6 +1,8 @@
 name: Group HQ tests
 
 on:
+  push:
+    branches: [codex/ghq-wa-pairing-20261106]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -13,7 +15,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test tools/whatsapp-keywords/test.cjs
+      - run: npm ci --prefix tools/whatsapp-keywords --ignore-scripts --no-audit --no-fund
+      - run: node --test tools/whatsapp-keywords/test.cjs tools/whatsapp-keywords/socket.test.cjs
   postgres-suite:
     runs-on: ubuntu-latest
     services:

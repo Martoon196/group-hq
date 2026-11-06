@@ -43,27 +43,29 @@ async function saveJson(file, value) {
 }
 
 async function main() {
-  const {Client, LocalAuth} = require('whatsapp-web.js');
-  const qr = require('qrcode-terminal');
+  const {SocketClient} = require('./socket-client.cjs');
+  const {createPairingPage} = require('./pairing-page.cjs');
   const root = path.resolve(process.env.GHQ_WA_DATA_DIR || path.join(__dirname, 'data'));
   const spool = path.join(root, 'events'), outcomes = path.join(root, 'outcomes');
   await fs.mkdir(spool,{recursive:true,mode:0o700}); await fs.mkdir(outcomes,{recursive:true,mode:0o700});
   const api = makeApi({origin:process.env.GHQ_BASE_URL || 'https://group-hq.onrender.com',
                        secret:process.env.WHATSAPP_KEYWORD_ADAPTER_SECRET || ''});
   const expectedNumber = process.env.GHQ_WA_LISTENER_NUMBER;
+  const pairOnly = process.env.GHQ_WA_PAIR_ONLY === 'true';
   if (!listenerMatches(String(expectedNumber) + '@c.us', expectedNumber)) throw Error('Set the selected listening number privately');
   let snapshot = {revision:0, listenerId:LISTENER, rules:[]}, ready = false, busy = false, groupsAt = 0;
-  const client = new Client({authStrategy:new LocalAuth({dataPath:path.join(root, 'session')}), puppeteer:{headless:true}});
+  const client = new SocketClient({dataPath:path.join(root,'socket-session'),expectedNumber,pairOnly});
+  const pairing = await createPairingPage(path.dirname(root));
   const note = message => console.log(new Date().toISOString(), message); // No message bodies, phone numbers, tokens or provider errors.
-  client.on('qr', value => { note('Scan here with WhatsApp > Settings > Linked devices. Keep this QR private.'); qr.generate(value,{small:true}); });
-  client.on('auth_failure', () => {ready=false; note('WhatsApp sign-in needs attention.');});
-  client.on('disconnected', () => {ready=false; note('WhatsApp disconnected. Check Linked devices.');});
+  client.on('qr', value => {void pairing.showQr(value).catch(()=>{pairing.setStatus('error');});note('A fresh QR is available on the private Codex pairing page.');});
+  client.on('auth_failure', () => {ready=false;pairing.setStatus('error'); note('WhatsApp sign-in needs attention.');});
+  client.on('disconnected', () => {ready=false;pairing.setStatus('reconnecting'); note('WhatsApp reconnecting.');});
   client.on('ready', () => {
     if (!listenerMatches(client.info?.wid?._serialized, expectedNumber)) {
       ready=false; note('This is not the selected group-listening account. Disconnecting without reading groups or sending.');
       void client.destroy(); return;
     }
-    ready=true; note('WhatsApp linked. Waiting for Growth HQ rules and deliberately selected groups.');
+    ready=true;pairing.setStatus('connected'); note('WhatsApp linked. Waiting for Growth HQ rules and deliberately selected groups.');
   });
 
   const phoneOf = async senderId => {
@@ -74,7 +76,7 @@ async function main() {
   };
   client.on('message', async msg => {
     try {
-      if (!ready || msg.fromMe || typeof msg.body !== 'string') return;
+      if (pairOnly || !ready || msg.fromMe || typeof msg.body !== 'string') return;
       const observedAt = new Date(Number(msg.timestamp)*1000).toISOString();
       let payload;
       if (msg.from?.endsWith('@g.us')) {
@@ -105,7 +107,7 @@ async function main() {
   });
 
   async function drain() {
-    if (!ready || busy) return; busy=true;
+    if (pairOnly || !ready || busy) return; busy=true;
     try {
       snapshot = await api('GET','rules');
       if (Date.now()-groupsAt > 300000) {
@@ -151,9 +153,10 @@ async function main() {
     finally {busy=false;}
   }
   const timer=setInterval(()=>void drain(),5000);
-  const stop=async()=>{clearInterval(timer);ready=false;await client.destroy().catch(()=>{});process.exit(0);};
+  const stop=async()=>{clearInterval(timer);ready=false;await client.destroy().catch(()=>{});await pairing.close();process.exit(0);};
   process.on('SIGTERM',stop);process.on('SIGINT',stop);
-  await client.initialize();
+  note('Private pairing page ready. No external browser is needed.');
+  try {await client.initialize();}catch(error){pairing.setStatus('error');clearInterval(timer);await client.destroy().catch(()=>{});throw error;}
 }
 
 if (require.main===module) main().catch(()=>{console.error('Listener could not start. Check its private configuration.');process.exitCode=1;});
