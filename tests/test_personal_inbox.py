@@ -54,6 +54,20 @@ def test_private_accounts_cache_and_tickets_are_owner_bound(admin_client, db, pe
     assert error.value.status_code == 409
 
 
+def test_selected_facebook_cloud_transport_keeps_native_owner_binding(admin_client, db, personal_account):
+    user, account, _ = personal_account
+    result = personal.discover(db, {"accounts": [{"channel": "facebook", "account_id": account.account_id, "user_id": "me",
+        "engine_provider": "cloud", "status": "connected", "label": "Martin personal Messenger"}]})
+    assert result["accounts"][0]["key"] == account.key
+    assert result["accounts"][0]["enabled"] is True
+    assert personal.catalog(db)["accounts"][0]["engine_provider"] == "cloud"
+    assert "Beeper cloud connection" in admin_client.get("/inbox/connect").text
+    with pytest.raises(HTTPException) as error:
+        personal.discover(db, {"accounts": [{"channel": "facebook", "account_id": account.account_id,
+            "user_id": "someone-else", "engine_provider": "cloud", "status": "connected"}]})
+    assert error.value.status_code == 409
+
+
 def test_adapter_hmac_is_exact_body_and_path_bound(client, db, personal_account):
     _, account, _ = personal_account
     path, raw, headers = signed("accounts", {"accounts": []})

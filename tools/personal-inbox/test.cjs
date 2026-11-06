@@ -7,6 +7,14 @@ const account={accountID:'account-1',user:{id:'me'},bridge:{type:'facebook',prov
 const chat={id:'native-chat',accountID:'account-1',type:'single',title:'Durham contact',participants:{items:[{id:'me',isSelf:true},{id:'peer'}],hasMore:false}};
 const json=value=>new Response(JSON.stringify(value),{status:200});
 const journal=()=>({state:{creds:{deliveries:{}}},saveCreds:async()=>{}});
+test('the owner-connected Facebook cloud account is available through the local authenticated engine',async()=>{
+  const personal={...account,bridge:{type:'facebookgo',provider:'cloud'}};
+  const other={...account,accountID:'matrix',bridge:{type:'matrix',provider:'cloud'}};
+  const engine=new EngineClient('private',async()=>json([personal,other]));
+  assert.deepEqual((await engine.accounts()).map(a=>a.accountID),[binding.account_id]);
+  assert.equal((await engine.boundAccount(binding)).bridge.provider,'cloud');
+  await assert.rejects(engine.boundAccount({...binding,user_id:'someone-else'}),/account_not_ready/);
+});
 test('a wrong-account or merged conversation cannot be sent to',async()=>{
   for(const invalid of [{...chat,accountID:'other'},{...chat,merge:{}}]){
     let writes=0;const engine=new EngineClient('private',async(url,opts)=>{if(opts.method==='POST')writes++;return json(url.endsWith('/accounts')?[account]:invalid);});

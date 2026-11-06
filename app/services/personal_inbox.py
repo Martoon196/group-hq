@@ -76,8 +76,8 @@ def discover(db, data):
     result, seen = [], set()
     for row in rows:
         if (not isinstance(row, dict) or row.get("channel") not in ("facebook", "linkedin")
-                or row.get("engine_provider") not in ("local", "self-hosted", "platform-sdk")):
-            problem("Only the selected on-device personal connections are supported")
+                or row.get("engine_provider") not in ("local", "cloud", "self-hosted", "platform-sdk")):
+            problem("Only the selected personal connections are supported")
         native, user_id = opaque(row.get("account_id")), opaque(row.get("user_id"))
         key = "personal-" + hashlib.sha256((row["channel"] + "\0" + native).encode()).hexdigest()[:24]
         if key in seen:
@@ -88,6 +88,7 @@ def discover(db, data):
             problem("Personal account identity changed", 409)
         result.append({"key": key, "provider": "local", "account_id": native, "user_id": user_id,
             "channel": row["channel"], "label": clean(row.get("label") or row["channel"], 200),
+            "engine_provider": row["engine_provider"],
             "brand": previous.get("brand", "group") if previous else "group", "owner_email": user.email,
             "credential_env": "GHQ_INBOX_PERSONAL_SECRET", "can_reply": True,
             "enabled": previous.get("enabled", False) if previous else False,

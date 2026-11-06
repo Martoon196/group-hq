@@ -19,7 +19,7 @@ class EngineClient {
   }
   async accounts(){
     const rows=await this.request('/v1/accounts');if(!Array.isArray(rows))throw Error('invalid_accounts');
-    return rows.filter(a=>channel(a)&&['local','self-hosted','platform-sdk'].includes(a.bridge?.provider)).map(a=>{
+    return rows.filter(a=>channel(a)&&['local','cloud','self-hosted','platform-sdk'].includes(a.bridge?.provider)).map(a=>{
       opaque(a.accountID);opaque(a.user?.id);return a;
     });
   }
