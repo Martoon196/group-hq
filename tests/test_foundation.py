@@ -15,7 +15,7 @@ from tests.conftest import ADMIN_EMAIL, session
 
 
 def test_database_is_at_head():
-    assert migrate.current_revision() == migrate.head_revision() == "0010_whatsapp_keywords"
+    assert migrate.current_revision() == migrate.head_revision() == "0011_unified_inbox"
 
 
 def test_grants_is_mounted_and_needs_a_login(client):
