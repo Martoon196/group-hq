@@ -258,6 +258,69 @@ class AppSetting(Base):
     updated_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
 
 
+class InboxReply(Base):
+    """One deliberate owner reply; an interrupted provider call is never retried automatically."""
+    __tablename__ = "inbox_replies"
+    __table_args__ = (
+        CheckConstraint("state IN ('queued','calling','accepted','bridge_accepted','rejected','outcome_unknown')", name="ck_inbox_reply_state"),
+        Index("ix_inbox_reply_thread", "account_key", "thread_sha256", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    account_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    binding_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    thread_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    thread_id: Mapped[str | None] = mapped_column(String(500))
+    body: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(500))
+    reason: Mapped[str | None] = mapped_column(String(60))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class InboxThread(Base):
+    """Owner-only personal connection cache. Not a CRM contact or consent assertion."""
+    __tablename__ = "inbox_threads"
+    account_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    thread_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    binding_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    thread_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    participant_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    preview: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_updated_at: Mapped[str] = mapped_column(String(100), nullable=False)
+    messages: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    has_more: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class InboxCrmLink(Base):
+    """Canonical Relaunch72 references; no duplicate people register."""
+    __tablename__ = "inbox_crm_links"
+    account_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    thread_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    brand: Mapped[str] = mapped_column(String(8), primary_key=True)
+    account_identity_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    participant_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    contact_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    last_error: Mapped[str | None] = mapped_column(String(400))
+
+
+class InboxCrmActivityReceipt(Base):
+    __tablename__ = "inbox_crm_activity_receipts"
+    account_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    thread_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    brand: Mapped[str] = mapped_column(String(8), primary_key=True)
+    message_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
 class KeywordDelivery(Base):
     """Distinct-source group request/outbox, not a canonical verified CRM contact."""
     __tablename__ = "whatsapp_keyword_deliveries"

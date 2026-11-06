@@ -1,0 +1,7 @@
+{% extends "app_base.html" %}
+{% block content %}<h1>Link an existing contact</h1><p>{{ conversation_name }} · {{ brands.get(crm_brand,crm_brand) }}</p>
+{% if search_error %}<p class="flash flash-err">{{ search_error }}</p>{% endif %}
+{% for match in matches %}<form method="post" action="/inbox/crm" class="card" style="padding:1rem;margin:1rem 0">
+<input type="hidden" name="thread_ticket" value="{{ thread_ticket }}"><input type="hidden" name="brand" value="{{ crm_brand }}">
+<input type="hidden" name="contact_id" value="{{ match.id }}"><p>{{ match.name }}</p><button class="btn btn-primary" type="submit">Link this contact</button></form>
+{% else %}<p>No matching contacts returned.</p>{% endfor %}<a class="btn btn-secondary" href="/inbox?thread={{ thread_ticket|urlencode }}">Back to conversation</a>{% endblock %}
