@@ -38,12 +38,12 @@ async function discover(context,query){
     const peerPage=await context.newPage();
     try{
       for(const row of found.values()){
-        row.participantId='';row.textOnly=true;row.reason='';
-        if(!row.encrypted){row.reason='This Messenger conversation format needs support.';continue;}
+        row.participantId='';row.textOnly=true;row.reason='';row.threadKind=row.encrypted?'e2ee':'page';
         try{
           await peerPage.goto(row.url,{waitUntil:'domcontentloaded',timeout:20000});
           await peerPage.waitForFunction(readPeer,row.name,{timeout:10000});
           row.participantId=await peerPage.evaluate(readPeer,row.name);
+          if(row.threadKind==='page'&&row.participantId!==row.threadId)row.reason='This non-Page conversation format needs support.';
         }catch{row.reason='Messenger has not supplied a verified participant yet. Search again after history restores.';}
       }
     }finally{await peerPage.close();}
@@ -54,7 +54,8 @@ async function discover(context,query){
 function validateTargets(rows){
   if(!Array.isArray(rows)||rows.length>100)throw Error('invalid_selection');
   const seen=new Set();
-  for(const t of rows){if(!/^\d+$/.test(t.threadId)||!/^\d+$/.test(t.participantId)||typeof t.name!=='string'||!t.name.trim()||t.name.length>500||seen.has(t.threadId))throw Error('invalid_selection');seen.add(t.threadId);}
+  for(const t of rows){if(!/^\d+$/.test(t.threadId)||!/^\d+$/.test(t.participantId)||!['e2ee','page'].includes(t.threadKind??'e2ee')||
+    (t.threadKind==='page'&&t.participantId!==t.threadId)||typeof t.name!=='string'||!t.name.trim()||t.name.length>500||seen.has(t.threadId))throw Error('invalid_selection');seen.add(t.threadId);}
   return rows;
 }
 module.exports={discover,readSearch,readPeer,validateTargets};

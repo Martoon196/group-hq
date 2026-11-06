@@ -4,7 +4,7 @@ const {createHash}=require('node:crypto');
 // internals, undocumented network endpoints or encryption keys are accessed.
 function readConversation(expected) {
   const url = new URL(location.href);
-  const match = url.pathname.match(/^\/messages\/e2ee\/t\/(\d+)\/?$/);
+  const match = url.pathname.match(expected.threadKind==='page'?/^\/messages\/t\/(\d+)\/?$/:/^\/messages\/e2ee\/t\/(\d+)\/?$/);
   if (url.origin !== 'https://www.facebook.com' || !match || match[1] !== expected.threadId) throw Error('wrong_thread');
   const logs = [...document.querySelectorAll('[role="log"]')].filter(e => e.getAttribute('aria-label') === `Messages in conversation with ${expected.name}`);
   if (logs.length !== 1) throw Error('conversation_not_ready');
@@ -56,7 +56,10 @@ function normalise(observed, expected, binding) {
   if(!Array.isArray(observed.messages)||observed.messages.length===0||observed.messages.length>100)throw Error('unsupported_message_window');
   const ids=new Set();
   for(const m of observed.messages){
-    if(typeof m.id!=='string'||!m.id.startsWith(expected.participantId+'@msgr.')||!/^\d+@msgr\.\d+$/.test(m.id)||ids.has(m.id))throw Error('invalid_message_identity');
+    const valid=expected.threadKind==='page'?
+      expected.threadId===expected.participantId&&/^mid\.\$[A-Za-z0-9_-]{1,200}$/.test(m.id):
+      typeof m.id==='string'&&m.id.startsWith(expected.participantId+'@msgr.')&&/^\d+@msgr\.\d+$/.test(m.id);
+    if(typeof m.id!=='string'||!valid||ids.has(m.id))throw Error('invalid_message_identity');
     ids.add(m.id);
   }
   const selected=expected.textOnly===true?observed.messages.filter(m=>{

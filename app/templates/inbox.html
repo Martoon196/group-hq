@@ -74,7 +74,7 @@
       <form method="get" action="/inbox/crm/search" style="margin-top:1rem"><input type="hidden" name="thread" value="{{ thread_ticket }}">
       <label>Business <select name="brand">{% for key,name in brands.items() %}<option value="{{ key }}"{% if key == account.brand %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
       <label>Find existing contact <input name="q" required maxlength="200"></label><button class="btn btn-secondary" type="submit">Search CRM</button></form>
-      <p>Add the same person to another brand here whenever it is relevant. Linking marks this as a business conversation; messages are copied only when selected. It does not subscribe anyone to marketing.</p>
+      <p>Add the same person to another brand whenever it is relevant. Personal conversations stay Personal and do not copy messages. For Business conversations, messages are copied only to the CRMs you select. Linking does not subscribe anyone to marketing.</p>
     {% else %}<p>CRM connection needs setting up. No contact or consent has been created.</p>{% endif %}</aside>
   {% else %}<h2>Choose a conversation</h2><p>Your reply will use that conversation’s original account and channel.</p>{% endif %}
   </section>

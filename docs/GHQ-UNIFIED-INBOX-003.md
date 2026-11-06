@@ -8,6 +8,10 @@ Native discovery searches rendered Messenger UI and resolves one native particip
 
 ## Validation and cutover
 
+Review corrections: short versioned setting keys fit the existing80-character column; local CRM link and message-copy choice commit atomically; adding another brand preserves Personal classification. A signed deselected conversation cannot dispatch a queued reply. An explicitly opened official-provider conversation now reuses the same idempotent CRM activity projection, gated by the chosen brand's copy setting; this is not unattended provider polling.
+
+Observed coverage correction: Dave Buys Houses uses the standard Page conversation path and native `mid.$…` IDs. Astra approved its bounded reader support under explicit `threadKind=page`, matching numeric thread/profile identity, with E2EE identity checks retained. Changed area -> Page/native-ID focused test and exactCI supersession -> estimated10minutes. No additional send test.
+
 1. Run focused native/personal connector checks and exact-source Postgres CI, including selection/account isolation, personal projection gating, two-brand links and no-copy defaults.
 2. Review exact source and CI; publish Group HQ through the Git database REST publisher. Deploy app first, preserving existing environment settings. Its endpoints retain the existing connector protocol during cutover.
 3. Verify `/healthz`, owner inbox, classifications and discovery page. Stop only the native Messenger helper, preserving its encrypted profile and journal; start the new helper against the same private directory and saved owner identity. Keep WhatsApp listener untouched.

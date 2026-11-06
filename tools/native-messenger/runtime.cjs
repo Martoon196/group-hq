@@ -23,7 +23,7 @@ class MessengerAdapter {
   async page(threadId){
     const target=this.target(threadId);let page=this.pages.get(threadId);
     if(!page||page.isClosed()){page=await this.context.newPage();this.pages.set(threadId,page);}
-    const expected=`https://www.facebook.com/messages/e2ee/t/${target.threadId}`;
+    const expected=`https://www.facebook.com/messages/${target.threadKind==='page'?'':'e2ee/'}t/${target.threadId}`;
     if(page.url().replace(/\/$/,'')!==expected)await page.goto(expected,{waitUntil:'domcontentloaded',timeout:30000});
     // Messenger renders the log before its participant header on reload.
     // Wait for both native identity signals; the collector still validates

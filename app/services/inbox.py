@@ -31,12 +31,16 @@ MESSAGES = {
 }
 
 
+def account_brand_key(account):
+    return "inbox.brand.v1." + account.identity
+
+
 def accounts(db=None):
     result = list(load_accounts(config.GHQ_INBOX_ACCOUNTS, os.environ))
     if db is not None:
         from dataclasses import replace
         for index, account in enumerate(result):
-            setting = db.get(AppSetting, "inbox.account.brand." + account.identity)
+            setting = db.get(AppSetting, account_brand_key(account))
             if setting and setting.value.get("brand") in BRANDS:
                 result[index] = replace(account, brand=setting.value["brand"])
     if db is not None:

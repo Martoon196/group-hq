@@ -103,7 +103,6 @@ def connect(db, user, thread_ticket, brand, display_name, contact_id="", copy_me
         contact_id=result["contactId"], workspace_id=result["workspaceId"], user_id=user.id, created_at=utcnow())
         .values(account_identity_sha256=account.identity, participant_id=origin["participantId"])
         .on_conflict_do_nothing(index_elements=[InboxCrmLink.account_key, InboxCrmLink.thread_sha256, InboxCrmLink.brand]))
-    db.commit()
     from . import inbox_organisation
     settings = inbox_organisation.choices(db, user.id, account, bound["thread"], links(db, account, bound["thread"]))
     # Newly added brands require an explicit message-copy choice from the UI.
@@ -112,7 +111,9 @@ def connect(db, user, thread_ticket, brand, display_name, contact_id="", copy_me
         syncing.add(brand)
     else:
         syncing.discard(brand)
-    inbox_organisation.save(db, user, account, bound["thread"], "business",
+    # Commit local link + projection choice together. A background importer
+    # must never observe a new link before the unchecked copy choice exists.
+    inbox_organisation.save(db, user, account, bound["thread"], "personal" if settings["kind"] == "personal" else "business",
         set(settings["brands"]) | {brand}, syncing, settings["note"])
     # Contacts/points are created only by Relaunch72; cache IDs here only after its confirmed response.
     return result
@@ -172,5 +173,25 @@ def sync_thread(account_key, thread_sha256, user_id):
         except CrmUnavailable as error:
             db.rollback()
             for link in links(db, account, cached.thread_id):
+                link.last_error = str(error)[:400]
+            db.commit()
+
+
+def sync_official_window(account_key, binding, thread_id, user_id, messages):
+    """Project an explicitly opened official conversation through existing CRM links."""
+    from ..db import SessionLocal
+    from ..models import User
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        if user is None or not user.is_active:
+            return
+        account = next((a for a in inbox.accounts(db) if a.key == account_key), None)
+        if account is None or account.provider == 'local' or account.binding != binding or (account.owner_email and account.owner_email != user.email):
+            return
+        try:
+            record_messages(db, user, account, thread_id, messages)
+        except CrmUnavailable as error:
+            db.rollback()
+            for link in links(db, account, thread_id):
                 link.last_error = str(error)[:400]
             db.commit()

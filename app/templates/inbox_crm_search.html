@@ -3,5 +3,5 @@
 {% if search_error %}<p class="flash flash-err">{{ search_error }}</p>{% endif %}
 {% for match in matches %}<form method="post" action="/inbox/crm" class="card" style="padding:1rem;margin:1rem 0">
 <input type="hidden" name="thread_ticket" value="{{ thread_ticket }}"><input type="hidden" name="brand" value="{{ crm_brand }}">
-<input type="hidden" name="contact_id" value="{{ match.id }}"><p>{{ match.name }}</p><p>Linking marks this conversation as business. It does not create marketing consent.</p><label><input type="checkbox" name="copy_messages" value="true"> Also copy this conversation’s available messages and future messages to this brand’s CRM</label><button class="btn btn-primary" type="submit">Link this contact</button></form>
+<input type="hidden" name="contact_id" value="{{ match.id }}"><p>{{ match.name }}</p><p>Personal conversations stay Personal and do not copy messages. Linking does not create marketing consent.</p><label><input type="checkbox" name="copy_messages" value="true"> When classified Business, copy this conversation’s available messages and future messages to this brand’s CRM</label><button class="btn btn-primary" type="submit">Link this contact</button></form>
 {% else %}<p>No matching contacts returned.</p>{% endfor %}<a class="btn btn-secondary" href="/inbox?thread={{ thread_ticket|urlencode }}">Back to conversation</a>{% endblock %}

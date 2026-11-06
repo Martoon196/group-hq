@@ -1,5 +1,6 @@
 """Owner conversation choices, independent of the source account and CRM identity."""
 import hashlib
+import json
 from fastapi import HTTPException
 from sqlalchemy.dialects.postgresql import insert
 from ..models import AppSetting, utcnow
@@ -10,7 +11,7 @@ KINDS = {"unclassified": "Unclassified", "personal": "Personal", "business": "Bu
 
 
 def key(user_id, account, thread_id):
-    return "inbox.conversation." + str(user_id) + "." + account.identity + "." + hashlib.sha256(thread_id.encode()).hexdigest()
+    return "inbox.conv.v1." + hashlib.sha256(json.dumps([user_id, account.identity, thread_id]).encode()).hexdigest()
 
 
 def choices(db, user_id, account, thread_id, links=()):

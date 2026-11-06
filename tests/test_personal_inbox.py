@@ -155,20 +155,20 @@ def test_crm_uses_signed_native_source_and_only_stores_confirmed_ids(db, persona
 def test_conversation_can_have_two_brands_without_auto_copy_and_personal_stops_projection(db, personal_account, monkeypatch, admin_client):
     from app.services import inbox_organisation as organisation
     user, account, ticket = personal_account
-    ids = {brand: (str(uuid.uuid4()), str(uuid.uuid4())) for brand in ("kp", "pp")}
+    ids = {brand: (str(uuid.uuid4()), str(uuid.uuid4())) for brand in ("kp", "pp", "mhp")}
     calls = []
     def native(actor, brand, action, **payload):
         calls.append((brand, action, payload))
         return {"brand": brand, "contactId": ids[brand][0], "workspaceId": ids[brand][1]}
     monkeypatch.setattr(inbox_crm, "command", native)
-    for brand in ids:
+    for brand in ("kp", "pp"):
         response = admin_client.post('/inbox/crm', data={"thread_ticket": ticket, "brand": brand, "display_name": "Buyer"}, follow_redirects=False)
         assert response.status_code == 303
     cached = inbox.local_thread(db, account, "durham-thread", user.id)
     assert inbox_crm.record_messages(db, user, account, "durham-thread", cached.messages) == 0
     links = inbox_crm.links(db, account, "durham-thread")
     assert len(links) == 2 and len({link.workspace_id for link in links}) == 2
-    for brand in ids:
+    for brand in ("kp", "pp"):
         assert len(inbox.snapshot(user.id, [], brand, db=db, user_email=user.email)[2]) == 1
     organisation.save(db, user, account, "durham-thread", "business", ["kp", "pp"], ["pp"])
     assert inbox_crm.record_messages(db, user, account, "durham-thread", cached.messages) == 1
@@ -180,12 +180,40 @@ def test_conversation_can_have_two_brands_without_auto_copy_and_personal_stops_p
     assert len(inbox.snapshot(user.id, [], db=db, user_email=user.email, kind='personal')[2]) == 1
     assert inbox.resolve(ticket, user.id, user.email, db)[0].account_id == account.account_id
     assert len(inbox_crm.links(db, account, "durham-thread")) == 2  # Keep history, don't delete contacts.
+    inbox_crm.connect(db, user, ticket, 'mhp', 'Buyer', copy_messages=True)
+    assert organisation.choices(db, user.id, account, 'durham-thread')['kind'] == 'personal'
+    assert inbox_crm.record_messages(db, user, account, "durham-thread", changed) == 0
 
 
 def test_unclassified_personal_account_does_not_inherit_business_filter(db, personal_account):
     user, account, ticket = personal_account
     assert inbox.snapshot(user.id, [], 'kp', db=db, user_email=user.email)[2] == []
     assert len(inbox.snapshot(user.id, [], db=db, user_email=user.email, kind='unclassified')[2]) == 1
+
+
+def test_inbox_metadata_keys_fit_real_schema_and_keep_full_owner_tuple(personal_account):
+    from app.services import inbox_organisation as organisation, inbox_discovery as discovery
+    user, account, _ = personal_account
+    keys = [organisation.key(user.id, account, 'a'*500), discovery.registry_key(user.id, account), inbox.account_brand_key(account)]
+    assert all(len(k) <= 80 for k in keys)
+    assert organisation.key(user.id, account, 'a'*500) != organisation.key(user.id, account, 'a'*499+'b')
+    assert discovery.registry_key(user.id, account) != discovery.registry_key(user.id+1, account)
+
+
+def test_new_crm_link_and_no_copy_choice_commit_together(db, personal_account, monkeypatch):
+    from app.services import inbox_organisation as organisation
+    user, account, ticket = personal_account
+    monkeypatch.setattr(inbox_crm, 'command', lambda *args, **kwargs: {'brand':'kp','contactId':str(uuid.uuid4()),'workspaceId':str(uuid.uuid4())})
+    commit = db.commit
+    observations = []
+    def checked_commit():
+        links = inbox_crm.links(db, account, 'durham-thread')
+        settings = organisation.choices(db, user.id, account, 'durham-thread', links)
+        observations.append((len(links), settings['sync_brands']))
+        commit()
+    monkeypatch.setattr(db, 'commit', checked_commit)
+    inbox_crm.connect(db, user, ticket, 'kp', 'Buyer', copy_messages=False)
+    assert observations == [(1, [])]
 
 
 def test_organisation_rejects_unlinked_copy_and_cross_owner_ticket(admin_client, db, personal_account):
@@ -240,3 +268,20 @@ def test_discovery_wrong_connector_and_unselected_import_refused(db, native_disc
     with pytest.raises(HTTPException) as error:
         personal.ingest(db, {**payload, 'thread': {'id': '1234', 'participant_id': '9876', 'is_group': False, 'is_merged': False}})
     assert error.value.status_code == 409
+
+
+def test_deselect_after_queue_rejects_native_reply_without_dispatch(db, native_discovery):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    discovery.report(db, {**payload, 'candidates': [{'threadId':'1234','participantId':'9876','name':'Buyer'}]})
+    saved = discovery.read(db, user.id, account)
+    saved['candidates'][0]['selected'] = True
+    discovery.write(db, user.id, account, saved, user.email)
+    personal.ingest(db, {**payload, 'observed_at':utcnow().isoformat()+'Z', 'thread':{'id':'1234','participant_id':'9876',
+        'name':'Buyer','updated_at':'2026-11-06T12:00:00Z','is_group':False,'is_merged':False,'messages':[]}})
+    reply_id = str(uuid.uuid4())
+    inbox.send(db, user, account, '1234', 'Owner draft', reply_id)
+    saved['candidates'][0]['selected'] = False
+    discovery.write(db, user.id, account, saved, user.email)
+    assert personal.begin(db, reply_id, 'native-messenger') == {'state':'rejected','dispatch':False}
+    assert db.get(InboxReply, reply_id).reason == 'conversation_deselected'

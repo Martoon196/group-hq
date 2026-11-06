@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -31,7 +31,7 @@ def channel_brand(account_key: str = Form(...), brand: str = Form(...), db: Sess
     account = next((a for a in service.accounts(db) if a.key == account_key and not a.owner_email), None)
     if account is None or brand not in service.BRANDS:
         raise HTTPException(400, "Choose a business account and valid brand.")
-    key = "inbox.account.brand." + account.identity
+    key = service.account_brand_key(account)
     db.execute(insert(AppSetting).values(key=key, value={"brand": brand}, updated_by=user.email, updated_at=utcnow())
         .on_conflict_do_update(index_elements=[AppSetting.key], set_={"value": {"brand": brand}, "updated_by": user.email, "updated_at": utcnow()}))
     audit(db, user, "inbox.account.brand", account.key, after={"brand": brand})
@@ -62,7 +62,7 @@ def thread_context(db, user, value, cursor=None):
 
 
 @router.get(service.PAGE, response_class=HTMLResponse)
-def inbox(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def inbox(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     selected = request.query_params.getlist("account")
     brand, channel = request.query_params.get("brand", ""), request.query_params.get("channel", "")
     kind = request.query_params.get("kind", "")
@@ -76,6 +76,9 @@ def inbox(request: Request, db: Session = Depends(get_db), user: User = Depends(
     value = request.query_params.get("thread")
     if value:
         ctx.update(thread_context(db, user, value, request.query_params.get("cursor")))
+        if ctx['account'].provider != 'local' and not ctx['thread_error'] and ctx['crm_links']:
+            account, bound = service.resolve(value, user.id, user.email, db)
+            background_tasks.add_task(inbox_crm.sync_official_window, account.key, account.binding, bound['thread'], user.id, ctx['messages'])
     response = render(request, "inbox.html", ctx)
     response.headers["Cache-Control"] = "no-store"
     return response

@@ -1,5 +1,6 @@
 """Owner-controlled native conversation discovery; metadata is not a CRM grant."""
 import hashlib
+import json
 from fastapi import HTTPException
 from sqlalchemy.dialects.postgresql import insert
 from ..models import AppSetting, InboxThread, utcnow
@@ -8,7 +9,7 @@ from .inbox_providers import clean, opaque
 
 
 def registry_key(user_id, account):
-    return "inbox.discovery." + str(user_id) + "." + account.identity
+    return "inbox.disc.v1." + hashlib.sha256(json.dumps([user_id, account.identity]).encode()).hexdigest()
 
 
 def read(db, user_id, account):
@@ -47,13 +48,18 @@ def report(db, data):
             raise HTTPException(400, "Invalid native candidate identity.")
         seen.add(thread_id)
         old = previous.get(thread_id)
+        thread_kind = row.get("threadKind", "e2ee")
+        if thread_kind not in ("e2ee", "page") or (thread_kind == "page" and participant_id and participant_id != thread_id):
+            raise HTTPException(400, "Unsupported native conversation kind.")
+        if old and old.get("threadKind", "e2ee") != thread_kind:
+            raise HTTPException(409, "Candidate conversation kind changed.")
         if old and old["participantId"] and participant_id and old["participantId"] != participant_id:
             raise HTTPException(409, "Candidate participant changed.")
         cached = db.get(InboxThread, (account.key, hashlib.sha256(thread_id.encode()).hexdigest()))
         inherited = bool(cached and cached.owner_user_id == user.id and cached.binding_sha256 == account.binding
                          and cached.participant_id == participant_id)
         previous[thread_id] = {"threadId": thread_id, "participantId": participant_id or (old or {}).get("participantId", ""),
-            "name": clean(row.get("name"), 500), "textOnly": row.get("textOnly") is True,
+            "name": clean(row.get("name"), 500), "textOnly": row.get("textOnly") is True, "threadKind": thread_kind,
             "selected": old["selected"] if old else inherited,
             "reason": clean(row.get("reason") or "", 200), "query": clean(data.get("query") or "", 100)}
     if len(previous) > 200:
