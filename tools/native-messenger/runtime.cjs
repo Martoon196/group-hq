@@ -28,12 +28,12 @@ class MessengerAdapter {
     // Wait for both native identity signals; the collector still validates
     // every profile ID and message instead of accepting a partial header.
     await page.waitForFunction(expected=>{
-      const log=[...document.querySelectorAll('[role="log"]')].some(e=>e.getAttribute('aria-label')===`Messages in conversation with ${expected.name}`);
+      const log=[...document.querySelectorAll('[role="log"]')].find(e=>e.getAttribute('aria-label')===`Messages in conversation with ${expected.name}`);
       const profile=[...document.querySelectorAll('a[href]')].some(e=>{
         if(!e.textContent.trim().startsWith(expected.name))return false;
         try{const u=new URL(e.href);return u.origin==='https://www.facebook.com'&&u.pathname.replace(/\/$/,'')==='/'+expected.participantId;}catch{return false;}
       });
-      return log&&profile;
+      return !!(log&&profile&&log.querySelector('[data-message-id]'));
     },target,{timeout:30000});
     return page;
   }
