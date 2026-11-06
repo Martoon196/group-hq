@@ -3,7 +3,7 @@
 See [the contract and release notes](../../docs/whatsapp-keywords.md).
 
 1. In this directory, run `npm ci`. The fixed whatsapp-web.js version uses Puppeteer to launch WhatsApp Web.
-2. Privately set `WHATSAPP_KEYWORD_ADAPTER_SECRET` to the dedicated value also saved on Group HQ. Never use a Meta access token here. Set `GHQ_WA_DATA_DIR` to a private persistent directory if needed.
+2. Privately set `WHATSAPP_KEYWORD_ADAPTER_SECRET` to the dedicated value also saved on Group HQ, and `GHQ_WA_LISTENER_NUMBER` to the chosen account's international digits (no plus sign). Never use a Meta access token here. Set `GHQ_WA_DATA_DIR` to a private persistent directory if needed.
 3. Run `npm start` in your own terminal and scan the private QR using the 07510… WhatsApp account → Linked devices.
 4. Open `https://group-hq.onrender.com/crm/channels/whatsapp/keywords`. Choose the business and groups, write the keywords/reply, confirm the invitation requests that reply, and deliberately enable the rule.
 

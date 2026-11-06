@@ -2,7 +2,13 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const crypto=require('node:crypto');
 const {normalise,findTrigger}=require('./matcher.cjs');
-const {makeApi,findRule}=require('./adapter.cjs');
+const {makeApi,findRule,listenerMatches}=require('./adapter.cjs');
+test('private number binding rejects missing configuration and the wrong account',()=>{
+ assert.equal(listenerMatches('447700900001@c.us','447700900001'),true);
+ assert.equal(listenerMatches('447700900002@c.us','447700900001'),false);
+ assert.equal(listenerMatches('undefined@c.us',undefined),false);
+ assert.equal(listenerMatches('447700900001@lid','447700900001'),false);
+});
 test('reused matcher accepts exact punctuation but not incidental income',()=>{
  const rules=[{keywords:['Income'],message:'hello'}];
  for(const value of ['Income','income!','INCOME 🙌']) assert.ok(findTrigger(value,rules));

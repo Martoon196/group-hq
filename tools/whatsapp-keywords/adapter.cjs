@@ -7,6 +7,11 @@ const {findTrigger} = require('./matcher.cjs');
 const BASE = '/api/whatsapp-keywords/v1';
 const LISTENER = 'personal-7510';
 
+function listenerMatches(actualId, configuredNumber) {
+  return typeof configuredNumber === 'string' && /^[1-9][0-9]{6,14}$/.test(configuredNumber)
+    && actualId === configuredNumber + '@c.us';
+}
+
 function makeApi({origin, secret, fetchFn = fetch, now = Date.now}) {
   const url = new URL(origin);
   if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash || secret.length < 32 || secret.length > 256) throw Error('Invalid Growth HQ connection');
@@ -45,6 +50,8 @@ async function main() {
   await fs.mkdir(spool,{recursive:true,mode:0o700}); await fs.mkdir(outcomes,{recursive:true,mode:0o700});
   const api = makeApi({origin:process.env.GHQ_BASE_URL || 'https://group-hq.onrender.com',
                        secret:process.env.WHATSAPP_KEYWORD_ADAPTER_SECRET || ''});
+  const expectedNumber = process.env.GHQ_WA_LISTENER_NUMBER;
+  if (!listenerMatches(String(expectedNumber) + '@c.us', expectedNumber)) throw Error('Set the selected listening number privately');
   let snapshot = {revision:0, listenerId:LISTENER, rules:[]}, ready = false, busy = false, groupsAt = 0;
   const client = new Client({authStrategy:new LocalAuth({dataPath:path.join(root, 'session')}), puppeteer:{headless:true}});
   const note = message => console.log(new Date().toISOString(), message); // No message bodies, phone numbers, tokens or provider errors.
@@ -52,7 +59,7 @@ async function main() {
   client.on('auth_failure', () => {ready=false; note('WhatsApp sign-in needs attention.');});
   client.on('disconnected', () => {ready=false; note('WhatsApp disconnected. Check Linked devices.');});
   client.on('ready', () => {
-    if (client.info?.wid?._serialized !== '447510243096@c.us') {
+    if (!listenerMatches(client.info?.wid?._serialized, expectedNumber)) {
       ready=false; note('This is not the selected group-listening account. Disconnecting without reading groups or sending.');
       void client.destroy(); return;
     }
@@ -150,4 +157,4 @@ async function main() {
 }
 
 if (require.main===module) main().catch(()=>{console.error('Listener could not start. Check its private configuration.');process.exitCode=1;});
-module.exports={makeApi,findRule};
+module.exports={makeApi,findRule,listenerMatches};

@@ -8,7 +8,7 @@ Each rule selects one business, explicit group IDs, exact or whole-word keywords
 
 ## Custody and boundaries
 
-The group listener is bound to `447510243096@c.us`. The owner scans its QR in their own terminal. A different account is disconnected before group collection or sending. The QR-linked session and adapter signing secret stay off-web. This uses the unofficial whatsapp-web.js transport; it is separate from MHP's official Meta number, token, webhook and message receipts. It does not grant access to existing phone-created groups through the Cloud API.
+The group listener is bound to the number privately configured in `GHQ_WA_LISTENER_NUMBER` (international digits only). The owner scans its QR in their own terminal. A missing configuration or different account is refused before group collection or sending. The QR-linked session and adapter signing secret stay off-web. This uses the unofficial whatsapp-web.js transport; it is separate from MHP's official Meta number, token, webhook and message receipts. It does not grant access to existing phone-created groups through the Cloud API.
 
 Only matching group messages, group-name/ID inventory, and private STOP/START controls are submitted. There is no private-chat backfill. Other personal messages are ignored. STOP/START affects only this listener's replies; it does not manufacture MHP/PP marketing consent, SMS consent or a verified canonical CRM contact.
 
