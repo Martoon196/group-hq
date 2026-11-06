@@ -258,6 +258,49 @@ class AppSetting(Base):
     updated_by: Mapped[str] = mapped_column(String(200), default="", nullable=False)
 
 
+class KeywordDelivery(Base):
+    """Distinct-source group request/outbox, not a canonical verified CRM contact."""
+    __tablename__ = "whatsapp_keyword_deliveries"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "sender_sha256", name="uq_keyword_rule_sender"),
+        CheckConstraint("state IN ('pending','calling','sent','outcome_unknown','held')", name="ck_keyword_state"),
+        CheckConstraint("brand IN ('pp','mhp','kp','hnh','ordris')", name="ck_keyword_brand"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    rule_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    rule_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    brand: Mapped[str] = mapped_column(String(8), nullable=False)
+    sender_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    sender_phone: Mapped[str] = mapped_column(String(15), nullable=False)
+    sender_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    sender_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    group_id: Mapped[str] = mapped_column(String(90), nullable=False)
+    reply: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(250))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    begun_at: Mapped[datetime | None] = mapped_column(DateTime)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class KeywordEvent(Base):
+    __tablename__ = "whatsapp_keyword_events"
+    __table_args__ = (UniqueConstraint("listener_id", "external_id", name="uq_keyword_external_event"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    listener_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    delivery_id: Mapped[str | None] = mapped_column(ForeignKey("whatsapp_keyword_deliveries.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class KeywordSuppression(Base):
+    __tablename__ = "whatsapp_keyword_suppressions"
+    sender_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    blocked: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class User(TimestampMixin, Base):
     """An admin login. Every user is an administrator; there is no other role yet."""
     __tablename__ = "users"

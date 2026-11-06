@@ -4,6 +4,7 @@
 <a class="help" href="/crm">← Back to CRM</a>
 <div class="page-title"><span class="eyebrow">Channels · WhatsApp</span><h1>Keep the conversation going.</h1></div>
 <p class="wa-intro">A personal follow-up, the right brand, and every reply attached to the lead. Connect each business here before adding WhatsApp to its journeys.</p>
+<p><a class="btn btn-primary" href="/crm/channels/whatsapp/keywords">Keywords &amp; private replies</a></p>
 <nav class="wa-brands" aria-label="Choose WhatsApp brand">
   {% for key, name in brands.items() %}<a href="/crm/channels/whatsapp?brand={{ key }}" class="btn{% if key == brand %} btn-primary{% endif %}"{% if key == brand %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}
 </nav>
