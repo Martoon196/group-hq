@@ -2,11 +2,12 @@
 {% block head %}<link rel="stylesheet" href="/assets/inbox.css">{% endblock %}
 {% block content %}
 <div class="page-head"><div><p class="eyebrow">Growth HQ</p><h1>Inbox</h1>
-<p>Choose your businesses and accounts. Replies stay in the conversation they came from.</p></div>
+<p>Personal and business conversations in one place. Replies use the original account and channel.</p></div>
 <a class="btn btn-secondary" href="/crm/channels/whatsapp/keywords">WhatsApp keywords</a></div>
-<p><a class="btn btn-primary" href="/inbox/connect">Connect personal Messenger &amp; LinkedIn</a></p>
+<p><a class="btn btn-primary" href="/inbox/channels">Inbox connections</a> <a class="btn btn-secondary" href="/inbox/connect">Connect personal Messenger &amp; LinkedIn</a></p>
 {% if setup_error %}<div class="flash flash-err">{{ setup_error }}</div>{% endif %}
 <form class="inbox-filters card" method="get" action="/inbox">
+  <label>Conversation type <select name="kind"><option value="">All conversations</option>{% for key,name in kinds.items() %}<option value="{{ key }}"{% if kind_filter == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
   <label>Business <select name="brand"><option value="">All businesses</option>{% for key,name in brands.items() %}
     <option value="{{ key }}"{% if brand_filter == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
   <label>Channel <select name="channel"><option value="">All channels</option>{% for key,name in channels.items() %}
@@ -28,14 +29,14 @@
     {% for t in threads %}<a class="inbox-thread{% if thread_ticket is defined and thread_ticket == t.ticket %} is-active{% endif %}"
         href="/inbox?account={{ t.account.key|urlencode }}&amp;thread={{ t.ticket|urlencode }}">
       <strong>{{ t.name }}</strong><span>{{ t.account.label }} · {{ channels[t.account.channel] }}</span>
-      <p>{{ t.preview[:180] }}</p><small>{{ t.updated_at }}</small></a>
+      <p>{{ t.preview[:180] }}</p><small>{{ kinds[t.organisation.kind] }}{% for b in t.organisation.brands %} · {{ brands[b] }}{% endfor %} · {{ t.updated_at }}</small></a>
     {% else %}<p>{% if results %}No conversations were returned for this selection. Check any connection notices above.{% else %}Your conversations will appear here when connected.{% endif %}</p>{% endfor %}
   </section>
   <section class="inbox-conversation card" aria-label="Selected conversation">
   {% if account is defined %}
     <h2>{{ conversation_name }}</h2><p class="inbox-channel">Private message · {{ channels[account.channel] }} · {{ account.label }}</p>
     {% if thread_error %}<div class="flash flash-err">{{ thread_error }}</div>{% endif %}
-    {% if message_window_limited %}<p>Showing the latest 100 messages. Older history remains in the original app.</p>{% endif %}
+    {% if message_window_limited %}<p>This is a partial text history. Older messages or unsupported attachments remain in the original app.</p>{% endif %}
     {% if next_cursor %}<a class="btn btn-secondary" href="/inbox?account={{ account.key|urlencode }}&amp;thread={{ thread_ticket|urlencode }}&amp;cursor={{ next_cursor|urlencode }}">Older messages</a>{% endif %}
     <div class="inbox-messages">{% for m in messages %}<article class="inbox-message {{ m.direction }}">
       <strong>{{ 'You' if m.direction == 'outgoing' else m.name or conversation_name }}</strong>
@@ -53,17 +54,27 @@
       {% elif r.state in ['calling','outcome_unknown'] %}Outcome unknown. Check the original app before sending again.
       {% else %}The channel refused the reply.{% endif %}</p>{% endfor %}
     <aside class="inbox-crm"><h3>CRM</h3>
+    <form method="post" action="/inbox/organise" class="card">
+      <input type="hidden" name="thread_ticket" value="{{ thread_ticket }}">
+      <label>Conversation type <select name="kind">{% for key,name in kinds.items() %}<option value="{{ key }}"{% if organisation.kind == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+      <p>Personal and unclassified conversations are not copied into a business CRM. Existing CRM history is retained.</p>
+      <fieldset><legend>Related businesses — choose any that apply</legend>{% for key,name in brands.items() %}<label class="inbox-checkbox"><input type="checkbox" name="brands" value="{{ key }}"{% if key in organisation.brands %} checked{% endif %}>{{ name }}</label>{% endfor %}</fieldset>
+      {% if crm_links %}<fieldset><legend>Copy messages to these linked CRMs when this is a business conversation</legend>{% for link in crm_links %}<label class="inbox-checkbox"><input type="checkbox" name="sync_brands" value="{{ link.brand }}"{% if link.brand in organisation.sync_brands %} checked{% endif %}>{{ brands[link.brand] }}</label>{% endfor %}</fieldset>{% endif %}
+      <label>Private conversation note <textarea name="note" rows="2" maxlength="2000">{{ organisation.note }}</textarea></label>
+      <button class="btn btn-primary" type="submit">Save conversation choices</button>
+    </form>
     {% for link in crm_links %}<p><a class="btn btn-secondary" href="/inbox/crm/contact?brand={{ link.brand|urlencode }}&amp;contact={{ link.contact_id|urlencode }}">Open {{ brands[link.brand] }} contact</a></p>
       {% if link.last_error %}<p>{{ link.last_error }}</p>{% endif %}{% endfor %}
     {% if crm_configured %}
       <form method="post" action="/inbox/crm"><input type="hidden" name="thread_ticket" value="{{ thread_ticket }}">
       <label>Business <select name="brand">{% for key,name in brands.items() %}<option value="{{ key }}"{% if key == account.brand %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
       <label>Contact name <input name="display_name" value="{{ conversation_name }}" required maxlength="200"></label>
-      <button class="btn btn-primary" type="submit">Add to CRM</button></form>
+      <label class="inbox-checkbox"><input type="checkbox" name="copy_messages" value="true">Also copy loaded and future messages to this brand’s CRM</label>
+      <button class="btn btn-primary" type="submit">Add to this brand’s CRM</button></form>
       <form method="get" action="/inbox/crm/search" style="margin-top:1rem"><input type="hidden" name="thread" value="{{ thread_ticket }}">
       <label>Business <select name="brand">{% for key,name in brands.items() %}<option value="{{ key }}"{% if key == account.brand %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
       <label>Find existing contact <input name="q" required maxlength="200"></label><button class="btn btn-secondary" type="submit">Search CRM</button></form>
-      <p>Linking records this conversation in the selected CRM. It does not subscribe anyone to marketing.</p>
+      <p>Add the same person to another brand whenever it is relevant. Personal conversations stay Personal and do not copy messages. For Business conversations, messages are copied only to the CRMs you select. Linking does not subscribe anyone to marketing.</p>
     {% else %}<p>CRM connection needs setting up. No contact or consent has been created.</p>{% endif %}</aside>
   {% else %}<h2>Choose a conversation</h2><p>Your reply will use that conversation’s original account and channel.</p>{% endif %}
   </section>

@@ -31,8 +31,18 @@ MESSAGES = {
 }
 
 
+def account_brand_key(account):
+    return "inbox.brand.v1." + account.identity
+
+
 def accounts(db=None):
     result = list(load_accounts(config.GHQ_INBOX_ACCOUNTS, os.environ))
+    if db is not None:
+        from dataclasses import replace
+        for index, account in enumerate(result):
+            setting = db.get(AppSetting, account_brand_key(account))
+            if setting and setting.value.get("brand") in BRANDS:
+                result[index] = replace(account, brand=setting.value["brand"])
     if db is not None:
         saved = db.get(AppSetting, "personal_inbox.accounts")
         local = (saved.value if saved else {}).get("accounts", [])
@@ -67,12 +77,15 @@ def resolve(value, user_id, user_email="", db=None):
         raise HTTPException(409, "Refresh the inbox before continuing.") from None
 
 
-def snapshot(user_id, selected, brand="", channel="", *, db=None, user_email=""):
+def snapshot(user_id, selected, brand="", channel="", *, db=None, user_email="", kind=""):
     allowed = tuple(a for a in accounts(db) if not a.owner_email or a.owner_email == user_email.lower())
     if set(selected) - {a.key for a in allowed} or (brand and brand not in BRANDS) or (channel and channel not in CHANNELS):
         raise HTTPException(400, "Unknown inbox filter")
+    from . import inbox_organisation, inbox_crm
+    if kind and kind not in inbox_organisation.KINDS:
+        raise HTTPException(400, "Choose a conversation type.")
     chosen = [a for a in allowed if (not selected or a.key in selected)
-              and (not brand or a.brand == brand) and (not channel or a.channel == channel)]
+              and (not channel or a.channel == channel)]
 
     local = {}
     if db is not None:
@@ -106,7 +119,23 @@ def snapshot(user_id, selected, brand="", channel="", *, db=None, user_email="")
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(read, chosen))
-    threads = sorted((t for r in results for t in r["threads"]), key=lambda t: t["updated_at"], reverse=True)
+    threads = []
+    for result in results:
+        for thread in result["threads"]:
+            linked = inbox_crm.links(db, thread["account"], thread["id"]) if db is not None else ()
+            settings = inbox_organisation.choices(db, user_id, thread["account"], thread["id"], linked)
+            thread["organisation"] = settings
+            if kind and settings["kind"] != kind:
+                continue
+            if brand and settings["kind"] == "personal":
+                continue
+            if brand and brand not in settings["brands"]:
+                # Official business inboxes retain their connection default;
+                # personal accounts need an explicit conversation association.
+                if settings["kind"] == "personal" or thread["account"].owner_email or thread["account"].brand != brand:
+                    continue
+            threads.append(thread)
+    threads.sort(key=lambda t: t["updated_at"], reverse=True)
     return allowed, results, threads
 
 

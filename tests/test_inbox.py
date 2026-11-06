@@ -63,6 +63,47 @@ def test_owner_screen_auth_filters_and_escaping(client, admin_client, connected,
     assert connected == []
 
 
+def test_connection_default_brand_change_invalidates_composer_but_keeps_source(admin_client, connected, db):
+    before = next(a for a in inbox.accounts(db) if a.key == 'kp-fb')
+    old_ticket = inbox.ticket(before, 'same-provider-thread-id', owner(db).id, 'Buyer', 'native-person')
+    response = admin_client.post('/inbox/channels/brand', data={'account_key': 'kp-fb', 'brand': 'pp'}, follow_redirects=False)
+    assert response.status_code == 303
+    after = next(a for a in inbox.accounts(db) if a.key == 'kp-fb')
+    assert after.brand == 'pp' and after.account_id == before.account_id and after.identity == before.identity
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):
+        inbox.resolve(old_ticket, owner(db).id, db=db)
+    page = admin_client.get('/inbox/channels')
+    assert page.status_code == 200 and 'current connection health' in page.text
+    assert connected == []
+
+
+def test_official_opened_conversation_projects_only_explicit_business_copy(admin_client, connected, db, monkeypatch):
+    from app.services import inbox_crm, inbox_organisation
+    user = owner(db)
+    account = next(a for a in inbox.accounts(db) if a.key == 'kp-fb')
+    ticket = inbox.ticket(account, 'same-provider-thread-id', user.id, 'Buyer', 'native-person')
+    contact_id, workspace_id = str(uuid.uuid4()), str(uuid.uuid4())
+    calls = []
+    def native(actor, brand, action, **payload):
+        calls.append(action)
+        return {'brand': brand, 'contactId': contact_id, 'workspaceId': workspace_id}
+    monkeypatch.setattr(inbox_crm, 'command', native)
+    inbox_crm.connect(db, user, ticket, 'kp', 'Buyer', copy_messages=False)
+    assert admin_client.get('/inbox', params={'thread': ticket}).status_code == 200
+    assert calls == ['create']
+    inbox_organisation.save(db, user, account, 'same-provider-thread-id', 'business', ['kp'], ['kp'])
+    assert admin_client.get('/inbox', params={'thread': ticket}).status_code == 200
+    assert calls == ['create', 'activity']
+    assert admin_client.get('/inbox', params={'thread': ticket}).status_code == 200
+    assert calls == ['create', 'activity']
+    inbox_organisation.save(db, user, account, 'same-provider-thread-id', 'personal', ['kp'], ['kp'])
+    monkeypatch.setattr(inbox.client, 'messages', lambda *args, **kwargs: ([{'id':'m2','body':'Private reply',
+        'direction':'incoming','name':'Buyer','occurred_at':'2026-11-06T12:01:00Z'}], None))
+    assert admin_client.get('/inbox', params={'thread': ticket}).status_code == 200
+    assert calls == ['create', 'activity'] and connected == []
+
+
 def test_reply_stays_on_signed_account_and_replay_has_no_effect(admin_client, connected, db):
     payload = form(db)
     payload["account"] = "mhp-ig"  # A submitted filter cannot retarget the signed conversation.

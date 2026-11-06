@@ -3,6 +3,7 @@ const fs=require('node:fs/promises'),path=require('node:path');
 const {readConversation,normalise}=require('./reader.cjs');
 const {GrowthHqClient}=require('../personal-inbox/client.cjs');
 const {openAuthState}=require('../whatsapp-keywords/socket-auth.cjs');
+const {discover,validateTargets}=require('./discovery.cjs');
 const CONNECTOR='native-messenger';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
@@ -22,7 +23,7 @@ class MessengerAdapter {
   async page(threadId){
     const target=this.target(threadId);let page=this.pages.get(threadId);
     if(!page||page.isClosed()){page=await this.context.newPage();this.pages.set(threadId,page);}
-    const expected=`https://www.facebook.com/messages/e2ee/t/${target.threadId}`;
+    const expected=`https://www.facebook.com/messages/${target.threadKind==='page'?'':'e2ee/'}t/${target.threadId}`;
     if(page.url().replace(/\/$/,'')!==expected)await page.goto(expected,{waitUntil:'domcontentloaded',timeout:30000});
     // Messenger renders the log before its participant header on reload.
     // Wait for both native identity signals; the collector still validates
@@ -88,10 +89,10 @@ async function settle(cloud,state){
   }
 }
 async function run({context,identity,directory,setStatus,isPaused,secret,threads}){
-  if(!Array.isArray(threads)||threads.length<1||threads.length>3||threads.some(t=>!/^\d+$/.test(t.threadId)||!/^\d+$/.test(t.participantId)))throw Error('named_thread_allowlist_required');
+  validateTargets(threads);
   const adapter=new MessengerAdapter(context,identity,threads),cloud=new GrowthHqClient(secret);
   const state=await openAuthState(path.join(directory,'journal'),{BufferJSON:{},initAuthCreds:()=>({deliveries:{}})});
-  let stopped=false;context.on('close',()=>{stopped=true;});
+  let stopped=false,searching=null;context.on('close',()=>{stopped=true;});
   const statusFile=path.join(directory,'runtime-status.json');
   while(!stopped){
     if(isPaused()){await sleep(2000);continue;}
@@ -104,8 +105,29 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
       if(!binding.key)throw Error('account_not_discovered');
       if(!binding.enabled){setStatus('Facebook connected. Choose Key Properties UK and enable this account in Growth HQ → Inbox → Connections.');await sleep(10000);continue;}
       await settle(cloud,state);
+      const identityPacket={connector_id:CONNECTOR,account_key:binding.key,account_id:binding.account_id,user_id:binding.user_id};
+      let selection=await cloud.request('selections',identityPacket);
+      if(!selection.initialised){
+        await cloud.request('candidates',{...identityPacket,candidates:threads,seed_existing:true,query:'Existing imported conversations',complete:false,
+          note:'Retained the existing imported conversations. Use Find conversations to discover more.'});
+        selection=await cloud.request('selections',identityPacket);
+      }
+      adapter.threads=validateTargets(selection.threads);
+      for(const [id,page] of adapter.pages)if(!adapter.threads.some(t=>t.threadId===id)){await page.close();adapter.pages.delete(id);}
+      if(selection.request&&!selection.request.done&&!searching){
+        const request=selection.request;
+        searching=discover(context,request.query).then(result=>cloud.request('candidates',{...identityPacket,...result,query:request.query,request_id:request.id}))
+          .catch(()=>cloud.request('candidates',{...identityPacket,candidates:[],query:request.query,request_id:request.id,complete:false,
+            note:'Messenger search could not finish. Check the connection and try again.'}).catch(()=>{})).finally(()=>{searching=null;});
+      }
       const counts=[];
-      for(const target of threads){const packet=await adapter.observe(target.threadId,binding);if(!packet){counts.push({threadId:target.threadId,count:0,skipped:'no_supported_text'});continue;}await cloud.request('threads',{connector_id:CONNECTOR,...packet});counts.push({threadId:target.threadId,count:packet.thread.messages.length,hasMore:packet.thread.has_more});}
+      // One unavailable conversation must not stop all other selected inboxes.
+      for(const target of adapter.threads){
+        if(isPaused())break;
+        try{const packet=await adapter.observe(target.threadId,binding);if(!packet){counts.push({threadId:target.threadId,count:0,skipped:'no_supported_text'});continue;}
+          await cloud.request('threads',{connector_id:CONNECTOR,...packet});counts.push({threadId:target.threadId,count:packet.thread.messages.length,hasMore:packet.thread.has_more});}
+        catch{counts.push({threadId:target.threadId,count:0,skipped:'conversation_needs_attention'});}
+      }
       if(isPaused())continue;
       const pending=await cloud.request('pending',{connector_id:CONNECTOR});
       for(const id of pending.reply_ids??[]){if(isPaused())break;await dispatch(adapter,cloud,state,binding,id,isPaused);}

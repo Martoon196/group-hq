@@ -136,6 +136,10 @@ def ingest(db, data):
     if not isinstance(value, dict) or value.get("is_group") is not False or value.get("is_merged") is not False:
         problem("Only original one-to-one conversations can be synced")
     thread_id, participant_id = opaque(value.get("id")), opaque(value.get("participant_id"))
+    if connector(data) == "native-messenger":
+        from .inbox_discovery import permits_thread
+        if not permits_thread(db, user.id, account, thread_id, participant_id):
+            problem("This conversation is not selected for sync", 409)
     observed = data.get("observed_at")
     try:
         observed_at = datetime.fromisoformat(observed.replace("Z", "+00:00")).astimezone(timezone.utc).replace(tzinfo=None)
@@ -190,6 +194,13 @@ def begin(db, reply_id, source="beeper"):
         problem("Reply account changed", 409)
     if row.state != "queued":
         return {"state": row.state, "dispatch": False}
+    if source == "native-messenger":
+        from .inbox_discovery import permits_thread
+        cached = inbox.local_thread(db, account, row.thread_id, user.id)
+        if not permits_thread(db, user.id, account, row.thread_id, cached.participant_id):
+            row.state, row.reason, row.settled_at = "rejected", "conversation_deselected", utcnow()
+            db.commit()
+            return {"state": "rejected", "dispatch": False}
     if (utcnow() - row.created_at).total_seconds() > 900:
         row.state, row.reason, row.settled_at = "rejected", "expired", utcnow()
         db.commit()
