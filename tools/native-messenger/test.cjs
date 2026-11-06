@@ -3,7 +3,7 @@ const {normalise,displayedTime}=require('./reader.cjs');
 const {validateAction,allowedUrl,client}=require('./login.cjs');
 const expected={threadId:'12345',participantId:'98765',name:'Example Buyer'};
 const binding={key:'native-example',account_id:'facebook-web:123',user_id:'123',channel:'facebook',timeZone:'Europe/London'};
-const {validateTargets,readSearch,readPeer}=require('./discovery.cjs');
+const {validateTargets,readSearch,readPeer,searchReady}=require('./discovery.cjs');
 test('owner-selected conversations are no longer limited to three; selection identity remains exact',()=>{
   const many=Array.from({length:20},(_,i)=>({...expected,threadId:String(1000+i)}));
   assert.equal(validateTargets(many).length,20);assert.deepEqual(validateTargets([]),[]);
@@ -22,12 +22,19 @@ test('discovery extracts only visible Facebook thread links and reports restorat
   assert.equal(value.rows.length,2);assert.equal(value.rows[0].threadId,'12345');assert.equal(value.rows[0].name,'Example Buyer');
   assert.equal(value.rows[1].encrypted,false);assert.equal(value.restoring,true);
 });
-test('candidate identity requires one exact conversation log and unanimous native profile ID',()=>{
-  const vm=require('node:vm');let ids=['98765'];
-  const document={querySelectorAll:selector=>selector==='[role="log"]'?[{getAttribute:()=> 'Messages in conversation with Example Buyer'}]:
+test('candidate identity comes from the exact thread, not a provisional Active now search label',()=>{
+  const vm=require('node:vm');let ids=['98765'],logCount=1;const location={pathname:'/messages/e2ee/t/12345/'};
+  const document={querySelectorAll:selector=>selector==='[role="log"]'?Array.from({length:logCount},()=>({getAttribute:()=> 'Messages in conversation with Example Buyer'})):
     ids.map(id=>({innerText:'Example Buyer',href:'https://www.facebook.com/'+id}))};
-  const check=()=>vm.runInNewContext('('+readPeer.toString()+')("Example Buyer")',{URL,document});
-  assert.equal(check(),'98765');ids.push('111');assert.equal(check(),null);ids=[];assert.equal(check(),null);
+  const check=()=>vm.runInNewContext('('+readPeer.toString()+')("12345")',{URL,document,location});
+  assert.equal(check().participantId,'98765');assert.equal(check().name,'Example Buyer');
+  ids.push('111');assert.equal(check(),null);ids=[];assert.equal(check(),null);ids=['98765'];
+  logCount=2;assert.equal(check(),null);logCount=1;location.pathname='/messages/e2ee/t/999/';assert.equal(check(),null);
+});
+test('search loading and stale query cannot contribute rows or stability',()=>{
+  assert.equal(searchReady({loading:true},'Durham','Durham'),false);
+  assert.equal(searchReady({loading:false},'Durham','old search'),false);
+  assert.equal(searchReady({loading:false},'Durham','Durham'),true);
 });
 const fixture=()=>({threadId:'12345',participantId:'98765',name:'Example Buyer',observedAt:'2026-11-06T19:00:00Z',introductionVisible:true,virtualised:false,composerReady:true,
   messages:[{id:'98765@msgr.123456789',label:'At Wednesday 13:32, You: Is Durham the area you want?',heading:'You sent'},

@@ -11,13 +11,20 @@ function readSearch() {
   }).filter(Boolean);
   return {rows,restoring:root.innerText.includes('Syncing chat history'),loading:root.innerText.includes('Loading...')};
 }
-function readPeer(name){
-  const logs=[...document.querySelectorAll('[role="log"]')].filter(e=>e.getAttribute('aria-label')===`Messages in conversation with ${name}`);
-  const ids=[...document.querySelectorAll('a[href]')].filter(e=>e.innerText.trim().startsWith(name)).map(e=>{
+function readPeer(threadId){
+  const route=location.pathname.match(/^\/messages\/(?:e2ee\/)?t\/(\d+)\/?$/);
+  if(!route||route[1]!==threadId)return null;
+  const prefix='Messages in conversation with ';
+  const logs=[...document.querySelectorAll('[role="log"]')].filter(e=>e.getAttribute('aria-label')?.startsWith(prefix));
+  if(logs.length!==1)return null;
+  const name=logs[0].getAttribute('aria-label').slice(prefix.length).trim();
+  if(!name)return null;
+  const ids=[...document.querySelectorAll('a[href]')].filter(e=>e.innerText.trim()===name).map(e=>{
     try{const u=new URL(e.href);return u.origin==='https://www.facebook.com'?u.pathname.match(/^\/(\d+)\/?$/)?.[1]:null;}catch{return null;}
   }).filter(Boolean);
-  return logs.length===1&&ids.length&&new Set(ids).size===1?ids[0]:null;
+  return ids.length&&new Set(ids).size===1?{name,participantId:ids[0]}:null;
 }
+function searchReady(state,query,value){return !state.loading&&value.trim()===query.trim();}
 async function discover(context,query){
   if(typeof query!=='string'||query.trim().length<2||query.length>100)throw Error('invalid_search');
   const page=await context.newPage(),found=new Map();let restoring=false;
@@ -29,6 +36,9 @@ async function discover(context,query){
     let stable=0;
     for(let scan=0;scan<12&&stable<3&&found.size<100;scan++){
       const state=await page.evaluate(readSearch),before=found.size;restoring||=state.restoring;
+      if(!searchReady(state,query,await page.getByRole('textbox',{name:'Search',exact:true}).inputValue())){
+        stable=0;await page.waitForTimeout(700);continue;
+      }
       for(const row of state.rows)if(found.size<100)found.set(row.threadId,row);
       stable=found.size===before?stable+1:0;
       const links=page.locator('[aria-label="Thread list"] a[href*="/messages/"]').filter({visible:true});
@@ -41,8 +51,10 @@ async function discover(context,query){
         row.participantId='';row.textOnly=true;row.reason='';row.threadKind=row.encrypted?'e2ee':'page';
         try{
           await peerPage.goto(row.url,{waitUntil:'domcontentloaded',timeout:20000});
-          await peerPage.waitForFunction(readPeer,row.name,{timeout:10000});
-          row.participantId=await peerPage.evaluate(readPeer,row.name);
+          await peerPage.waitForFunction(readPeer,row.threadId,{timeout:10000});
+          const identity=await peerPage.evaluate(readPeer,row.threadId);
+          if(!identity)throw Error('unresolved_identity');
+          row.name=identity.name;row.participantId=identity.participantId;
           if(row.threadKind==='page'&&row.participantId!==row.threadId)row.reason='This non-Page conversation format needs support.';
         }catch{row.reason='Messenger has not supplied a verified participant yet. Search again after history restores.';}
       }
@@ -58,4 +70,4 @@ function validateTargets(rows){
     (t.threadKind==='page'&&t.participantId!==t.threadId)||typeof t.name!=='string'||!t.name.trim()||t.name.length>500||seen.has(t.threadId))throw Error('invalid_selection');seen.add(t.threadId);}
   return rows;
 }
-module.exports={discover,readSearch,readPeer,validateTargets};
+module.exports={discover,readSearch,readPeer,searchReady,validateTargets};
