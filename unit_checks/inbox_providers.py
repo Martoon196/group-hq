@@ -155,6 +155,13 @@ class InboxProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(InboxError, "unbound_target"):
             Matrix(MATRIX, httpx.MockTransport(lambda r: self.fail("No request"))).send("!other:test", "Test", REQUEST)
 
+    def test_bad_metadata_stays_an_account_error_not_a_page_crash(self):
+        for payload in ({"data": [], "meta": ["bad"]}, {"data": [], "pagination": "bad"},
+                        {"messages": [], "pagination": {"nextCursor": {"bad": True}}}):
+            with self.subTest(payload=payload), self.assertRaisesRegex(InboxError, "invalid_provider_response"):
+                client = Zernio(ACCOUNT, httpx.MockTransport(lambda r: httpx.Response(200, json=payload)))
+                client.messages("thread") if "messages" in payload else client.conversations()
+
 
 if __name__ == "__main__":
     unittest.main()

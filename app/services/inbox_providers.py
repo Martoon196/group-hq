@@ -51,6 +51,20 @@ def rows(body, key, limit=100):
     return value
 
 
+def object_field(body, key):
+    value = body.get(key) or {}
+    if not isinstance(value, dict):
+        raise InboxError("invalid_provider_response")
+    return value
+
+
+def next_cursor(body):
+    cursor = object_field(body, "pagination").get("nextCursor")
+    if cursor is not None and (not isinstance(cursor, str) or not 1 <= len(cursor) <= 4096):
+        raise InboxError("invalid_provider_response")
+    return cursor
+
+
 @dataclass(frozen=True)
 class Account:
     key: str
@@ -197,9 +211,10 @@ class Zernio(Transport):
             result.append({"id": opaque(item.get("id")), "name": clean(item.get("participantName") or "Unnamed contact", 500),
                 "participant_id": opaque(item.get("participantId")), "preview": clean(item.get("lastMessage") or ""),
                 "updated_at": clean(item.get("updatedTime") or "", 100), "unread": item.get("unreadCount", 0)})
-        if (body.get("meta") or {}).get("failedAccounts") or (body.get("meta") or {}).get("accountsFailed"):
+        meta = object_field(body, "meta")
+        if meta.get("failedAccounts") or meta.get("accountsFailed"):
             raise InboxError("provider_unavailable")
-        return result, (body.get("pagination") or {}).get("hasMore") is True
+        return result, object_field(body, "pagination").get("hasMore") is True
 
     def messages(self, thread_id, cursor=None):
         params = {"accountId": self.account.account_id, "sortOrder": "desc", "limit": 100}
@@ -215,7 +230,7 @@ class Zernio(Transport):
             result.append({"id": opaque(item.get("id")), "body": clean(item.get("message") or "[Attachment]"),
                 "direction": direction, "name": clean(item.get("senderName") or "", 500),
                 "occurred_at": clean(item.get("createdAt") or "", 100)})
-        return list(reversed(result)), (body.get("pagination") or {}).get("nextCursor")
+        return list(reversed(result)), next_cursor(body)
 
     def send(self, thread_id, body, request_id):
         self.validate_send(thread_id, body, request_id)
