@@ -18,6 +18,18 @@ test('remote controls bounded and no arbitrary command/evaluate surface',()=>{as
 test('connection page JavaScript parses',()=>{new (require('node:vm').Script)(client);});
 
 const {dispatch,settle}=require('./runtime.cjs');
+test('profile utility links without an ID do not change identity; different and missing IDs fail',async()=>{
+  const {MessengerAdapter}=require('./runtime.cjs');
+  let links=[];
+  const page={goto:async()=>{},locator:()=>({filter:()=>({first:()=>({waitFor:async()=>{}})}),evaluateAll:async fn=>fn(links)})};
+  const adapter=new MessengerAdapter({newPage:async()=>page},{userId:'123'},[]);
+  links=[{href:'https://www.facebook.com/profile.php?fb_profile_edit_entry_point=1&id=123'},{href:'https://www.facebook.com/profile.php?fb_profile_edit_entry_point=1'}];
+  await adapter.verifyIdentity();
+  links.push({href:'https://www.facebook.com/profile.php?fb_profile_edit_entry_point=1&id=456'});
+  await assert.rejects(adapter.verifyIdentity(),/account_changed/);
+  links=[{href:'https://www.facebook.com/profile.php?fb_profile_edit_entry_point=1'}];
+  await assert.rejects(adapter.verifyIdentity(),/account_changed/);
+});
 test('native send intent persisted before send; accepted result replays without second send',async()=>{
   const data={deliveries:{}},order=[];let sends=0,settleAttempts=0;
   const state={state:{creds:data},saveCreds:async()=>order.push(JSON.parse(JSON.stringify(data)))};

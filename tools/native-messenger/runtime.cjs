@@ -13,8 +13,9 @@ class MessengerAdapter {
   async verifyIdentity(){
     this.identityPage??=await this.context.newPage();
     await this.identityPage.goto('https://www.facebook.com/me/',{waitUntil:'domcontentloaded',timeout:30000});
-    const edit=this.identityPage.locator('a[href*="fb_profile_edit_entry_point"]');await edit.first().waitFor({timeout:15000});
-    const ids=await edit.evaluateAll(links=>links.map(e=>new URL(e.href).searchParams.get('id')));
+    const edit=this.identityPage.locator('a[href*="fb_profile_edit_entry_point"]');
+    await edit.filter({hasText:'Edit profile'}).first().waitFor({timeout:30000});
+    const ids=await edit.evaluateAll(links=>links.map(e=>new URL(e.href).searchParams.get('id')).filter(Boolean));
     if(!ids.length||ids.some(id=>id!==this.identity.userId))throw Error('account_changed');
   }
   target(threadId){const t=this.threads.find(t=>t.threadId===threadId);if(!t)throw Error('thread_not_authorised');return t;}
@@ -23,11 +24,17 @@ class MessengerAdapter {
     if(!page||page.isClosed()){page=await this.context.newPage();this.pages.set(threadId,page);}
     const expected=`https://www.facebook.com/messages/e2ee/t/${target.threadId}`;
     if(page.url().replace(/\/$/,'')!==expected)await page.goto(expected,{waitUntil:'domcontentloaded',timeout:30000});
-    await page.locator('[role="log"]').filter({has:page.getByRole('heading',{name:target.name,exact:true})}).waitFor({timeout:15000}).catch(async()=>{
-      // In longer conversations the intro may be virtualised, but the exact
-      // visible log label is still required by the read-only collector.
-      await page.locator('[role="log"]').getAttribute('aria-label');
-    });
+    // Messenger renders the log before its participant header on reload.
+    // Wait for both native identity signals; the collector still validates
+    // every profile ID and message instead of accepting a partial header.
+    await page.waitForFunction(expected=>{
+      const log=[...document.querySelectorAll('[role="log"]')].some(e=>e.getAttribute('aria-label')===`Messages in conversation with ${expected.name}`);
+      const profile=[...document.querySelectorAll('a[href]')].some(e=>{
+        if(!e.textContent.trim().startsWith(expected.name))return false;
+        try{const u=new URL(e.href);return u.origin==='https://www.facebook.com'&&u.pathname.replace(/\/$/,'')==='/'+expected.participantId;}catch{return false;}
+      });
+      return log&&profile;
+    },target,{timeout:30000});
     return page;
   }
   async observe(threadId,binding){const page=await this.page(threadId);return normalise(await page.evaluate(readConversation,this.target(threadId)),this.target(threadId),binding);}
@@ -108,7 +115,7 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
       const reason=/^[a-z_]+$/.test(error.message)?error.message:'connection_needs_attention';
       await fs.writeFile(statusFile,JSON.stringify({at:new Date().toISOString(),state:'attention_required',reason}),{mode:0o600});
       await cloud.request('accounts',{connector_id:CONNECTOR,accounts:[{account_id:`facebook-web:${identity.userId}`,user_id:identity.userId,
-        channel:'facebook',engine_provider:'growth-hq-browser',status:'attention_required',label:'Martin Howard · Messenger',can_reply:false}]}).catch(()=>{});
+        channel:'facebook',engine_provider:'growth-hq-browser',status:'attention_required',label:'Martin Howard · Messenger',can_reply:true}]}).catch(()=>{});
       setStatus('Connection needs attention. No unknown send will be retried. Check Facebook below or the Growth HQ connection settings.');
     }
     await sleep(20000);
