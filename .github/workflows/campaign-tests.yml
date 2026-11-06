@@ -36,6 +36,6 @@ jobs:
         run: |
           alembic upgrade 0008_mentee_earnings
           alembic upgrade head
-          python -c "from app import migrate; assert migrate.current_revision() == migrate.head_revision() == '0009_campaign_workspace'"
+          python -c "from app import migrate; assert migrate.current_revision() == migrate.head_revision() == '0010_whatsapp_keywords'"
       - name: Run exact source suite
         run: pytest -q
