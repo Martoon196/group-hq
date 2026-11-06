@@ -68,6 +68,38 @@ def test_selected_facebook_cloud_transport_keeps_native_owner_binding(admin_clie
     assert error.value.status_code == 409
 
 
+def test_native_discovery_does_not_disconnect_or_claim_other_connector(db, personal_account):
+    user, beeper, _ = personal_account
+    native = {"connector_id": "native-messenger", "accounts": [{"channel": "facebook", "account_id": "facebook-web:123",
+        "user_id": "123", "engine_provider": "growth-hq-browser", "status": "connected", "label": "Own Messenger", "can_reply": False}]}
+    result = personal.discover(db, native)
+    assert len(result["accounts"]) == 1
+    key = result["accounts"][0]["key"]
+    rows = {r["key"]: r for r in personal.catalog(db)["accounts"]}
+    assert rows[beeper.key]["status"] == "connected" and rows[beeper.key]["enabled"]
+    assert rows[key]["can_reply"] is False
+    personal.discover(db, {"accounts": []})
+    rows = {r["key"]: r for r in personal.catalog(db)["accounts"]}
+    assert rows[key]["status"] == "connected" and rows[beeper.key]["status"] == "disconnected"
+    with pytest.raises(HTTPException):
+        personal.discover(db, {"accounts": [{**native["accounts"][0], "engine_provider": "local"}]})
+
+
+def test_native_queue_isolated_from_legacy_worker(db, personal_account):
+    user, beeper, _ = personal_account
+    ident = str(uuid.uuid4())
+    inbox.send(db, user, beeper, "durham-thread", "Requested reply", ident)
+    assert personal.pending(db, "native-messenger")["reply_ids"] == []
+    with pytest.raises(HTTPException) as error:
+        personal.begin(db, ident, "native-messenger")
+    assert error.value.status_code == 403
+    assert db.get(InboxReply, ident).state == "queued"
+    assert personal.begin(db, ident)["dispatch"] is True
+    with pytest.raises(HTTPException):
+        personal.settle(db, ident, {"connector_id": "native-messenger", "state": "outcome_unknown"})
+    assert db.get(InboxReply, ident).state == "calling"
+
+
 def test_adapter_hmac_is_exact_body_and_path_bound(client, db, personal_account):
     _, account, _ = personal_account
     path, raw, headers = signed("accounts", {"accounts": []})

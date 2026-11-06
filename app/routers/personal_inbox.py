@@ -61,12 +61,14 @@ async def desktop(action: str, request: Request, background_tasks: BackgroundTas
             background_tasks.add_task(sync_thread, data["account_key"], result["thread_sha256"], service.owner(db).id)
         elif request.method == "GET" and action == "pending":
             result = service.pending(db)
+        elif request.method == "POST" and action == "pending":
+            result = service.pending(db, service.connector(data))
         elif request.method == "POST" and action.startswith("replies/"):
             parts = action.split("/")
             if len(parts) != 3:
                 raise HTTPException(404)
-            if parts[2] == "begin" and not data:
-                result = service.begin(db, parts[1])
+            if parts[2] == "begin" and set(data).issubset({"connector_id"}):
+                result = service.begin(db, parts[1], service.connector(data))
             elif parts[2] == "settle":
                 result = service.settle(db, parts[1], data)
             else:

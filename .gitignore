@@ -7,5 +7,8 @@ __pycache__/
 tools/whatsapp-keywords/data/
 tools/whatsapp-keywords/node_modules/
 tools/whatsapp-keywords/.env
+tools/native-messenger/node_modules/
+tools/native-messenger/.env
+tools/native-messenger/data/
 # Real ONS extracts are large (the ONSPD is over 100 MB); only data/sample/*.csv is tracked.
 data/*.csv

@@ -20,6 +20,18 @@ BASE = "/api/personal-inbox/v1"
 ACCOUNTS = "personal_inbox.accounts"
 
 
+def connector(data):
+    value = data.get("connector_id", "beeper")
+    if value not in ("beeper", "native-messenger"):
+        problem("Unknown personal connector")
+    return value
+
+
+def connector_for(db, account_key):
+    row = next((r for r in catalog(db)["accounts"] if r["key"] == account_key), None)
+    return row.get("connector_id", "beeper") if row else None
+
+
 def problem(code, status=400):
     raise HTTPException(status, code)
 
@@ -69,6 +81,7 @@ def save_catalog(db, value, actor):
 
 def discover(db, data):
     user = owner(db)
+    source = connector(data)
     rows = data.get("accounts")
     if not isinstance(rows, list) or len(rows) > 5:
         problem("Invalid personal accounts")
@@ -76,29 +89,33 @@ def discover(db, data):
     result, seen = [], set()
     for row in rows:
         if (not isinstance(row, dict) or row.get("channel") not in ("facebook", "linkedin")
-                or row.get("engine_provider") not in ("local", "cloud", "self-hosted", "platform-sdk")):
+                or row.get("engine_provider") not in (("growth-hq-browser",) if source == "native-messenger" else ("local", "cloud", "self-hosted", "platform-sdk"))):
             problem("Only the selected personal connections are supported")
         native, user_id = opaque(row.get("account_id")), opaque(row.get("user_id"))
+        if source == "native-messenger" and (row["channel"] != "facebook" or not user_id.isdecimal()
+                or native != "facebook-web:" + user_id or not isinstance(row.get("can_reply"), bool)):
+            problem("Invalid native Messenger binding")
         key = "personal-" + hashlib.sha256((row["channel"] + "\0" + native).encode()).hexdigest()[:24]
         if key in seen:
             problem("Duplicate personal account")
         seen.add(key)
         previous = old.get(key)
-        if previous and previous["user_id"] != user_id:
+        if previous and (previous["user_id"] != user_id or previous.get("connector_id", "beeper") != source):
             problem("Personal account identity changed", 409)
         result.append({"key": key, "provider": "local", "account_id": native, "user_id": user_id,
             "channel": row["channel"], "label": clean(row.get("label") or row["channel"], 200),
-            "engine_provider": row["engine_provider"],
+            "engine_provider": row["engine_provider"], "connector_id": source,
             "brand": previous.get("brand", "group") if previous else "group", "owner_email": user.email,
-            "credential_env": "GHQ_INBOX_PERSONAL_SECRET", "can_reply": True,
+            "credential_env": "GHQ_INBOX_PERSONAL_SECRET", "can_reply": row.get("can_reply", True),
             "enabled": previous.get("enabled", False) if previous else False,
             "status": row.get("status") if row.get("status") in ("connected", "backfilling", "connecting", "attention_required", "disconnected") else "attention_required"})
     # Missing accounts remain visible as disconnected, never silently rerouted.
-    result.extend({**r, "status": "disconnected"} for k, r in old.items() if k not in seen)
+    result.extend(({**r, "status": "disconnected"} if r.get("connector_id", "beeper") == source else r)
+                  for k, r in old.items() if k not in seen)
     save_catalog(db, {"accounts": result, "seen_at": utcnow().isoformat()}, "desktop:personal-inbox")
     db.commit()
     return {"accounts": [{"key": r["key"], "account_id": r["account_id"], "user_id": r["user_id"],
-                          "channel": r["channel"], "enabled": r["enabled"]} for r in result]}
+                          "channel": r["channel"], "enabled": r["enabled"]} for r in result if r.get("connector_id", "beeper") == source]}
 
 
 def enabled_account(db, key):
@@ -111,6 +128,8 @@ def enabled_account(db, key):
 
 def ingest(db, data):
     account, user = enabled_account(db, data.get("account_key"))
+    if connector_for(db, account.key) != connector(data):
+        problem("Wrong personal connector", 403)
     if data.get("account_id") != account.account_id or data.get("user_id") != account.user_id:
         problem("Wrong personal account", 403)
     value = data.get("thread")
@@ -151,19 +170,22 @@ def ingest(db, data):
     return {"ok": True, "thread_sha256": digest}
 
 
-def pending(db):
+def pending(db, source="beeper"):
     user = owner(db)
-    keys = [a.key for a in inbox.accounts(db) if a.provider == "local" and a.owner_email == user.email]
+    keys = [a.key for a in inbox.accounts(db) if a.provider == "local" and a.owner_email == user.email
+            and connector_for(db, a.key) == source]
     result = db.scalars(select(InboxReply.id).where(InboxReply.account_key.in_(keys),
         InboxReply.user_id == user.id, InboxReply.state == "queued").order_by(InboxReply.created_at).limit(20)).all()
     return {"reply_ids": list(result)}
 
 
-def begin(db, reply_id):
+def begin(db, reply_id, source="beeper"):
     row = db.scalar(select(InboxReply).where(InboxReply.id == reply_id).with_for_update())
     if row is None:
         problem("Unknown reply", 404)
     account, user = enabled_account(db, row.account_key)
+    if connector_for(db, account.key) != source:
+        problem("Wrong personal connector", 403)
     if row.user_id != user.id or row.binding_sha256 != account.binding:
         problem("Reply account changed", 409)
     if row.state != "queued":
@@ -185,6 +207,8 @@ def settle(db, reply_id, data):
     if row is None:
         problem("Unknown reply", 404)
     account, user = enabled_account(db, row.account_key)
+    if connector_for(db, account.key) != connector(data):
+        problem("Wrong personal connector", 403)
     if row.user_id != user.id or row.binding_sha256 != account.binding:
         problem("Reply account changed", 409)
     state = data.get("state")

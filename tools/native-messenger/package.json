@@ -1,0 +1,7 @@
+{
+  "name": "growth-hq-native-messenger",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {"test": "node --test test.cjs", "connect": "node login.cjs"},
+  "dependencies": {"playwright-core": "1.56.1"}
+}
