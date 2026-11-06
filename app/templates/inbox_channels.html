@@ -1,0 +1,17 @@
+{% extends "app_base.html" %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">Growth HQ</p><h1>Inbox connections</h1><p>Pick an account to read and reply. Its default business does not add people to a CRM.</p></div><a class="btn btn-secondary" href="/inbox">Back to inbox</a></div>
+<p><a class="btn btn-primary" href="/inbox/connect">Manage personal connections</a> <a class="btn btn-secondary" href="/crm/channels/whatsapp/keywords">WhatsApp keyword listener</a></p>
+{% for a in accounts %}<section class="card" style="padding:1.25rem;margin:1rem 0"><h2>{{ a.label }}</h2><p>{{ channels[a.channel] }} · {{ brands[a.brand] }}{% if a.owner_email %} · Private to your account{% endif %}</p>
+<p>{% if not a.configured %}Credential setup needed.{% elif a.can_reply %}Configured for reading and replies. Open the inbox to check current connection health.{% else %}Configured for reading; replies are not enabled.{% endif %}</p>
+<a class="btn btn-primary" href="/inbox?account={{ a.key|urlencode }}">Open this inbox</a>
+{% if not a.owner_email %}<form method="post" action="/inbox/channels/brand"><input type="hidden" name="account_key" value="{{ a.key }}"><label>Default business <select name="brand">{% for key,name in brands.items() %}<option value="{{ key }}"{% if a.brand == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label><button class="btn btn-secondary">Save default business</button></form>{% else %}<p><a href="/inbox/connect">Manage account and selected conversations</a></p>{% endif %}</section>{% else %}<p>No account has been configured for this inbox yet.</p>{% endfor %}
+<section class="card" style="padding:1.25rem"><h2>Other channels</h2><ul>
+<li>Facebook Pages, Instagram professional accounts and X: supported by the existing social inbox adapter; each account needs its messaging credential and exact account connection.</li>
+<li>Personal Messenger: your Growth HQ desktop connector. Keep the PC awake for syncing and replies.</li>
+<li>LinkedIn personal messages: the native connection is not built yet. A publishing connection does not provide messages.</li>
+<li>TikTok: your current publishing connection does not provide an inbox.</li>
+<li>YouTube: comments need a channel connection; YouTube has no private-message inbox.</li>
+<li>WhatsApp: existing messaging workspaces and keyword listener remain separate while their full inbox adapter is connected.</li>
+</ul><p>Use Personal for private chats. Associate business conversations with several brands, then choose explicitly whether each CRM receives message history.</p></section>
+{% endblock %}

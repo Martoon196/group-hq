@@ -1,0 +1,11 @@
+{% extends "app_base.html" %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">{{ account.label }}</p><h1>Choose conversations</h1><p>Find the chats you want in Growth HQ. Personal chats can stay personal.</p></div><a class="btn btn-secondary" href="/inbox">Back to inbox</a></div>
+<form method="post" action="/inbox/discover/search" class="card"><input type="hidden" name="account_key" value="{{ account.key }}">
+<label>Search message contents <input name="query" required minlength="2" maxlength="100" placeholder="Durham or keypropertiesuk.co.uk/app"></label><button class="btn btn-primary">Find conversations</button></form>
+{% if registry.request and not registry.request.done %}<p>Search pending. Keep your desktop connector running, then refresh this page.</p>{% endif %}
+{% if registry.coverage %}<p>{{ registry.coverage.count }} matches returned for “{{ registry.coverage.query }}”. {% if not registry.coverage.complete %}Facebook history or pagination is incomplete; these results may not include every matching conversation.{% endif %} {{ registry.coverage.note }}</p>{% endif %}
+<form method="post" action="/inbox/discover/select" class="card"><input type="hidden" name="account_key" value="{{ account.key }}">
+{% for c in registry.candidates %}<label class="inbox-checkbox" style="display:block;padding:0.6rem"><input type="checkbox" name="threads" value="{{ c.threadId }}"{% if c.selected %} checked{% endif %}{% if c.reason or not c.participantId %} disabled{% endif %}> <strong>{{ c.name }}</strong>{% if c.reason %} — {{ c.reason }}{% elif not c.participantId %} — Identity still being checked{% elif c.textOnly %} — Text only; attachments remain in Messenger{% endif %}</label>{% else %}<p>No conversations discovered yet. Search above while the connector is running.</p>{% endfor %}
+<button class="btn btn-primary">Save selected conversations</button><p>This only selects inbox syncing. Add CRM contacts and business associations separately while chatting.</p></form>
+{% endblock %}
