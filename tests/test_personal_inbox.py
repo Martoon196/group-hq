@@ -150,3 +150,93 @@ def test_crm_uses_signed_native_source_and_only_stores_confirmed_ids(db, persona
     with pytest.raises(inbox_crm.CrmUnavailable):
         inbox_crm.connect(db, user, ticket, "mhp", "Durham prospect")
     assert len(db.scalars(select(InboxCrmLink)).all()) == 1
+
+
+def test_conversation_can_have_two_brands_without_auto_copy_and_personal_stops_projection(db, personal_account, monkeypatch, admin_client):
+    from app.services import inbox_organisation as organisation
+    user, account, ticket = personal_account
+    ids = {brand: (str(uuid.uuid4()), str(uuid.uuid4())) for brand in ("kp", "pp")}
+    calls = []
+    def native(actor, brand, action, **payload):
+        calls.append((brand, action, payload))
+        return {"brand": brand, "contactId": ids[brand][0], "workspaceId": ids[brand][1]}
+    monkeypatch.setattr(inbox_crm, "command", native)
+    for brand in ids:
+        response = admin_client.post('/inbox/crm', data={"thread_ticket": ticket, "brand": brand, "display_name": "Buyer"}, follow_redirects=False)
+        assert response.status_code == 303
+    cached = inbox.local_thread(db, account, "durham-thread", user.id)
+    assert inbox_crm.record_messages(db, user, account, "durham-thread", cached.messages) == 0
+    links = inbox_crm.links(db, account, "durham-thread")
+    assert len(links) == 2 and len({link.workspace_id for link in links}) == 2
+    for brand in ids:
+        assert len(inbox.snapshot(user.id, [], brand, db=db, user_email=user.email)[2]) == 1
+    organisation.save(db, user, account, "durham-thread", "business", ["kp", "pp"], ["pp"])
+    assert inbox_crm.record_messages(db, user, account, "durham-thread", cached.messages) == 1
+    assert [c[0] for c in calls if c[1] == 'activity'] == ['pp']
+    organisation.save(db, user, account, "durham-thread", "personal", ["kp", "pp"], ["pp"], "Private conversation")
+    changed = [{**cached.messages[0], "id": "new-message"}]
+    assert inbox_crm.record_messages(db, user, account, "durham-thread", changed) == 0
+    assert inbox.snapshot(user.id, [], 'kp', db=db, user_email=user.email)[2] == []
+    assert len(inbox.snapshot(user.id, [], db=db, user_email=user.email, kind='personal')[2]) == 1
+    assert inbox.resolve(ticket, user.id, user.email, db)[0].account_id == account.account_id
+    assert len(inbox_crm.links(db, account, "durham-thread")) == 2  # Keep history, don't delete contacts.
+
+
+def test_unclassified_personal_account_does_not_inherit_business_filter(db, personal_account):
+    user, account, ticket = personal_account
+    assert inbox.snapshot(user.id, [], 'kp', db=db, user_email=user.email)[2] == []
+    assert len(inbox.snapshot(user.id, [], db=db, user_email=user.email, kind='unclassified')[2]) == 1
+
+
+def test_organisation_rejects_unlinked_copy_and_cross_owner_ticket(admin_client, db, personal_account):
+    user, account, ticket = personal_account
+    response = admin_client.post('/inbox/organise', data={'thread_ticket': ticket, 'kind': 'business', 'brands': 'pp', 'sync_brands': 'pp'})
+    assert response.status_code == 400
+    forged = inbox.ticket(account, 'durham-thread', user.id + 99, 'Buyer')
+    response = admin_client.post('/inbox/organise', data={'thread_ticket': forged, 'kind': 'personal'})
+    assert response.status_code == 409
+
+
+@pytest.fixture
+def native_discovery(db, personal_account):
+    user, _, _ = personal_account
+    found = personal.discover(db, {'connector_id': 'native-messenger', 'accounts': [{'channel': 'facebook', 'account_id': 'facebook-web:123',
+        'user_id': '123', 'engine_provider': 'growth-hq-browser', 'status': 'connected', 'label': 'Own Messenger', 'can_reply': True}]})
+    key = found['accounts'][0]['key']
+    catalog = personal.catalog(db)
+    next(r for r in catalog['accounts'] if r['key'] == key).update(enabled=True, brand='kp')
+    personal.save_catalog(db, catalog, user.email); db.commit()
+    return user, next(a for a in inbox.accounts(db) if a.key == key), {'connector_id': 'native-messenger', 'account_key': key, 'account_id': 'facebook-web:123', 'user_id': '123'}
+
+
+def test_discovery_requires_owner_selection_preserves_native_identity_and_unknown_rows(admin_client, db, native_discovery):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    rows = [{'threadId': '1234', 'participantId': '9876', 'name': 'Buyer', 'textOnly': True},
+            {'threadId': '1235', 'participantId': '', 'name': 'Unsupported buyer', 'reason': 'Format needs support.'}]
+    discovery.report(db, {**payload, 'candidates': rows, 'query': 'Durham', 'complete': False})
+    assert discovery.selections(db, payload)['threads'] == []
+    assert not discovery.permits_thread(db, user.id, account, '1234', '9876')
+    page = admin_client.get('/inbox/discover', params={'account': account.key})
+    assert page.status_code == 200 and 'Unsupported buyer' in page.text and 'Format needs support.' in page.text
+    assert admin_client.post('/inbox/discover/select', data={'account_key': account.key, 'threads': '1235'}).status_code == 400
+    assert admin_client.post('/inbox/discover/select', data={'account_key': account.key, 'threads': '1234'}, follow_redirects=False).status_code == 303
+    assert discovery.permits_thread(db, user.id, account, '1234', '9876')
+    assert not discovery.permits_thread(db, user.id, account, '1234', '9999')
+    with pytest.raises(HTTPException) as error:
+        discovery.report(db, {**payload, 'candidates': [{**rows[0], 'participantId': '9999'}]})
+    assert error.value.status_code == 409
+    discovery.report(db, {**payload, 'candidates': rows})
+    assert len(discovery.selections(db, payload)['threads']) == 1
+    assert not db.scalars(select(InboxCrmLink)).all()
+
+
+def test_discovery_wrong_connector_and_unselected_import_refused(db, native_discovery):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    discovery.report(db, {**payload, 'candidates': [{'threadId': '1234', 'participantId': '9876', 'name': 'Buyer'}]})
+    with pytest.raises(HTTPException):
+        discovery.selections(db, {**payload, 'connector_id': 'beeper'})
+    with pytest.raises(HTTPException) as error:
+        personal.ingest(db, {**payload, 'thread': {'id': '1234', 'participant_id': '9876', 'is_group': False, 'is_merged': False}})
+    assert error.value.status_code == 409

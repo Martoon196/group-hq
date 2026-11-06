@@ -3,6 +3,32 @@ const {normalise,displayedTime}=require('./reader.cjs');
 const {validateAction,allowedUrl,client}=require('./login.cjs');
 const expected={threadId:'12345',participantId:'98765',name:'Example Buyer'};
 const binding={key:'native-example',account_id:'facebook-web:123',user_id:'123',channel:'facebook',timeZone:'Europe/London'};
+const {validateTargets,readSearch,readPeer}=require('./discovery.cjs');
+test('owner-selected conversations are no longer limited to three; selection identity remains exact',()=>{
+  const many=Array.from({length:20},(_,i)=>({...expected,threadId:String(1000+i)}));
+  assert.equal(validateTargets(many).length,20);assert.deepEqual(validateTargets([]),[]);
+  assert.throws(()=>validateTargets([...many,many[0]]),/invalid_selection/);
+  assert.throws(()=>validateTargets([{...expected,participantId:'not-a-native-id'}]),/invalid_selection/);
+  assert.throws(()=>validateTargets(Array(101).fill(expected)),/invalid_selection/);
+});
+test('discovery extracts only visible Facebook thread links and reports restoration',()=>{
+  const vm=require('node:vm');
+  const root={innerText:'Syncing chat history. Loading...',querySelectorAll:()=>[
+    {href:'https://www.facebook.com/messages/e2ee/t/12345/',innerText:'Example Buyer\nDurham'},
+    {href:'https://www.facebook.com/messages/t/12346/',innerText:'Another Buyer\nDurham'},
+    {href:'https://www.facebook.com/messages/e2ee/t/999/',innerText:''},
+    {href:'https://evil.test/messages/e2ee/t/12345/',innerText:'Wrong origin'}]};
+  const value=vm.runInNewContext('('+readSearch.toString()+')()',{URL,document:{querySelector:()=>root}});
+  assert.equal(value.rows.length,2);assert.equal(value.rows[0].threadId,'12345');assert.equal(value.rows[0].name,'Example Buyer');
+  assert.equal(value.rows[1].encrypted,false);assert.equal(value.restoring,true);
+});
+test('candidate identity requires one exact conversation log and unanimous native profile ID',()=>{
+  const vm=require('node:vm');let ids=['98765'];
+  const document={querySelectorAll:selector=>selector==='[role="log"]'?[{getAttribute:()=> 'Messages in conversation with Example Buyer'}]:
+    ids.map(id=>({innerText:'Example Buyer',href:'https://www.facebook.com/'+id}))};
+  const check=()=>vm.runInNewContext('('+readPeer.toString()+')("Example Buyer")',{URL,document});
+  assert.equal(check(),'98765');ids.push('111');assert.equal(check(),null);ids=[];assert.equal(check(),null);
+});
 const fixture=()=>({threadId:'12345',participantId:'98765',name:'Example Buyer',observedAt:'2026-11-06T19:00:00Z',introductionVisible:true,virtualised:false,composerReady:true,
   messages:[{id:'98765@msgr.123456789',label:'At Wednesday 13:32, You: Is Durham the area you want?',heading:'You sent'},
     {id:'98765@msgr.123456790',label:'At Wednesday 21:21, Example: Yes, Durham please.',heading:'Example'}]});

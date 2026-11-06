@@ -83,7 +83,7 @@ def links(db, account, thread_id):
         InboxCrmLink.thread_sha256 == digest, InboxCrmLink.account_identity_sha256 == account.identity)).all()
 
 
-def connect(db, user, thread_ticket, brand, display_name, contact_id=""):
+def connect(db, user, thread_ticket, brand, display_name, contact_id="", copy_messages=True):
     account, bound, origin = source(db, user, thread_ticket)
     if brand not in inbox.BRANDS:
         raise HTTPException(400, "Choose a business for this CRM contact.")
@@ -104,6 +104,16 @@ def connect(db, user, thread_ticket, brand, display_name, contact_id=""):
         .values(account_identity_sha256=account.identity, participant_id=origin["participantId"])
         .on_conflict_do_nothing(index_elements=[InboxCrmLink.account_key, InboxCrmLink.thread_sha256, InboxCrmLink.brand]))
     db.commit()
+    from . import inbox_organisation
+    settings = inbox_organisation.choices(db, user.id, account, bound["thread"], links(db, account, bound["thread"]))
+    # Newly added brands require an explicit message-copy choice from the UI.
+    syncing = set(settings["sync_brands"])
+    if copy_messages:
+        syncing.add(brand)
+    else:
+        syncing.discard(brand)
+    inbox_organisation.save(db, user, account, bound["thread"], "business",
+        set(settings["brands"]) | {brand}, syncing, settings["note"])
     # Contacts/points are created only by Relaunch72; cache IDs here only after its confirmed response.
     return result
 
@@ -112,7 +122,12 @@ def record_messages(db, user, account, thread_id, messages, *, limit=10):
     """Safe to retry the native idempotent command. Never sends a provider message."""
     from ..models import InboxCrmActivityReceipt
     recorded = 0
-    for link in links(db, account, thread_id):
+    from . import inbox_organisation
+    linked = links(db, account, thread_id)
+    settings = inbox_organisation.choices(db, user.id, account, thread_id, linked)
+    for link in linked:
+        if not inbox_organisation.permits_projection(settings, link.brand):
+            continue
         cached = db.get(InboxThread, (account.key, link.thread_sha256)) if account.provider == "local" else None
         participant = cached.participant_id if cached else link.participant_id
         if not participant:

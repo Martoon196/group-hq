@@ -84,7 +84,7 @@ function snapshot(binding,c,page){
 class GrowthHqClient {
   constructor(secret,fetcher=fetch){if(typeof secret!=='string'||secret.length<32||secret.length>256)throw Error('missing_connector_key');this.secret=secret;this.fetcher=fetcher;}
   async request(action,value,method='POST'){
-    if(!/^(accounts|threads|pending|replies\/[a-f0-9-]{36}\/(begin|settle))$/u.test(action))throw Error('invalid_action');
+    if(!/^(accounts|threads|pending|candidates|selections|replies\/[a-f0-9-]{36}\/(begin|settle))$/u.test(action))throw Error('invalid_action');
     const path=BASE+'/'+action,body=method==='GET'?'':JSON.stringify(value??{}),stamp=String(Math.floor(Date.now()/1000));
     const signature=crypto.createHmac('sha256',this.secret).update(`${stamp}\n${method}\n${path}\n`).update(body).digest('hex');
     const r=await this.fetcher(GHQ+path,{method,redirect:'error',signal:AbortSignal.timeout(20000),

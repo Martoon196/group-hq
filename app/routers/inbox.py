@@ -7,11 +7,36 @@ from sqlalchemy.orm import Session
 from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import User
-from ..services import inbox as service, inbox_crm
+from ..services import inbox as service, inbox_crm, inbox_organisation
 from ..services.inbox_providers import InboxError, client
 from ..templating import go, render
 
 router = APIRouter()
+
+
+@router.get("/inbox/channels")
+def channels(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    accounts = [a for a in service.accounts(db) if not a.owner_email or a.owner_email == user.email]
+    response = render(request, "inbox_channels.html", {"user": user, "section": "inbox", "accounts": accounts,
+        "brands": service.BRANDS, "channels": service.CHANNELS})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.post("/inbox/channels/brand", dependencies=[Depends(check_origin)])
+def channel_brand(account_key: str = Form(...), brand: str = Form(...), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    from sqlalchemy.dialects.postgresql import insert
+    from ..models import AppSetting, utcnow
+    from ..services.audit import audit
+    account = next((a for a in service.accounts(db) if a.key == account_key and not a.owner_email), None)
+    if account is None or brand not in service.BRANDS:
+        raise HTTPException(400, "Choose a business account and valid brand.")
+    key = "inbox.account.brand." + account.identity
+    db.execute(insert(AppSetting).values(key=key, value={"brand": brand}, updated_by=user.email, updated_at=utcnow())
+        .on_conflict_do_update(index_elements=[AppSetting.key], set_={"value": {"brand": brand}, "updated_by": user.email, "updated_at": utcnow()}))
+    audit(db, user, "inbox.account.brand", account.key, after={"brand": brand})
+    db.commit()
+    return go("/inbox/channels", ok="Default brand saved. Existing conversation choices and CRM links remain separate.")
 
 
 def thread_context(db, user, value, cursor=None):
@@ -27,10 +52,12 @@ def thread_context(db, user, value, cursor=None):
             messages, next_cursor = client(account).messages(bound["thread"], cursor)
     except InboxError as exc:
         error = service.MESSAGES.get(exc.code, "Connection unavailable.")
+    linked = inbox_crm.links(db, account, bound["thread"])
     return {"account": account, "conversation_name": bound["name"], "thread_ticket": value,
             "messages": messages, "next_cursor": next_cursor, "thread_error": error,
             "message_window_limited": account.provider == "local" and cached.has_more,
-            "crm_links": inbox_crm.links(db, account, bound["thread"]), "crm_configured": bool(service.config.R72_GROUP_HQ_INBOX_SECRET),
+            "crm_links": linked, "organisation": inbox_organisation.choices(db, user.id, account, bound["thread"], linked),
+            "kinds": inbox_organisation.KINDS, "crm_configured": bool(service.config.R72_GROUP_HQ_INBOX_SECRET),
             "reply_receipts": service.replies(db, account, bound["thread"]), "request_id": str(uuid.uuid4())}
 
 
@@ -38,11 +65,12 @@ def thread_context(db, user, value, cursor=None):
 def inbox(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     selected = request.query_params.getlist("account")
     brand, channel = request.query_params.get("brand", ""), request.query_params.get("channel", "")
+    kind = request.query_params.get("kind", "")
     ctx = {"user": user, "section": "inbox", "brands": service.BRANDS, "channels": service.CHANNELS,
            "selected": selected, "brand_filter": brand, "channel_filter": channel,
-           "accounts": [], "results": [], "threads": [], "setup_error": None}
+           "accounts": [], "results": [], "threads": [], "setup_error": None, "kind_filter": kind, "kinds": inbox_organisation.KINDS}
     try:
-        ctx["accounts"], ctx["results"], ctx["threads"] = service.snapshot(user.id, selected, brand, channel, db=db, user_email=user.email)
+        ctx["accounts"], ctx["results"], ctx["threads"] = service.snapshot(user.id, selected, brand, channel, db=db, user_email=user.email, kind=kind)
     except InboxError:
         ctx["setup_error"] = "Inbox account configuration needs checking. Existing channels remain available in their workspaces."
     value = request.query_params.get("thread")
@@ -81,17 +109,30 @@ def reply(request: Request, thread_ticket: str = Form(...), request_id: str = Fo
 
 @router.post("/inbox/crm", dependencies=[Depends(check_origin)])
 def crm_connect(thread_ticket: str = Form(...), brand: str = Form(...), display_name: str = Form(""),
-                contact_id: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+                contact_id: str = Form(""), copy_messages: bool = Form(False), db: Session = Depends(get_db), user: User = Depends(require_admin)):
     from urllib.parse import urlencode
     account, bound = service.resolve(thread_ticket, user.id, user.email, db)
     try:
-        inbox_crm.connect(db, user, thread_ticket, brand, display_name, contact_id)
+        inbox_crm.connect(db, user, thread_ticket, brand, display_name, contact_id, copy_messages=copy_messages)
     except inbox_crm.CrmUnavailable as error:
         return go("/inbox?" + urlencode({"account": account.key, "thread": thread_ticket}), err=str(error))
     if account.provider == "local":
         from hashlib import sha256
         inbox_crm.sync_thread(account.key, sha256(bound["thread"].encode()).hexdigest(), user.id)
     return go("/inbox?" + urlencode({"account": account.key, "thread": thread_ticket}), ok="Conversation linked to the selected business CRM.")
+
+
+@router.post("/inbox/organise", dependencies=[Depends(check_origin)])
+def organise(thread_ticket: str = Form(...), kind: str = Form(...), brands: list[str] = Form([]),
+             sync_brands: list[str] = Form([]), note: str = Form(""),
+             db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    from urllib.parse import urlencode
+    account, bound = service.resolve(thread_ticket, user.id, user.email, db)
+    linked = inbox_crm.links(db, account, bound["thread"])
+    if set(sync_brands) - {link.brand for link in linked}:
+        raise HTTPException(400, "Link a CRM contact before choosing message copying.")
+    inbox_organisation.save(db, user, account, bound["thread"], kind, brands, sync_brands, note)
+    return go("/inbox?" + urlencode({"account": account.key, "thread": thread_ticket}), ok="Conversation choices saved. Your reply channel has not changed.")
 
 
 @router.get("/inbox/crm/search")

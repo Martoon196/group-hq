@@ -10,7 +10,7 @@
 </div>
 {% for a in catalog.accounts %}<form method="post" action="/inbox/connect" class="card" style="margin-top:1rem;padding:1.25rem">
 <h2>{{ a.label }}</h2><p>{{ a.channel }} · {{ a.status }}{% if a.engine_provider == 'growth-hq-browser' %} · Growth HQ isolated browser{% elif a.engine_provider %} · Beeper {{ a.engine_provider }} connection{% endif %}</p><input type="hidden" name="account_key" value="{{ a.key }}">
-{% if a.connector_id == 'native-messenger' %}<p>Initial connection: Sabir Malik and Emma Combes only. History is the available Messenger window, with timestamps accurate to the displayed minute. {% if not a.can_reply %}Replies are waiting for the connector to be ready.{% endif %}</p>{% endif %}
+{% if a.connector_id == 'native-messenger' %}<p>Choose the conversations you want to bring into your inbox. History is the available Messenger window, with timestamps accurate to the displayed minute. {% if not a.can_reply %}Replies are waiting for the connector to be ready.{% endif %}</p>{% if a.enabled %}<p><a class="btn btn-secondary" href="/inbox/discover?account={{ a.key|urlencode }}">Find and choose conversations</a></p>{% endif %}{% endif %}
 <label>Default business <select name="brand">{% for key,name in brands.items() %}<option value="{{ key }}"{% if a.brand == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
 <label><input type="checkbox" name="enabled" value="true"{% if a.enabled %} checked{% endif %}> Show and sync this account in my Growth HQ inbox</label>
 <button class="btn btn-primary" type="submit">Save account</button></form>{% else %}<p>No personal accounts have been discovered yet.</p>{% endfor %}
