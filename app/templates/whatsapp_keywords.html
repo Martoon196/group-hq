@@ -1,0 +1,30 @@
+{% extends "app_base.html" %}
+{% set title = "WhatsApp keywords | Growth HQ" %}
+{% block content %}
+<a href="/crm/channels/whatsapp" class="help">← WhatsApp connections</a>
+<div class="page-title"><span class="eyebrow">WhatsApp · Group requests</span><h1>A keyword. A personal reply.</h1></div>
+<p>Choose the business, the groups and exactly what people receive. This listener uses your 07510… WhatsApp account. MHP’s separate business number handles its official API messages.</p>
+<section class="panel"><h2>Your connection</h2>
+{% if inventory.groups %}<p>Group list received {{ inventory.checkedAt }}. Choose from the groups below.</p>{% else %}<p>Link the group listener using WhatsApp → Linked devices. Your groups will then appear here. No groups are selected automatically.</p>{% endif %}
+{% if not connected %}<p class="help">The listener connection still needs configuring. You can view this editor; sending is not connected yet.</p>{% endif %}
+<p class="help">Only matching group requests and private STOP/START controls are submitted. Other personal chats are not imported.</p></section>
+<div class="wa-layout mt-2"><section class="panel"><h2>{{ 'Edit rule' if edit else 'Create a reply rule' }}</h2>
+<form method="post" action="/crm/channels/whatsapp/keywords">
+<input type="hidden" name="revision" value="{{ saved.revision }}"><input type="hidden" name="rule_id" value="{{ edit.id if edit else '' }}">
+<label>Rule name<input name="name" maxlength="100" value="{{ edit.name if edit else '' }}" placeholder="Income action plan" required></label>
+<label>Business<select name="brand">{% for code,label in brands.items() %}<option value="{{ code }}"{% if edit and edit.brand == code %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Keywords · one per line<textarea name="keywords" rows="3" required placeholder="Income">{{ edit.keywords|join('\n') if edit else '' }}</textarea></label>
+<label>Match<select name="match_mode"><option value="exact"{% if not edit or edit.matchMode == 'exact' %} selected{% endif %}>Just the keyword (punctuation is fine)</option><option value="word"{% if edit and edit.matchMode == 'word' %} selected{% endif %}>Keyword anywhere in the message</option></select></label>
+<label>Private reply<textarea name="message" maxlength="4000" rows="6" required placeholder="Hi {name}, here’s the link you asked for…">{{ edit.message if edit else '' }}</textarea></label>
+<p class="help">Use {name} for their first name. Put your destination link directly in the message.</p>
+<fieldset><legend>Groups to listen in</legend>{% for group in inventory.groups or [] %}<label><input type="checkbox" name="group_ids" value="{{ group.id }}"{% if edit and group.id in edit.groupIds %} checked{% endif %}> {{ group.name }}</label>{% else %}<p>Connect the listener first to choose groups.</p>{% endfor %}</fieldset>
+<label><input type="checkbox" name="requested_reply" value="true"> I have told these group members that this keyword requests this private reply.</label>
+<label><input type="checkbox" name="enabled" value="true"{% if edit and edit.enabled %} checked{% endif %}> Enable this rule for new requests</label>
+<p class="help">Each person receives a rule’s reply once. STOP blocks later replies from this listener; START clears that block. Editing a rule never re-sends it to previous recipients.</p>
+<button class="btn btn-primary" type="submit"{% if not inventory.groups %} disabled{% endif %}>Save reply rule</button>{% if edit %} <a class="btn" href="/crm/channels/whatsapp/keywords">New rule</a>{% endif %}
+</form></section><section class="panel"><h2>Your rules</h2>
+{% for rule in saved.rules %}<article><h3>{{ rule.name }}</h3><p>{{ brands[rule.brand] }} · {{ 'Enabled' if rule.enabled else 'Paused' }} · {{ rule.keywords|join(', ') }}</p><p>{{ rule.message }}</p><a class="btn" href="?edit={{ rule.id }}">Edit / pause</a><hr></article>{% else %}<p>No rules yet. Create one after linking the listener.</p>{% endfor %}
+<h2>Recent keyword enquiries</h2><p class="help">These are WhatsApp Web requests awaiting canonical CRM identity matching, not Meta-verified contacts. “Sent” means WhatsApp accepted the DM, not a delivery/read receipt. Interrupted sends need checking and are never retried automatically.</p>
+{% for job in deliveries %}<article><strong>{{ job.sender_name or 'Group member' }}</strong><p>+{{ job.sender_phone }} · {{ brands[job.brand] }} · {{ job.state|replace('_',' ') }}</p><small>{{ job.created_at|uk }}</small><hr></article>{% else %}<p>Matching requests appear here after the listener is connected.</p>{% endfor %}
+</section></div>
+{% endblock %}

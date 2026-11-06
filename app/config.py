@@ -13,6 +13,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent          # repository root (alembic.ini lives here)
 APP_DIR = Path(__file__).resolve().parent
 
+# Dedicated group adapter only. Never reuse the read-only Relaunch72 bridge token.
+WHATSAPP_KEYWORD_ADAPTER_SECRET = os.environ.get("WHATSAPP_KEYWORD_ADAPTER_SECRET", "")
+
 
 def _bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
