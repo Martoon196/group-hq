@@ -10,8 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from threading import Lock
+from time import monotonic
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -206,15 +209,22 @@ class Transport:
 
 
 class Zernio(Transport):
+    # Only older pages are shared. Every reader must first obtain a fresh,
+    # account-bound first page, even when all subsequent pages are cached.
+    _older_pages = OrderedDict()
+    _pages_lock = Lock()
+
     def _bound(self, row, thread_id=None):
         if (row.get("accountId") != self.account.account_id or row.get("platform") != self.account.channel
                 or (thread_id is not None and row.get("conversationId") != thread_id)):
             raise InboxError("unbound_target")
 
-    def conversations(self):
+    def conversation_page(self, cursor=None):
         a = self.account
-        body = self.request("GET", "/api/v1/inbox/conversations", params={
-            "profileId": a.profile_id, "accountId": a.account_id, "limit": 100, "sortOrder": "desc"})
+        params = {"profileId": a.profile_id, "accountId": a.account_id, "limit": 100, "sortOrder": "desc"}
+        if cursor is not None:
+            params["cursor"] = cursor
+        body = self.request("GET", "/api/v1/inbox/conversations", params=params)
         result = []
         for item in rows(body, "data"):
             self._bound(item)
@@ -224,7 +234,45 @@ class Zernio(Transport):
         meta = object_field(body, "meta")
         if meta.get("failedAccounts") or meta.get("accountsFailed"):
             raise InboxError("provider_unavailable")
-        return result, object_field(body, "pagination").get("hasMore") is True
+        return result, object_field(body, "pagination").get("hasMore") is True, next_cursor(body)
+
+    def conversations(self):
+        first, more, cursor = self.conversation_page()
+        by_id = {row["id"]: row for row in first}
+        visited = set()
+        fetched = False
+        binding = self.account.binding
+        while more and cursor and cursor not in visited:
+            visited.add(cursor)
+            key = (binding, cursor)
+            with self._pages_lock:
+                cached = self._older_pages.get(key)
+                if cached and cached[0] > monotonic():
+                    self._older_pages.move_to_end(key)
+                    page = cached[1]
+                else:
+                    self._older_pages.pop(key, None)
+                    page = None
+            if page is None:
+                # Grow the visible list on each scan without making an owner
+                # wait for an unbounded series of calls to their social account.
+                if fetched:
+                    break
+                try:
+                    page = self.conversation_page(cursor)
+                except InboxError as error:
+                    if error.code not in ("rate_limited", "provider_unavailable"):
+                        raise
+                    break
+                with self._pages_lock:
+                    self._older_pages[key] = (monotonic() + 900, page)
+                    if len(self._older_pages) > 64:
+                        self._older_pages.popitem(last=False)
+                fetched = True
+            items, more, cursor = page
+            for row in items:
+                by_id.setdefault(row["id"], row)
+        return list(by_id.values()), more
 
     def messages(self, thread_id, cursor=None):
         params = {"accountId": self.account.account_id, "sortOrder": "desc", "limit": 100}

@@ -44,7 +44,7 @@
 <p>Your existing email, SMS and WhatsApp workspaces continue to work. Personal Messenger and LinkedIn need their own account connection.</p>
 <a class="btn btn-primary" href="/crm">Open your workspaces</a></div>{% endif %}
 {% for result in results %}{% if result.error or result.has_more %}<p class="inbox-notice"><strong>{{ result.account.label }}:</strong>
-{{ result.error or ('Showing the latest 2,000 imported conversations.' if result.account.provider == 'local' else 'More conversations are available in the original inbox.') }}</p>{% endif %}{% endfor %}
+{{ result.error or ('Showing the latest 2,000 imported conversations.' if result.account.provider == 'local' else 'More conversations are available. Refresh to check for older chats.' if result.account.provider == 'zernio' else 'More conversations are available in the original inbox.') }}</p>{% endif %}{% endfor %}
 <div class="inbox-layout">
   <section class="inbox-list card" aria-label="Conversations">
     <h2>Conversations</h2>
