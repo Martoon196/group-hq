@@ -8,7 +8,7 @@ from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import User
 from ..services import personal_inbox as service
-from ..services import inbox_discovery
+from ..services import inbox_discovery, whatsapp_direct
 from ..services.audit import audit
 from ..services.inbox_providers import BRANDS, InboxError
 from ..templating import go, render
@@ -46,8 +46,9 @@ def discovery_select(account_key: str = Form(...), threads: list[str] = Form([])
     db.execute(text("SELECT pg_advisory_xact_lock(741935835)"))
     saved = inbox_discovery.read(db, user.id, account)
     candidates = {r["threadId"]: r for r in saved["candidates"]}
-    if set(threads) - set(candidates) or len(set(threads)) > 100:
-        raise HTTPException(400, "Choose up to 100 discovered conversations.")
+    if set(threads) - set(candidates):
+        raise HTTPException(400, "Choose discovered conversations.")
+    threads = set(threads)
     for row in candidates.values():
         row["selected"] = row["threadId"] in threads
         if row["selected"] and (not row["participantId"] or row["reason"]):
@@ -83,10 +84,18 @@ def require_personal_owner(user):
 def connect(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     require_personal_owner(user)
     response = render(request, "personal_inbox_connect.html", {"user": user, "section": "inbox",
-        "catalog": service.catalog(db), "brands": BRANDS,
+        "catalog": service.catalog(db), "brands": BRANDS, "whatsapp": whatsapp_direct.status(db), "wa_online": whatsapp_direct.online(db),
         "configured": 32 <= len(config.GHQ_PERSONAL_INBOX_SECRET) <= 256})
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@router.post("/inbox/connect/whatsapp", dependencies=[Depends(check_origin)])
+def save_whatsapp(collect: bool = Form(False), reply: bool = Form(False),
+                  db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    require_personal_owner(user)
+    whatsapp_direct.configure(db, user, collect, reply)
+    return go("/inbox/connect", ok="Personal WhatsApp settings saved.")
 
 
 @router.post("/inbox/connect", dependencies=[Depends(check_origin)])
@@ -119,6 +128,20 @@ async def desktop(action: str, request: Request, background_tasks: BackgroundTas
             result = inbox_discovery.report(db, data)
         elif request.method == "POST" and action == "selections":
             result = inbox_discovery.selections(db, data)
+        elif request.method == "POST" and action == "history":
+            from ..services.inbox_archive import store_history
+            account, user = service.enabled_account(db, data.get("account_key"))
+            connector_id = service.connector(data)
+            if (account.channel not in ("facebook", "linkedin") or connector_id != service.connector_for(db, account.key) or account.account_id != data.get("account_id")
+                    or account.user_id != data.get("user_id")):
+                raise HTTPException(403, "Wrong history connection.")
+            thread = data.get("thread")
+            if not isinstance(thread, dict):
+                raise HTTPException(400, "Missing conversation.")
+            if connector_id == "native-messenger" and (not inbox_discovery.read(db, user.id, account).get("candidates")
+                    or not inbox_discovery.permits_thread(db, user.id, account, thread.get("id"), thread.get("participant_id"))):
+                raise HTTPException(403, "Conversation is outside your sync selection.")
+            result = store_history(db, user, account, data)
         elif request.method == "POST" and action == "threads":
             result = service.ingest(db, data)
             from ..services.inbox_crm import sync_thread

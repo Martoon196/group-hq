@@ -31,7 +31,7 @@ def _digest(parts):
 
 
 def available(account, user):
-    return account.configured and account.can_reply and (
+    return account.provider != "r72_whatsapp" and account.configured and account.can_reply and (
         not account.owner_email or account.owner_email == user.email.lower())
 
 

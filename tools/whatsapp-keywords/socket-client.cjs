@@ -43,16 +43,42 @@ class SocketClient extends EventEmitter {
   async connect() {
     if(this.closed)return;
     const p=this.provider;
+    let fullHistory=false;
+    if (!this.pairOnly && this.prepareHistory) {
+      try { fullHistory=await this.prepareHistory(); } catch { /* Older servers still support group rules. */ }
+    }
     const socket=p.default({auth:this.auth.state,logger:this.logger,
-      browser:p.Browsers.ubuntu('Chrome'),markOnlineOnConnect:false,syncFullHistory:false,
-      shouldSyncHistoryMessage:()=>false,emitOwnEvents:false,generateHighQualityLinkPreview:false,
+      browser:fullHistory ? p.Browsers.windows('Desktop') : p.Browsers.ubuntu('Chrome'),markOnlineOnConnect:false,syncFullHistory:fullHistory,
+      shouldSyncHistoryMessage:()=>!this.pairOnly && Boolean(this.allowHistory?.()),emitOwnEvents:false,generateHighQualityLinkPreview:false,
       connectTimeoutMs:30000,qrTimeout:60000});
     this.socket=socket;this.ready=false;
     socket.ev.on('creds.update',()=>{void this.auth.saveCreds().catch(()=>this.persistenceFailed());});
     socket.ev.on('connection.update',update=>{void this.connectionUpdate(socket,update).catch(()=>this.persistenceFailed());});
+    socket.ev.on('messaging-history.set',bundle=>{
+      if (!this.pairOnly && !this.closed && socket===this.socket && this.allowHistory?.()) {
+        this.emit('direct_history',bundle,p);
+      }
+    });
+    socket.ev.on('chats.upsert',chats=>{
+      if (!this.pairOnly && !this.closed && socket===this.socket && this.allowHistory?.()) {
+        const messages=chats.flatMap(c=>(c.messages||[]).map(entry=>entry.message).filter(Boolean));
+        this.emit('direct_history',{chats,messages},p);
+      }
+    });
     socket.ev.on('messages.upsert',event=>{
-      if(this.pairOnly||!this.ready||this.closed||socket!==this.socket||event.type!=='notify'||event.requestId)return;
+      if(this.pairOnly||!this.ready||this.closed||socket!==this.socket)return;
+      if (this.allowHistory?.()) {
+        const archived=(event.messages||[]).filter(m=>event.type==='append' || event.requestId ||
+          Number(m.messageTimestamp)*1000 < this.connectedAt-2000);
+        if (archived.length) this.emit('direct_history',{chats:[],messages:archived},p);
+      }
+      if(event.type!=='notify'||event.requestId)return;
       for(const packet of event.messages||[]) {
+        if (this.allowDirect?.()) {
+          const {privateNotification} = require('./direct-inbox.cjs');
+          const event = privateNotification(packet, this.connectedAt, p, this.info.wid._serialized);
+          if (event) this.emit('direct_message', event);
+        }
         const message=incomingMessage(packet,this.connectedAt,p);
         if(!message)continue;
         const raw=message.author||message.from;

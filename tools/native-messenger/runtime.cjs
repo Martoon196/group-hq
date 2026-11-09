@@ -4,6 +4,7 @@ const {readConversation,normalise}=require('./reader.cjs');
 const {GrowthHqClient}=require('../personal-inbox/client.cjs');
 const {openAuthState}=require('../whatsapp-keywords/socket-auth.cjs');
 const {discover,validateTargets,AvailableDiscovery}=require('./discovery.cjs');
+const {MessengerHistory}=require('./archive.cjs');
 const CONNECTOR='native-messenger';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
@@ -101,10 +102,25 @@ async function seedExisting(cloud,identityPacket,threads){
     query:'Existing imported conversations',complete:false,
     note:'Retained existing named conversations. Available-chat discovery is controlled by the owner in Growth HQ.'});
 }
+async function selections(cloud,identityPacket){
+  let cursor=null,result=null;const threads=new Map(),seen=new Set();
+  do{
+    const page=await cloud.request('selections',{...identityPacket,limit:250,...(cursor?{cursor}:{})});
+    result??=page;validateTargets(page.threads);
+    for(const row of page.threads){const previous=threads.get(row.threadId);
+      if(previous&&(previous.participantId!==row.participantId||previous.threadKind!==row.threadKind))throw Error('selection_identity_changed');
+      threads.set(row.threadId,row);}
+    cursor=page.next_cursor??null;
+    if(cursor!==null&&(typeof cursor!=='string'||!cursor.length||cursor.length>4096||seen.has(cursor)))throw Error('invalid_selection_cursor');
+    if(cursor)seen.add(cursor);
+  }while(cursor);
+  return {...result,threads:[...threads.values()],next_cursor:null};
+}
 async function run({context,identity,directory,setStatus,isPaused,secret,threads}){
   validateTargets(threads);
   const adapter=new MessengerAdapter(context,identity,threads),cloud=new GrowthHqClient(secret);
   const available=new AvailableDiscovery(context);let syncOffset=0;
+  const history=new MessengerHistory(context);
   const state=await openAuthState(path.join(directory,'journal'),{BufferJSON:{},initAuthCreds:()=>({deliveries:{}})});
   let stopped=false,searching=null;context.on('close',()=>{stopped=true;});
   const statusFile=path.join(directory,'runtime-status.json');
@@ -120,22 +136,23 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
       if(!binding.enabled){setStatus('Facebook connected. Choose Key Properties UK and enable this account in Growth HQ → Inbox → Connections.');await sleep(10000);continue;}
       await settle(cloud,state);
       const identityPacket={connector_id:CONNECTOR,account_key:binding.key,account_id:binding.account_id,user_id:binding.user_id};
-      let selection=await cloud.request('selections',identityPacket);
+      let selection=await selections(cloud,identityPacket);
       if(!selection.initialised){
         await seedExisting(cloud,identityPacket,threads);
-        selection=await cloud.request('selections',identityPacket);
+        selection=await selections(cloud,identityPacket);
       }
       if(selection.sync_all===true&&!searching){
         const result=await available.scan(selection.threads);
         if(result){await cloud.request('candidates',{...identityPacket,...result,query:'All available private chats'});
-          selection=await cloud.request('selections',identityPacket);}
+          selection=await selections(cloud,identityPacket);}
       }else if(selection.sync_all!==true){await available.close();}
       adapter.threads=validateTargets(selection.threads);
       if(selection.request&&!selection.request.done&&!searching){
         const request=selection.request;
-        searching=discover(context,request.query).then(result=>cloud.request('candidates',{...identityPacket,...result,query:request.query,request_id:request.id}))
+        searching=discover(context,request.query,(result,done)=>cloud.request('candidates',{...identityPacket,...result,
+          query:request.query,request_id:request.id,request_done:done}),isPaused)
           .catch(()=>cloud.request('candidates',{...identityPacket,candidates:[],query:request.query,request_id:request.id,complete:false,
-            note:'Messenger search could not finish. Check the connection and try again.'}).catch(()=>{})).finally(()=>{searching=null;});
+            request_done:!isPaused(),note:'Messenger search could not finish. Check the connection and try again.'}).catch(()=>{})).finally(()=>{searching=null;});
       }
       const counts=[];
       await adapter.verifyIdentity(); // Recheck the owner after discovery, before ingesting any body.
@@ -144,14 +161,16 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
       for(const target of batch.threads){
         if(isPaused())break;
         try{const packet=await adapter.observe(target.threadId,binding);if(!packet){counts.push({threadId:target.threadId,count:0,skipped:'no_supported_text'});continue;}
-          await cloud.request('threads',{connector_id:CONNECTOR,...packet});counts.push({threadId:target.threadId,count:packet.thread.messages.length,hasMore:packet.thread.has_more});}
+          await cloud.request('threads',{connector_id:CONNECTOR,...packet});history.noticeRecent(state,target,binding,packet.thread.messages);
+          counts.push({threadId:target.threadId,count:packet.thread.messages.length,hasMore:packet.thread.has_more});}
         catch{counts.push({threadId:target.threadId,count:0,skipped:'conversation_needs_attention'});}
       }
       if(isPaused())continue;
       const pending=await cloud.request('pending',{connector_id:CONNECTOR});
       for(const id of pending.reply_ids??[]){if(isPaused())break;await dispatch(adapter,cloud,state,binding,id,isPaused);}
+      const historyProgress=await history.tick(adapter,cloud,state,binding,adapter.threads,isPaused);
       const result={at:new Date().toISOString(),state:'connected',syncAll:selection.sync_all===true,
-        selectedCount:adapter.threads.length,batchCount:batch.threads.length,counts};await fs.writeFile(statusFile,JSON.stringify(result),{mode:0o600});
+        selectedCount:adapter.threads.length,batchCount:batch.threads.length,counts,history:historyProgress};await fs.writeFile(statusFile,JSON.stringify(result),{mode:0o600});
       setStatus(selection.sync_all===true?'Connected. Available private one-to-one chats are being discovered and synced in batches. Personal chats stay personal.'
         :'Connected. Your selected conversations are syncing to Growth HQ. Replies use this Facebook account.');
     }catch(error){
@@ -164,6 +183,7 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
     await sleep(20000);
   }
   await available.close();
+  await history.close();
   await state.flush();
 }
-module.exports={MessengerAdapter,dispatch,settle,nextBatch,seedExisting,run};
+module.exports={MessengerAdapter,dispatch,settle,nextBatch,seedExisting,selections,run};

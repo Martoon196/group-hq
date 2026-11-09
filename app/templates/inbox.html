@@ -17,6 +17,7 @@
 {% endmacro %}
 {% block head %}<link rel="stylesheet" href="/assets/inbox.css">{% endblock %}
 {% block content %}
+<a class="btn btn-secondary" href="/inbox/history">Message history</a>
 <div class="page-head"><div><p class="eyebrow">Growth HQ</p><h1>Inbox</h1>
 <p>Personal and business conversations in one place. Replies use the original account and channel.</p></div>
 <a class="btn btn-secondary" href="/inbox/automations">Reply rules &amp; handoff</a></div>
@@ -66,13 +67,13 @@
     <p>{{ triage.intent }}{% for b in triage.brands %} · {{ brands[b] }}{% endfor %}</p>
     {% if triage.needs_owner %}<strong>Needs me</strong> · {% endif %}{{ triage.reason }}{% if not triage_current %}<p>Based on an earlier message window.</p>{% endif %}
     </aside>{% endif %}
-    {% if handoff is defined and account.can_reply and account.configured %}{% include 'inbox_handoff_controls.html' %}{% endif %}
-    {% if message_window_limited %}<p>This is a partial text history. Older messages or unsupported attachments remain in the original app.</p>{% endif %}
+    {% if handoff is defined and account.provider != 'r72_whatsapp' and account.can_reply and account.configured %}{% include 'inbox_handoff_controls.html' %}{% endif %}
+    {% if account.provider in ('local','zernio','r72_whatsapp') %}<a href="/inbox/history?account={{ account.key|urlencode }}&amp;thread={{ history_key }}">Search this conversation’s history</a>{% endif %}
     {% if next_cursor %}<a class="btn btn-secondary" href="/inbox?account={{ account.key|urlencode }}&amp;thread={{ thread_ticket|urlencode }}&amp;cursor={{ next_cursor|urlencode }}">Older messages</a>{% endif %}
     <div class="inbox-messages">{% for m in messages %}<article class="inbox-message {{ m.direction }}">
       <strong>{{ 'You' if m.direction == 'outgoing' else m.name or conversation_name }}</strong>
-      <p>{{ m.body }}</p><small>{{ m.occurred_at }}</small></article>{% else %}<p>No messages loaded.</p>{% endfor %}</div>
-    {% if account.can_reply and account.configured and not thread_error %}
+      <p>{{ m.body }}</p><small>{{ m.occurred_at }}{% if m.reply_state %} · {{ m.reply_state|replace('_',' ') }}{% endif %}</small></article>{% else %}<p>No messages loaded.</p>{% endfor %}</div>
+    {% if account.can_reply and account.configured and not thread_error and (account.provider != 'r72_whatsapp' or whatsapp_window_open) %}
     <form method="post" action="/inbox/reply" class="inbox-compose">
       <input type="hidden" name="thread_ticket" value="{{ thread_ticket }}"><input type="hidden" name="request_id" value="{{ request_id }}">
       <label for="inbox-reply">Reply to {{ conversation_name }} on {{ channels[account.channel] }}</label>
@@ -80,9 +81,10 @@
       {% if can_suggest and not draft %}<small>Suggested by {{ triage.source }}. Edit before sending.</small>{% endif %}
       <textarea id="inbox-reply" name="message" rows="4" required maxlength="10000">{{ draft if draft is defined else (triage.draft if can_suggest else '') }}</textarea>
       <button type="submit" class="btn btn-primary">Send reply</button>
-    </form>{% elif account.provider == 'r72_whatsapp' %}<p>Showing received WhatsApp messages. Replies from Growth HQ are unavailable for this number.</p>{% else %}<p>Replying needs a working account connection with send access.</p>{% endif %}
+    </form>{% elif account.provider == 'r72_whatsapp' and account.can_reply and not thread_error %}<p>WhatsApp replies require an eligible message from this person within the past 24 hours.</p>{% elif account.provider == 'r72_whatsapp' %}<p>Showing received WhatsApp messages. Replies from Growth HQ are unavailable for this number.</p>{% else %}<p>Replying needs a working account connection with send access.</p>{% endif %}
     {% for r in reply_receipts %}<p class="inbox-notice">{{ r.created_at|uk }} · {% if r.state == 'queued' %}Queued for your personal connector.
       {% elif r.state == 'accepted' %}Channel accepted the reply.
+      {% elif r.state == 'bridge_accepted' and account.provider == 'r72_whatsapp' %}Growth HQ recorded this reply. Its WhatsApp status appears in the conversation.
       {% elif r.state == 'bridge_accepted' %}Connector accepted the reply; delivery to the original app is not confirmed.
       {% elif r.state in ['calling','outcome_unknown'] %}Outcome unknown. Check the original app before sending again.
       {% else %}The channel refused the reply.{% endif %}</p>{% endfor %}
@@ -98,9 +100,8 @@
     </form>
     {% for link in crm_links %}<p><a class="btn btn-secondary" href="/inbox/crm/contact?brand={{ link.brand|urlencode }}&amp;contact={{ link.contact_id|urlencode }}">Open {{ brands[link.brand] }} contact</a></p>
       {% if link.last_error %}<p>{{ link.last_error }}</p>{% endif %}{% endfor %}
-    {% if account.provider == 'r72_whatsapp' %}
-      {% if canonical_contact %}<a class="btn btn-secondary" href="/inbox/crm/contact?brand=mhp&amp;contact={{ canonical_contact|urlencode }}">Open MHP CRM contact</a>{% endif %}
-    {% elif crm_configured %}
+    {% if canonical_contact %}<a class="btn btn-secondary" href="/inbox/crm/contact?brand=mhp&amp;contact={{ canonical_contact|urlencode }}">Open MHP CRM contact</a>{% endif %}
+    {% if crm_configured %}
       <form method="post" action="/inbox/crm"><input type="hidden" name="thread_ticket" value="{{ thread_ticket }}">
       {{ crm_business_select() }}
       <label>Contact name <input name="display_name" value="{{ conversation_name }}" required maxlength="200"></label>

@@ -12,16 +12,45 @@ function readConversation(expected) {
   const profiles = [...document.querySelectorAll('a[href]')].filter(e => e.textContent.trim().startsWith(expected.name))
     .map(e => { try {const u=new URL(e.href);return u.origin==='https://www.facebook.com' ? u.pathname.match(/^\/(\d+)\/?$/)?.[1] : null;} catch{return null;} }).filter(Boolean);
   if (!profiles.length || profiles.some(id => id !== expected.participantId)) throw Error('wrong_participant');
+  const contextDates = new Map();
+  if(expected.archive===true){
+    let date='';
+    for(const node of log.querySelectorAll('[role="heading"],[role="row"],h3,time,[data-message-id]')){
+      if(node.hasAttribute('data-message-id')){contextDates.set(node,date);continue;}
+      if(node.closest('[data-message-id]')||node.querySelector('[data-message-id]'))continue;
+      const text=(node.innerText||node.textContent||'').trim();
+      if(text!==expected.name&&text.length<100){
+        if(/^(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+)?(?:(?:\d{1,2}\s+[A-Za-z]+|[A-Za-z]+\s+\d{1,2}),?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4})$/i.test(text))date=text;
+        // A later unsupported/no-year date heading must clear the previous
+        // context. Never attach an old day's clock-only rows to that date.
+        else if(/^(Today|Yesterday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|\d{1,2}\s+[A-Za-z]+|[A-Za-z]+\s+\d{1,2})(?:\b|,)/i.test(text))date='';
+      }
+    }
+  }
   const messages = [...log.querySelectorAll('[data-message-id]')].map(e => ({
-    id: e.getAttribute('data-message-id'), label: e.getAttribute('aria-label'), heading: e.querySelector('h4')?.textContent?.trim() ?? ''
+    id: e.getAttribute('data-message-id'), label: e.getAttribute('aria-label'), heading: e.querySelector('h4')?.textContent?.trim() ?? '',
+    ...(expected.archive===true?{context_date:contextDates.get(e)||''}:{})
   }));
+  let historyState={};
+  if(expected.archive===true){
+    let scroller=log;
+    while(scroller.parentElement&&scroller.scrollHeight<=scroller.clientHeight+1)scroller=scroller.parentElement;
+    const reverse=getComputedStyle(scroller).flexDirection==='column-reverse'||scroller.scrollTop<0;
+    const edge=reverse?-(scroller.scrollHeight-scroller.clientHeight):0;
+    const notices=[...document.querySelectorAll('[role="dialog"],[role="alert"]')]
+      .filter(e=>e.getClientRects().length).map(e=>(e.innerText||'').trim());
+    historyState={at_oldest_scroll:Math.abs(scroller.scrollTop-edge)<3,
+      restoring:notices.some(t=>/syncing chat history|restoring.*history/i.test(t)),
+      restore_required:notices.some(t=>/enter (?:your )?pin|restore (?:your )?(?:chat|message) history/i.test(t)),
+      scroll_top:scroller.scrollTop,scroll_height:scroller.scrollHeight,viewport_height:scroller.clientHeight};
+  }
   return {url:url.href,threadId:match[1],participantId:expected.participantId,name:expected.name,
     observedAt:new Date().toISOString(), messages,
     // This signals the visible introduction, not a promise about deleted or
     // unavailable historical messages. Virtualised windows remain incomplete.
     introductionVisible:[...log.querySelectorAll('h3')].some(e=>e.textContent.trim()===expected.name),
     virtualised:!!log.querySelector('[data-virtualized="true"]'),
-    composerReady:[...document.querySelectorAll('[contenteditable="true"]')].some(e=>e.getAttribute('aria-label')===`Write to ${expected.name}`)};
+    composerReady:[...document.querySelectorAll('[contenteditable="true"]')].some(e=>e.getAttribute('aria-label')===`Write to ${expected.name}`),...historyState};
 }
 
 const weekdays=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -40,11 +69,14 @@ function displayedTime(label, observedAt, timeZone) {
   const wall=Date.UTC(day.getUTCFullYear(),day.getUTCMonth(),day.getUTCDate(),+m[2],+m[3]);
   // Resolve local wall-clock minute against timezone offsets; reject DST's
   // repeated/missing hour instead of silently choosing one.
-  const candidates=[];
+  return wallTime(wall,observed,timeZone);
+}
+function wallTime(wall,observed,timeZone){
+  const day=new Date(wall),hour=day.getUTCHours(),minute=day.getUTCMinutes(),candidates=[];
   for(let offset=-14*60;offset<=14*60;offset+=15){
     const instant=new Date(wall-offset*60000);
     const v=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(instant).map(x=>[x.type,x.value]));
-    if(+v.year===day.getUTCFullYear()&&+v.month===day.getUTCMonth()+1&&+v.day===day.getUTCDate()&&+v.hour===+m[2]&&+v.minute===+m[3])candidates.push(instant);
+    if(+v.year===day.getUTCFullYear()&&+v.month===day.getUTCMonth()+1&&+v.day===day.getUTCDate()&&+v.hour===hour&&+v.minute===minute)candidates.push(instant);
   }
   if(candidates.length!==1 || candidates[0]>observed)throw Error('ambiguous_displayed_time');
   return candidates[0].toISOString();
@@ -88,4 +120,4 @@ function normalise(observed, expected, binding) {
       updated_at:messages.at(-1).occurred_at,is_group:false,is_merged:false,messages,has_more:omitted>0||observed.introductionVisible!==true||observed.virtualised===true},
     evidence:{transport:'growth-hq-browser',history:'rendered_window',omitted_rows:omitted,time_precision:'minute',composer_ready:observed.composerReady===true}};
 }
-module.exports={readConversation,normalise,displayedTime};
+module.exports={readConversation,normalise,displayedTime,wallTime};

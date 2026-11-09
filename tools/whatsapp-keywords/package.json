@@ -2,7 +2,7 @@
   "name": "growth-hq-whatsapp-keywords",
   "version": "1.0.0",
   "private": true,
-  "scripts": {"start": "node adapter.cjs", "test": "node --test test.cjs socket.test.cjs"},
+  "scripts": {"start": "node adapter.cjs", "test": "node --test test.cjs socket.test.cjs direct-inbox.test.cjs phone-history.test.cjs"},
   "engines": {"node": ">=22"},
   "dependencies": {"@whiskeysockets/baileys":"7.0.0-rc14", "qrcode":"1.5.4", "pino":"9.14.0"}
 }

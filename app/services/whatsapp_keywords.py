@@ -125,7 +125,7 @@ async def authenticated_body(request: Request) -> bytes:
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > (400000 if request.url.path == BASE + '/groups' else 32000):
+        if len(body) > (400000 if request.url.path in (BASE + '/groups', BASE + '/direct/history') else 32000):
             problem("Request too large", 413)
     material = f"{stamp}\n{request.method}\n{request.url.path}\n".encode() + body
     expected = hmac.new(secret.encode(), material, hashlib.sha256).hexdigest()
@@ -245,6 +245,16 @@ def settle(db: Session, job_id: str, data: dict) -> dict:
     return {"ok": True, "replayed": False}
 
 
+STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "OPT OUT"}
+
+
+def apply_control(db, phone_sha, occurred, blocked):
+    old = db.get(KeywordSuppression, phone_sha)
+    # Older callbacks cannot release a newer STOP. At equal times STOP wins.
+    if not old or occurred > old.occurred_at or (occurred == old.occurred_at and blocked):
+        db.merge(KeywordSuppression(sender_sha256=phone_sha, blocked=blocked, occurred_at=occurred))
+
+
 def opt_out(db: Session, data: dict, body: bytes) -> dict:
     """Only private STOP/START controls; other personal-message content is never ingested."""
     if set(data) != {"eventId", "senderPhone", "action", "observedAt"} or any(not isinstance(v, str) for v in data.values()) or data["action"] not in ("STOP", "START") or not 1 <= len(data["eventId"]) <= 200 or not re.fullmatch(r"[1-9][0-9]{6,14}", data["senderPhone"]):
@@ -267,10 +277,7 @@ def opt_out(db: Session, data: dict, body: bytes) -> dict:
     if age < -300 or age > (604800 if data['action'] == 'STOP' else 300):
         problem("Invalid opt-out time")
     phone_sha = hashlib.sha256(data["senderPhone"].encode()).hexdigest()
-    old_control = db.get(KeywordSuppression, phone_sha)
-    # Older callbacks cannot release a newer STOP; at equal times STOP wins.
-    if not old_control or occurred > old_control.occurred_at or (occurred == old_control.occurred_at and data["action"] == "STOP"):
-        db.merge(KeywordSuppression(sender_sha256=phone_sha, blocked=data["action"] == "STOP", occurred_at=occurred))
+    apply_control(db, phone_sha, occurred, data["action"] == "STOP")
     db.add(KeywordEvent(listener_id=LISTENER, external_id=data["eventId"], request_sha256=sha))
     db.commit()
     return {"ok": True, "replayed": False}

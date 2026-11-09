@@ -1,0 +1,16 @@
+{% extends "app_base.html" %}
+{% block content %}
+<div class="page-head"><h1>{{ current.name if current else "Message history" }}</h1><a class="btn btn-secondary" href="/inbox">Inbox</a></div>
+{% if current %}<p><a href="/inbox/history?account={{ account_key|urlencode }}">Back to conversations</a> · <a href="/inbox?thread={{ live_link|urlencode }}">Open conversation and reply</a></p>{% endif %}
+<form method="get" class="card" style="padding:1rem">
+{% if current %}<input type="hidden" name="account" value="{{ account_key }}"><input type="hidden" name="thread" value="{{ current.thread_key }}">
+{% else %}<label>Account <select name="account"><option value="">All connected accounts</option>{% for a in accounts %}<option value="{{ a.key }}" {% if a.key == account_key %}selected{% endif %}>{{ a.label }}</option>{% endfor %}</select></label>{% endif %}
+<label>Search history <input type="search" name="q" value="{{ q }}" maxlength="200"></label><button class="btn btn-primary">Search</button></form>
+{% if current %}
+<p>{{ "Source reported its oldest available page." if current.reached_start else "Earlier history is still being checked." }}{% if current.incomplete %} Some content could not be imported.{% endif %}{% if current.error %} The last read needs a retry.{% endif %}</p>
+{% for row in items %}<article class="card" style="padding:1rem"><strong>{{ "You" if row.direction == "outgoing" else (row.name or current.name) }}</strong> · {{ row.sent_at }}<p style="white-space:pre-wrap">{{ row.body }}</p></article>{% else %}<p>No archived messages match this search.</p>{% endfor %}
+{% else %}
+{% for row in items %}<article class="card" style="padding:1rem"><a href="/inbox/history?account={{ scope_map[row.scope].key|urlencode }}&amp;thread={{ row.thread_key }}">{{ row.name }}</a> · {{ scope_map[row.scope].label }}<p>{{ row.total }} messages{% if row.oldest %} · Earliest imported {{ row.oldest.date() }}{% endif %} · {{ "Oldest available page reached" if row.reached_start else "Partial history" }}{% if row.incomplete %} · Some content unavailable{% endif %}{% if row.error %} · Read awaiting retry{% endif %}</p></article>
+{% else %}<p>No conversations match the imported history yet.</p>{% endfor %}{% endif %}
+{% if newer %}<a class="btn btn-secondary" href="{{ newer }}">Previous page</a>{% endif %} {% if older %}<a class="btn btn-secondary" href="{{ older }}">Next page</a>{% endif %}
+{% endblock %}

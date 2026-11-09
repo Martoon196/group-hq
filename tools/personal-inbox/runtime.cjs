@@ -66,11 +66,19 @@ async function cycle(engine,cloud,state,channelScope){
     const page=await engine.chats(binding);
     for(const c of page.items){
       if(c.type!=='single'||c.merge)continue;
-      try{const messages=await engine.messages(binding,c);await cloud.request('threads',snapshot(binding,c,messages));}
+      try {
+        const messages=await engine.messages(binding,c);
+        const latest=snapshot(binding,c,messages);
+        latest.thread.has_more ||= latest.thread.messages.length > 100;
+        latest.thread.messages=latest.thread.messages.slice(-100);
+        await cloud.request('threads',latest);
+      }
       catch(error){if(/cross_account|unbound/.test(error.message))throw error;}
       // Long initial histories must not starve replies queued in Growth HQ.
       await drain();
     }
+    const {archiveCycle} = require('./history.cjs');
+    await archiveCycle(engine,cloud,state,binding);
   }
 }
 async function run(){

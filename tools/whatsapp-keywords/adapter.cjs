@@ -1,4 +1,4 @@
-// Group transport only. Growth HQ owns rules, durable claims and delivery receipts.
+// Growth HQ owns group rules, private inbox permissions, durable claims and delivery receipts.
 // Run in the owner's terminal: QR codes/session material must never enter chat logs.
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
@@ -74,6 +74,13 @@ async function main() {
     const pn = mapping?.[0]?.pn;
     return typeof pn === 'string' && /^[1-9][0-9]{6,14}@c\.us$/.test(pn) ? pn.split('@')[0] : null;
   };
+  const {createDirectInbox} = require('./direct-inbox.cjs');
+  const direct = createDirectInbox({api,client,root,expectedNumber,phoneOf});
+  client.allowDirect = direct.enabled;
+  client.allowHistory = direct.historyEnabled;
+  client.prepareHistory = direct.prepareHistory;
+  client.on('direct_history',(bundle,provider)=>{void direct.acceptHistory(bundle,provider).catch(()=>note('Private history import needs attention.'));});
+  client.on('direct_message', event => { void direct.accept(event).catch(() => note('Private WhatsApp intake needs attention.')); });
   client.on('message', async msg => {
     try {
       if (pairOnly || !ready || msg.fromMe || typeof msg.body !== 'string') return;
@@ -153,10 +160,12 @@ async function main() {
     finally {busy=false;}
   }
   const timer=setInterval(()=>void drain(),5000);
-  const stop=async()=>{clearInterval(timer);ready=false;await client.destroy().catch(()=>{});await pairing.close();process.exit(0);};
+  // A disabled or older inbox server must never interrupt the existing group rule loop.
+  const directTimer = setInterval(() => { void direct.tick().catch(() => {}); }, 5000);
+  const stop=async()=>{clearInterval(timer);clearInterval(directTimer);ready=false;await client.destroy().catch(()=>{});await pairing.close();process.exit(0);};
   process.on('SIGTERM',stop);process.on('SIGINT',stop);
   note('Private pairing page ready. No external browser is needed.');
-  try {await client.initialize();}catch(error){pairing.setStatus('error');clearInterval(timer);await client.destroy().catch(()=>{});throw error;}
+  try {await client.initialize();}catch(error){pairing.setStatus('error');clearInterval(timer);clearInterval(directTimer);await client.destroy().catch(()=>{});throw error;}
 }
 
 if (require.main===module) main().catch(()=>{console.error('Listener could not start. Check its private configuration.');process.exitCode=1;});

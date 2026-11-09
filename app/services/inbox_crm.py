@@ -22,13 +22,17 @@ class CrmUnavailable(Exception):
     pass
 
 
-def command(user, brand, action, *, transport=None, **payload):
+class ReplyRefused(CrmUnavailable):
+    pass
+
+
+def command(user, brand, action, *, transport=None, request_id=None, **payload):
     if brand == "piuk" and not config.GHQ_INBOX_PIUK_CRM_ENABLED:
         raise CrmUnavailable("The Prop Invest UK CRM workspace needs connecting.")
     secret = config.R72_GROUP_HQ_INBOX_SECRET
     if not 32 <= len(secret) <= 256:
         raise CrmUnavailable("CRM connection needs setting up.")
-    value = {**payload, "brand": brand, "action": action, "actorEmail": user.email, "requestId": str(uuid.uuid4())}
+    value = {**payload, "brand": brand, "action": action, "actorEmail": user.email, "requestId": request_id or str(uuid.uuid4())}
     body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
     stamp = str(int(time.time()))
     signature = hmac.new(secret.encode(), f"{stamp}\nPOST\n{PATH}\n".encode() + body, hashlib.sha256).hexdigest()
@@ -37,6 +41,8 @@ def command(user, brand, action, *, transport=None, **payload):
             response = client.post(ORIGIN + PATH, content=body, headers={"Content-Type": "application/json",
                 "X-GHQ-Timestamp": stamp, "X-GHQ-Signature": signature})
         if response.status_code != 200:
+            if action == "whatsappReply" and response.status_code in (400, 403, 404, 409):
+                raise ReplyRefused("This WhatsApp conversation cannot receive this reply.")
             if response.status_code == 403:
                 raise CrmUnavailable("Your CRM access for this business is unavailable.")
             if response.status_code == 409:
@@ -47,7 +53,7 @@ def command(user, brand, action, *, transport=None, **payload):
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError()
-        if action in ("whatsappThreads", "whatsappMessages"):
+        if action in ("whatsappThreads", "whatsappMessages", "whatsappReply"):
             # The dedicated reader validates each native ID and the returned account/thread binding.
             return result
         if action == "search":
@@ -90,8 +96,17 @@ def links(db, account, thread_id):
 
 def connect(db, user, thread_ticket, brand, display_name, contact_id="", copy_messages=True):
     account, bound, origin = source(db, user, thread_ticket)
-    if account.provider == "r72_whatsapp":
-        raise CrmUnavailable("This conversation already belongs to its MHP CRM contact.")
+    if account.provider == "r72_whatsapp" and brand == "mhp":
+        from .inbox_r72_whatsapp import WhatsAppReader
+        from .inbox_providers import InboxError
+        try:
+            messages, _ = WhatsAppReader(account, user.email).messages(bound["thread"], origin["participantId"])
+        except InboxError:
+            raise CrmUnavailable("Refresh the WhatsApp conversation to check its existing contact.") from None
+        if not messages:
+            raise CrmUnavailable("Refresh the WhatsApp conversation to check its existing contact.")
+        if messages[0].get("contact_id"):
+            raise CrmUnavailable("This conversation already belongs to its MHP CRM contact.")
     if brand not in inbox.BRANDS:
         raise HTTPException(400, "Choose a business for this CRM contact.")
     if contact_id:
@@ -143,6 +158,8 @@ def record_messages(db, user, account, thread_id, messages, *, limit=10):
             continue
         origin = {"channel": account.channel, "accountId": account.account_id, "threadId": thread_id, "participantId": participant}
         for m in messages:
+            if account.provider == "r72_whatsapp" and m.get("direction") == "outgoing" and m.get("reply_state") not in ("accepted", "sent", "delivered", "read"):
+                continue
             digest = hashlib.sha256(json.dumps([link.contact_id, m["id"], m.get("revision", "")]).encode()).hexdigest()
             key = (account.key, link.thread_sha256, link.brand, digest)
             if db.get(InboxCrmActivityReceipt, key):

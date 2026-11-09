@@ -58,8 +58,11 @@ test('reuses the native LinkedIn binding from engine discovery and never drains 
     assert.equal(action,'accounts');return {accounts:[{key:'li',account_id:ac.accountID,user_id:ac.user.id,enabled:true},
       {key:'fb',account_id:facebook.accountID,user_id:facebook.user.id,enabled:true}]};
   }};
-  await cycle(engine,cloud,{state:{creds:{deliveries:{}}}},'linkedin');
-  assert.equal(read.length,1);assert.equal(read[0].channel,'linkedin');assert.equal(read[0].key,'li');
+  let checkpoints = 0;
+  await cycle(engine,cloud,{state:{creds:{deliveries:{}}},saveCreds:async()=>{checkpoints++;}},'linkedin');
+  assert.equal(read.length,2);
+  assert.ok(read.every(binding=>binding.channel==='linkedin' && binding.key==='li'));
+  assert.equal(checkpoints,1);
   assert.deepEqual(actions.map(x=>x[0]),['accounts','pending']);
   assert.equal(actions[1][1].channel,'linkedin');
 });

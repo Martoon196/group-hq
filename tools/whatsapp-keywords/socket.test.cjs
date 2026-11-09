@@ -37,8 +37,8 @@ test('JIDs preserve PN and LID distinctions and sending refuses group/broadcast 
 
 function fixture(number='447700900001') {
  const sockets=[],calls=[],auth={state:{creds:{},keys:{}},saveCreds:async()=>{},flush:async()=>{}};
- const provider={normalizeMessageContent:x=>x,Browsers:{ubuntu:()=>['Ubuntu','Chrome','22']},DisconnectReason:{restartRequired:515,loggedOut:401,badSession:500},
-  default:options=>{const socket={ev:new EventEmitter(),user:{id:number+':2@s.whatsapp.net'},end:()=>calls.push('end'),
+ const provider={normalizeMessageContent:x=>x,Browsers:{ubuntu:()=>['Ubuntu','Chrome','22'],windows:()=>['Windows','Desktop','10']},DisconnectReason:{restartRequired:515,loggedOut:401,badSession:500},
+  default:options=>{const socket={options,ev:new EventEmitter(),user:{id:number+':2@s.whatsapp.net'},end:()=>calls.push('end'),
    groupFetchAllParticipating:async()=>{calls.push('groups');return {one:{id:'123456789@g.us',subject:'Test group'}};},
    signalRepository:{lidMapping:{getPNForLID:async()=>null}},
    sendMessage:async(jid,content)=>{calls.push({jid,content});return {key:{id:'provider-test-id'}};}};
@@ -65,6 +65,20 @@ test('socket confirms selected account before groups/messages; notify-only live 
  assert.equal((await f.client.sendMessage('447700900002@c.us','Requested plan')).id._serialized,'baileys:provider-test-id');
  await assert.rejects(f.client.sendMessage('123456789@g.us','No group sends'));
  assert.equal(f.calls.filter(c=>typeof c==='object').length,1);
+ await f.client.destroy();
+});
+
+test('the verified desktop history profile routes old and append packets only to the archive',async()=>{
+ const f=fixture(), historic=[], live=[];
+ f.client.allowHistory=()=>true;f.client.prepareHistory=async()=>true;
+ f.client.on('direct_history',bundle=>historic.push(bundle));f.client.on('message',m=>live.push(m));
+ await f.client.initialize();await f.client.connectionUpdate(f.sockets[0],{connection:'open'});
+ const socket=f.sockets[0];assert(socket.options.syncFullHistory);assert.deepEqual(socket.options.browser,['Windows','Desktop','10']);
+ const old=packet({messageTimestamp:Date.UTC(2016,1,2)/1000});
+ socket.ev.emit('messages.upsert',{type:'append',messages:[old]});
+ socket.ev.emit('messages.upsert',{type:'notify',messages:[old]});
+ socket.ev.emit('messaging-history.set',{chats:[],messages:[old]});
+ assert.equal(historic.length,3);assert.equal(live.length,0);assert.equal(f.calls.length,0);
  await f.client.destroy();
 });
 
