@@ -16,7 +16,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 
-BRANDS = {"mhp": "Martin Howard Property", "pp": "Property Predator", "kp": "Key Properties UK",
+BRANDS = {"mhp": "Martin Howard Property", "pp": "Property Predator", "kp": "Key Properties UK", "piuk": "Prop Invest UK",
           "hnh": "Hello New Home", "ordris": "Ordris", "group": "Group"}
 CHANNELS = {"facebook": "Facebook", "instagram": "Instagram", "linkedin": "LinkedIn",
             "twitter": "X", "tiktok": "TikTok", "youtube": "YouTube", "whatsapp": "WhatsApp"}

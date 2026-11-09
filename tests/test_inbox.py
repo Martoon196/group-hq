@@ -78,6 +78,41 @@ def test_connection_default_brand_change_invalidates_composer_but_keeps_source(a
     assert connected == []
 
 
+def test_piuk_inbox_before_and_after_canonical_crm_setup(admin_client, connected, db, monkeypatch):
+    import httpx
+    from app.services import inbox_crm
+
+    mapping = {"key": "piuk-ig", "brand": "piuk", "channel": "instagram", "label": "Prop Invest UK",
+               "provider": "zernio", "account_id": "piuk-account", "profile_id": "piuk-profile",
+               "credential_env": "GHQ_INBOX_TEST", "can_reply": True}
+    monkeypatch.setattr(config, "GHQ_INBOX_ACCOUNTS", json.dumps([mapping]))
+    monkeypatch.setattr(config, "R72_GROUP_HQ_INBOX_SECRET", "test-secret-" * 4)
+    monkeypatch.setattr(config, "GHQ_INBOX_PIUK_CRM_ENABLED", False)
+    actor = owner(db)
+    _, _, rows = inbox.snapshot(actor.id, [], "piuk", db=db, user_email=actor.email)
+    assert len(rows) == 1 and rows[0]["account"].account_id == "piuk-account"
+    assert rows[0]["organisation"]["kind"] == "unclassified"
+    assert inbox.snapshot(actor.id, [], "pp", db=db, user_email=actor.email)[2] == []
+    page = admin_client.get("/inbox", params={"thread": rows[0]["ticket"]})
+    assert page.status_code == 200 and page.text.count("Choose a connected CRM") == 2
+    assert page.text.count("Prop Invest UK · CRM setup needed") == 2
+    with pytest.raises(inbox_crm.CrmUnavailable, match="Prop Invest UK"):
+        inbox_crm.command(actor, "piuk", "search", query="Buyer",
+                          transport=httpx.MockTransport(lambda _: pytest.fail("Unexpected CRM request")))
+
+    monkeypatch.setattr(config, "GHQ_INBOX_PIUK_CRM_ENABLED", True)
+    page = admin_client.get("/inbox", params={"thread": rows[0]["ticket"]})
+    assert page.text.count('<option value="piuk" selected>Prop Invest UK</option>') == 2
+
+    def search(request):
+        assert json.loads(request.content)["brand"] == "piuk"
+        return httpx.Response(200, json={"contacts": []})
+
+    assert inbox_crm.command(actor, "piuk", "search", transport=httpx.MockTransport(search),
+                             query="Buyer") == {"contacts": []}
+    assert connected == []
+
+
 def test_official_opened_conversation_projects_only_explicit_business_copy(admin_client, connected, db, monkeypatch):
     from app.services import inbox_crm, inbox_organisation
     user = owner(db)

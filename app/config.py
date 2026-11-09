@@ -30,6 +30,10 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+# Enable after the canonical PIUK workspace has a verified signed CRM scope.
+GHQ_INBOX_PIUK_CRM_ENABLED = _bool("GHQ_INBOX_PIUK_CRM_ENABLED", False)
+
+
 def normalise_database_url(url: str) -> str:
     """Force the psycopg (v3) driver whatever spelling the hosting platform hands us.
 

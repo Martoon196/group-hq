@@ -36,9 +36,14 @@ never trigger automatic resend. The UI retains an invalid draft on correction.
 ## Configuration contract
 
 `GHQ_INBOX_ACCOUNTS` is an operator-managed JSON array. Each record needs `key`,
-`brand` (`mhp|pp|kp|hnh|ordris|group`), `channel`, `label`, `provider`, `account_id`,
+`brand` (`mhp|pp|kp|piuk|hnh|ordris|group`), `channel`, `label`, `provider`, `account_id`,
 `credential_env` (a `GHQ_INBOX_*` name) and explicit `can_reply`.
 Credential **values** stay in the corresponding private environment setting.
+
+Prop Invest UK uses its own `piuk` account mapping. Social inbox access and
+conversation classification work before the CRM workspace is connected. Set
+`GHQ_INBOX_PIUK_CRM_ENABLED=true` in Group HQ after confirming a signed CRM
+search reaches the canonical Prop Invest UK workspace.
 
 For `provider: zernio`, supply `profile_id`; allowed channels are `facebook`,
 `instagram`, `twitter`. Fixed origin: `https://zernio.com`.

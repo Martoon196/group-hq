@@ -1,4 +1,20 @@
 {% extends "app_base.html" %}
+{% macro crm_business_select() %}
+<label>Business
+  <select name="brand" required>
+    {% if account.brand == 'piuk' and not piuk_crm_enabled %}
+      <option value="" selected>Choose a connected CRM</option>
+    {% endif %}
+    {% for key, name in brands.items() %}
+      {% if key == 'piuk' and not piuk_crm_enabled %}
+        <option disabled>{{ name }} · CRM setup needed</option>
+      {% else %}
+        <option value="{{ key }}"{% if key == account.brand %} selected{% endif %}>{{ name }}</option>
+      {% endif %}
+    {% endfor %}
+  </select>
+</label>
+{% endmacro %}
 {% block head %}<link rel="stylesheet" href="/assets/inbox.css">{% endblock %}
 {% block content %}
 <div class="page-head"><div><p class="eyebrow">Growth HQ</p><h1>Inbox</h1>
@@ -67,12 +83,12 @@
       {% if link.last_error %}<p>{{ link.last_error }}</p>{% endif %}{% endfor %}
     {% if crm_configured %}
       <form method="post" action="/inbox/crm"><input type="hidden" name="thread_ticket" value="{{ thread_ticket }}">
-      <label>Business <select name="brand">{% for key,name in brands.items() %}<option value="{{ key }}"{% if key == account.brand %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+      {{ crm_business_select() }}
       <label>Contact name <input name="display_name" value="{{ conversation_name }}" required maxlength="200"></label>
       <label class="inbox-checkbox"><input type="checkbox" name="copy_messages" value="true">Also copy loaded and future messages to this brand’s CRM</label>
       <button class="btn btn-primary" type="submit">Add to this brand’s CRM</button></form>
       <form method="get" action="/inbox/crm/search" style="margin-top:1rem"><input type="hidden" name="thread" value="{{ thread_ticket }}">
-      <label>Business <select name="brand">{% for key,name in brands.items() %}<option value="{{ key }}"{% if key == account.brand %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+      {{ crm_business_select() }}
       <label>Find existing contact <input name="q" required maxlength="200"></label><button class="btn btn-secondary" type="submit">Search CRM</button></form>
       <p>Add the same person to another brand whenever it is relevant. Personal conversations stay Personal and do not copy messages. For Business conversations, messages are copied only to the CRMs you select. Linking does not subscribe anyone to marketing.</p>
     {% else %}<p>CRM connection needs setting up. No contact or consent has been created.</p>{% endif %}</aside>

@@ -58,6 +58,7 @@ def thread_context(db, user, value, cursor=None):
             "message_window_limited": account.provider == "local" and cached.has_more,
             "crm_links": linked, "organisation": inbox_organisation.choices(db, user.id, account, bound["thread"], linked),
             "kinds": inbox_organisation.KINDS, "crm_configured": bool(service.config.R72_GROUP_HQ_INBOX_SECRET),
+            "piuk_crm_enabled": service.config.GHQ_INBOX_PIUK_CRM_ENABLED,
             "reply_receipts": service.replies(db, account, bound["thread"]), "request_id": str(uuid.uuid4())}
 
 

@@ -23,6 +23,8 @@ class CrmUnavailable(Exception):
 
 
 def command(user, brand, action, *, transport=None, **payload):
+    if brand == "piuk" and not config.GHQ_INBOX_PIUK_CRM_ENABLED:
+        raise CrmUnavailable("The Prop Invest UK CRM workspace needs connecting.")
     secret = config.R72_GROUP_HQ_INBOX_SECRET
     if not 32 <= len(secret) <= 256:
         raise CrmUnavailable("CRM connection needs setting up.")
