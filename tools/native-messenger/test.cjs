@@ -36,6 +36,27 @@ test('search loading and stale query cannot contribute rows or stability',()=>{
   assert.equal(searchReady({loading:false},'Durham','old search'),false);
   assert.equal(searchReady({loading:false},'Durham','Durham'),true);
 });
+test('recent sent preview returns metadata only for an exact visible owner-authored preview', () => {
+  const {readRecentSentPreviews} = require('./discovery.cjs');
+  const vm = require('node:vm');
+  const item = (id, text, visible = true, origin = 'https://www.facebook.com') => ({
+    href: origin + '/messages/e2ee/t/' + id + '/?tracking=unused',
+    innerText: text, getClientRects: () => visible ? [{}] : []
+  });
+  const items = [
+    item('101', 'Example Buyer\nYou: Hi, WHAT sort of  property deals would interest you?'),
+    item('102', 'Example Buyer\nThem: what sort of property deals would interest you?'),
+    item('103', 'What sort of property deals\nYou: Have a good weekend'),
+    item('104', 'Buyer\nYou: what sort of property deals?', false),
+    item('105', 'Buyer\nYou: what sort of property deals?', true, 'https://example.com')
+  ];
+  const matches = vm.runInNewContext('(' + readRecentSentPreviews.toString() + ')(query)', {
+    URL, query: 'what sort of property deals', document: {querySelector: () => ({querySelectorAll: () => items})}
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(matches)), [{
+    threadId: '101', url: 'https://www.facebook.com/messages/e2ee/t/101/', encrypted: true, name: ''
+  }]);
+});
 const fixture=()=>({threadId:'12345',participantId:'98765',name:'Example Buyer',observedAt:'2026-11-06T19:00:00Z',introductionVisible:true,virtualised:false,composerReady:true,
   messages:[{id:'98765@msgr.123456789',label:'At Wednesday 13:32, You: Is Durham the area you want?',heading:'You sent'},
     {id:'98765@msgr.123456790',label:'At Wednesday 21:21, Example: Yes, Durham please.',heading:'Example'}]});

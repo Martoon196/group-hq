@@ -270,6 +270,40 @@ def test_discovery_wrong_connector_and_unselected_import_refused(db, native_disc
     assert error.value.status_code == 409
 
 
+def test_discovery_cached_outreach_and_verified_new_candidates(admin_client, db, native_discovery):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    phrase = 'what sort of property deals'
+    row = {'threadId': '1234', 'participantId': '9876', 'name': 'Known buyer'}
+    discovery.report(db, {**payload, 'candidates': [row]})
+    admin_client.post('/inbox/discover/select', data={'account_key': account.key, 'threads': '1234'})
+    personal.ingest(db, {**payload, 'observed_at': utcnow().isoformat() + 'Z', 'thread': {
+        'id': '1234', 'participant_id': '9876', 'name': 'Known buyer', 'updated_at': '2026-11-06T12:00:00Z',
+        'is_group': False, 'is_merged': False, 'messages': [{'id': 'm1', 'name': 'You', 'direction': 'outgoing',
+        'body': 'Hi, WHAT sort of\nproperty deals are you looking for please?', 'occurred_at': '2026-11-06T12:00:00Z'}]}})
+    response = admin_client.post('/inbox/discover/search', data={'account_key': account.key, 'query': phrase})
+    assert response.status_code == 303
+    local = discovery.read(db, user.id, account)['request']
+    assert local['cached'] == [{'threadId': '1234', 'name': 'Known buyer'}]
+    assert 'cached' not in discovery.selections(db, payload)['request']
+    selected = [{**row, 'selected': True, 'reason': ''}]
+    assert discovery.cached_matches(db, user.id+1, account, selected, phrase) == []
+    assert discovery.cached_matches(db, user.id, account, [{**selected[0], 'participantId': '9999'}], phrase) == []
+    assert discovery.cached_matches(db, user.id, account, [{**selected[0], 'selected': False}], phrase) == []
+    assert discovery.cached_matches(db, user.id, account, selected, '%') == []
+
+    fresh = {'threadId': '4444', 'participantId': '5555', 'name': 'New buyer'}
+    discovery.report(db, {**payload, 'candidates': [fresh], 'query': phrase, 'request_id': 'stale'})
+    assert not discovery.read(db, user.id, account)['request']['done']
+    discovery.report(db, {**payload, 'candidates': [row, fresh], 'query': phrase, 'request_id': local['id']})
+    saved = discovery.read(db, user.id, account)
+    assert [m['status'] for m in saved['coverage']['matches']] == ['Already imported', 'New candidate']
+    assert not discovery.permits_thread(db, user.id, account, '4444', '5555')
+    page = admin_client.get('/inbox/discover', params={'account': account.key})
+    assert 'New buyer · New candidate' in page.text and 'looking for please?' not in page.text
+    assert not db.scalars(select(InboxCrmLink)).all()
+
+
 def test_deselect_after_queue_rejects_native_reply_without_dispatch(db, native_discovery):
     from app.services import inbox_discovery as discovery
     user, account, payload = native_discovery

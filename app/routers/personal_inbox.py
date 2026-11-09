@@ -33,7 +33,9 @@ def discovery_search(account_key: str = Form(...), query: str = Form(...), db: S
         raise HTTPException(400, "Enter a search phrase between 2 and 100 characters.")
     db.execute(text("SELECT pg_advisory_xact_lock(741935835)"))
     saved = inbox_discovery.read(db, user.id, account)
-    saved["request"] = {"id": str(uuid.uuid4()), "query": query.strip(), "done": False}
+    saved["request"] = {"id": str(uuid.uuid4()), "query": query.strip(), "done": False,
+                        "cached": inbox_discovery.cached_matches(db, user.id, account, saved["candidates"], query)}
+    saved["coverage"] = None
     inbox_discovery.write(db, user.id, account, saved, user.email)
     return go("/inbox/discover?account=" + account.key, ok="Search requested. Your running connector will search Messenger; refresh this page for results.")
 

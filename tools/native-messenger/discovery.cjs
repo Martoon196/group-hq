@@ -25,25 +25,57 @@ function readPeer(threadId){
   return ids.length&&new Set(ids).size===1?{name,participantId:ids[0]}:null;
 }
 function searchReady(state,query,value){return !state.loading&&value.trim()===query.trim();}
+function readRecentSentPreviews(query) {
+  const list = document.querySelector('[aria-label="Thread list"]');
+  if (!list) return [];
+  const normalise = value => value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+  const phrase = normalise(query);
+  const matches = [];
+  for (const link of [...list.querySelectorAll('a[href*="/messages/"]')].slice(0, 100)) {
+    if (!link.getClientRects().length) continue;
+    const url = new URL(link.href);
+    const route = url.pathname.match(/^\/messages\/(e2ee\/)?t\/(\d+)\/?$/);
+    if (!route || url.origin !== 'https://www.facebook.com') continue;
+    const lines = link.innerText.split('\n').map(line => line.trim()).filter(Boolean);
+    // Only an explicitly self-authored preview beneath the name is evidence.
+    if (!lines.slice(1).some(line => /^You:\s*\S/i.test(line) && normalise(line.slice(4)).includes(phrase))) continue;
+    matches.push({threadId: route[2], url: url.origin + url.pathname, encrypted: Boolean(route[1]), name: ''});
+  }
+  return matches;
+}
 async function discover(context,query){
   if(typeof query!=='string'||query.trim().length<2||query.length>100)throw Error('invalid_search');
   const page=await context.newPage(),found=new Map();let restoring=false;
   try{
     await page.goto('https://www.facebook.com/messages/',{waitUntil:'domcontentloaded',timeout:30000});
-    await page.getByRole('combobox',{name:'Search Messenger',exact:true}).fill(query);
-    await page.getByRole('link',{name:`Search messages for ${query}`,exact:true}).click();
-    await page.getByRole('textbox',{name:'Search',exact:true}).waitFor();
-    let stable=0;
-    for(let scan=0;scan<12&&stable<3&&found.size<100;scan++){
-      const state=await page.evaluate(readSearch),before=found.size;restoring||=state.restoring;
-      if(!searchReady(state,query,await page.getByRole('textbox',{name:'Search',exact:true}).inputValue())){
-        stable=0;await page.waitForTimeout(700);continue;
+    const search = page.getByRole('combobox',{name:'Search Messenger',exact:true});
+    await search.waitFor();
+    const recentLinks = page.locator('[aria-label="Thread list"] a[href*="/messages/"]').filter({visible:true});
+    const recentReady = await recentLinks.first().waitFor({timeout:3000}).then(() => true, () => false);
+    const recent = recentReady ? await page.evaluate(readRecentSentPreviews, query) : [];
+    let searchUnavailable = false;
+    try {
+      await search.fill(query);
+      await page.getByRole('link',{name:`Search messages for ${query}`,exact:true}).click();
+      await page.getByRole('textbox',{name:'Search',exact:true}).waitFor();
+      let stable=0;
+      for(let scan=0;scan<12&&stable<3&&found.size<100;scan++){
+        const state=await page.evaluate(readSearch),before=found.size;restoring||=state.restoring;
+        if(!searchReady(state,query,await page.getByRole('textbox',{name:'Search',exact:true}).inputValue())){
+          stable=0;await page.waitForTimeout(700);continue;
+        }
+        for(const row of state.rows)if(found.size<100)found.set(row.threadId,row);
+        stable=found.size===before?stable+1:0;
+        const links=page.locator('[aria-label="Thread list"] a[href*="/messages/"]').filter({visible:true});
+        if(await links.count())await links.last().scrollIntoViewIfNeeded();
+        await page.waitForTimeout(700);
       }
-      for(const row of state.rows)if(found.size<100)found.set(row.threadId,row);
-      stable=found.size===before?stable+1:0;
-      const links=page.locator('[aria-label="Thread list"] a[href*="/messages/"]').filter({visible:true});
-      if(await links.count())await links.last().scrollIntoViewIfNeeded();
-      await page.waitForTimeout(700);
+    } catch (error) {
+      if (!recent.length) throw error;
+      searchUnavailable = true;
+    }
+    for (const row of recent) {
+      if (!found.has(row.threadId) && found.size < 100) found.set(row.threadId, row);
     }
     const peerPage=await context.newPage();
     try{
@@ -59,8 +91,10 @@ async function discover(context,query){
         }catch{row.reason='Messenger has not supplied a verified participant yet. Search again after history restores.';}
       }
     }finally{await peerPage.close();}
-    return {candidates:[...found.values()].map(({url,encrypted,...row})=>row),complete:false,
-      note:restoring?'Messenger is still restoring history. Search again for more results.':'Available search window checked; older or unloaded chats may still be missing.'};
+    const note = searchUnavailable ? 'Messenger search was unavailable. Only visible matching sent previews were checked.'
+      : restoring ? 'Messenger is restoring history. Available results and visible sent previews were checked.'
+      : 'Available results and visible sent previews were checked. Older or unloaded chats may still be missing.';
+    return {candidates:[...found.values()].filter(row => row.name).map(({url,encrypted,...row})=>row),complete:false,note};
   }finally{await page.close();}
 }
 function validateTargets(rows){
@@ -70,4 +104,4 @@ function validateTargets(rows){
     (t.threadKind==='page'&&t.participantId!==t.threadId)||typeof t.name!=='string'||!t.name.trim()||t.name.length>500||seen.has(t.threadId))throw Error('invalid_selection');seen.add(t.threadId);}
   return rows;
 }
-module.exports={discover,readSearch,readPeer,searchReady,validateTargets};
+module.exports={discover,readSearch,readPeer,readRecentSentPreviews,searchReady,validateTargets};
