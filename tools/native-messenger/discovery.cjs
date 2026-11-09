@@ -31,7 +31,7 @@ function readRecentSentPreviews(query) {
   const normalise = value => value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
   const phrase = normalise(query);
   const matches = [];
-  for (const link of [...list.querySelectorAll('a[href*="/messages/"]')].slice(0, 100)) {
+  for (const link of list.querySelectorAll('a[href*="/messages/"]')) {
     if (!link.getClientRects().length) continue;
     const url = new URL(link.href);
     const route = url.pathname.match(/^\/messages\/(e2ee\/)?t\/(\d+)\/?$/);
@@ -111,7 +111,7 @@ class AvailableDiscovery {
     return {candidates,complete:false,note};
   }
 }
-async function discover(context,query){
+async function discover(context,query,onBatch=null,isPaused=()=>false){
   if(typeof query!=='string'||query.trim().length<2||query.length>100)throw Error('invalid_search');
   const page=await context.newPage(),found=new Map();let restoring=false;
   try{
@@ -127,12 +127,13 @@ async function discover(context,query){
       await page.getByRole('link',{name:`Search messages for ${query}`,exact:true}).click();
       await page.getByRole('textbox',{name:'Search',exact:true}).waitFor();
       let stable=0;
-      for(let scan=0;scan<12&&stable<3&&found.size<100;scan++){
+      while(stable<3){
+        if(isPaused())throw Error('search_paused');
         const state=await page.evaluate(readSearch),before=found.size;restoring||=state.restoring;
         if(!searchReady(state,query,await page.getByRole('textbox',{name:'Search',exact:true}).inputValue())){
           stable=0;await page.waitForTimeout(700);continue;
         }
-        for(const row of state.rows)if(found.size<100)found.set(row.threadId,row);
+        for(const row of state.rows)found.set(row.threadId,row);
         stable=found.size===before?stable+1:0;
         const links=page.locator('[aria-label="Thread list"] a[href*="/messages/"]').filter({visible:true});
         if(await links.count())await links.last().scrollIntoViewIfNeeded();
@@ -143,11 +144,12 @@ async function discover(context,query){
       searchUnavailable = true;
     }
     for (const row of recent) {
-      if (!found.has(row.threadId) && found.size < 100) found.set(row.threadId, row);
+      if (!found.has(row.threadId)) found.set(row.threadId, row);
     }
-    const peerPage=await context.newPage();
+    const peerPage=await context.newPage(),verified=[];
     try{
       for(const row of found.values()){
+        if(isPaused())throw Error('search_paused');
         row.participantId='';row.textOnly=true;row.reason='';row.threadKind=row.encrypted?'e2ee':'page';
         try{
           await peerPage.goto(row.url,{waitUntil:'domcontentloaded',timeout:20000});
@@ -157,16 +159,20 @@ async function discover(context,query){
           row.name=identity.name;row.participantId=identity.participantId;
           if(row.threadKind==='page'&&row.participantId!==row.threadId)row.reason='This non-Page conversation format needs support.';
         }catch{row.reason='Messenger has not supplied a verified participant yet. Search again after history restores.';}
+        if(row.name){const {url,encrypted,...candidate}=row;verified.push(candidate);}
+        if(onBatch&&verified.length>=100){await onBatch({candidates:verified.splice(0),complete:false,
+          note:'Available search results are being verified and streamed in batches.'},false);}
       }
     }finally{await peerPage.close();}
     const note = searchUnavailable ? 'Messenger search was unavailable. Only visible matching sent previews were checked.'
       : restoring ? 'Messenger is restoring history. Available results and visible sent previews were checked.'
       : 'Available results and visible sent previews were checked. Older or unloaded chats may still be missing.';
-    return {candidates:[...found.values()].filter(row => row.name).map(({url,encrypted,...row})=>row),complete:false,note};
+    if(onBatch){await onBatch({candidates:verified,complete:false,note},true);return {streamed:true,complete:false,note};}
+    return {candidates:verified,complete:false,note};
   }finally{await page.close();}
 }
 function validateTargets(rows){
-  if(!Array.isArray(rows)||rows.length>2000)throw Error('invalid_selection');
+  if(!Array.isArray(rows))throw Error('invalid_selection');
   const seen=new Set();
   for(const t of rows){if(!/^\d+$/.test(t.threadId)||!/^\d+$/.test(t.participantId)||!['e2ee','page'].includes(t.threadKind??'e2ee')||
     (t.threadKind==='page'&&t.participantId!==t.threadId)||typeof t.name!=='string'||!t.name.trim()||t.name.length>500||seen.has(t.threadId))throw Error('invalid_selection');seen.add(t.threadId);}

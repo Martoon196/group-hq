@@ -40,13 +40,14 @@ def channel_brand(account_key: str = Form(...), brand: str = Form(...), db: Sess
 
 
 def thread_context(db, user, value, cursor=None):
+    from ..services.inbox_archive import digest
     account, bound = service.resolve(value, user.id, user.email, db)
     messages, next_cursor, error = [], None, None
     try:
         if account.provider == "local":
             cached = service.local_thread(db, account, bound["thread"], user.id)
             messages, next_cursor = cached.messages, None
-            if (service.utcnow() - cached.seen_at).total_seconds() > 120:
+            if not service.local_online(db, account, cached):
                 error = "Your personal connector is offline or catching up. These are the last synced messages."
         elif account.provider == "r72_whatsapp":
             from ..services.inbox_r72_whatsapp import WhatsAppReader
@@ -64,7 +65,9 @@ def thread_context(db, user, value, cursor=None):
             "handoff": inbox_automations.handoff_state(db, user.id, account, bound["thread"]),
             "account": account, "conversation_name": bound["name"], "thread_ticket": value,
             "messages": messages, "next_cursor": next_cursor, "thread_error": error,
-            "canonical_contact": bound.get("participant") if account.provider == "r72_whatsapp" and not error else None,
+            "canonical_contact": messages[0].get("contact_id") if account.provider == "r72_whatsapp" and messages else None,
+            "whatsapp_window_open": bool(messages and messages[0].get("can_reply")),
+            "history_key": digest(bound["thread"]),
             "message_window_limited": account.provider == "local" and cached.has_more,
             "crm_links": linked, "organisation": inbox_organisation.choices(db, user.id, account, bound["thread"], linked),
             "kinds": inbox_organisation.KINDS, "crm_configured": bool(service.config.R72_GROUP_HQ_INBOX_SECRET),
@@ -125,7 +128,7 @@ def inbox(request: Request, background_tasks: BackgroundTasks, db: Session = Dep
     value = request.query_params.get("thread")
     if value:
         ctx.update(thread_context(db, user, value, request.query_params.get("cursor")))
-        if ctx['account'].provider not in ('local', 'r72_whatsapp') and not ctx['thread_error'] and ctx['crm_links']:
+        if ctx['account'].provider != 'local' and not ctx['thread_error'] and ctx['crm_links']:
             account, bound = service.resolve(value, user.id, user.email, db)
             background_tasks.add_task(inbox_crm.sync_official_window, account.key, account.binding, bound['thread'], user.id, ctx['messages'])
     response = render(request, "inbox.html", ctx)
@@ -163,7 +166,8 @@ def reply(request: Request, thread_ticket: str = Form(...), request_id: str = Fo
         return response
     from urllib.parse import urlencode
     status = {"queued": "Your reply is queued for your personal connector.", "accepted": "The channel accepted your reply.",
-              "bridge_accepted": "Your connector accepted the reply. Delivery to the original app is not confirmed.",
+              "bridge_accepted": ("Growth HQ recorded your reply. Reopen the thread to see its WhatsApp status."
+                                  if account.provider == "r72_whatsapp" else "Your connector accepted the reply. Delivery to the original app is not confirmed."),
               "calling": service.MESSAGES["outcome_unknown"],
               "outcome_unknown": service.MESSAGES["outcome_unknown"],
               "rejected": service.MESSAGES.get(receipt.reason, "The channel refused the reply.")}[receipt.state]

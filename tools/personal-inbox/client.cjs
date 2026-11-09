@@ -36,15 +36,16 @@ class EngineClient {
     for(const c of page.items)if(c.accountID!==binding.account_id)throw Error('cross_account_chat');
     return page;
   }
-  async chat(binding,chatId){
+  async chat(binding,chatId,forSend=true){
     const c=await this.request('/v1/chats/'+encodeURIComponent(opaque(chatId)));
-    if(c.id!==chatId||c.accountID!==binding.account_id||c.type!=='single'||c.merge||c.isReadOnly===true)throw Error('unbound_chat');
+    if(c.id!==chatId||c.accountID!==binding.account_id||c.type!=='single'||c.merge||(forSend && c.isReadOnly===true))throw Error('unbound_chat');
     return c;
   }
-  async messages(binding,c){
+  async messages(binding,c,cursor){
     if(c.accountID!==binding.account_id||c.type!=='single'||c.merge)throw Error('unbound_chat');
-    const page=await this.request('/v1/chats/'+encodeURIComponent(opaque(c.id))+'/messages?limit=100');
-    if(!Array.isArray(page.items)||page.items.length>100)throw Error('invalid_messages');
+    const query = cursor ? '?' + new URLSearchParams({cursor, direction:'before'}) : '';
+    const page=await this.request('/v1/chats/'+encodeURIComponent(opaque(c.id))+'/messages'+query);
+    if(!Array.isArray(page.items))throw Error('invalid_messages');
     for(const m of page.items)if(m.chatID!==c.id||m.accountID!==binding.account_id)throw Error('cross_account_message');
     return page;
   }
@@ -84,7 +85,7 @@ function snapshot(binding,c,page){
 class GrowthHqClient {
   constructor(secret,fetcher=fetch){if(typeof secret!=='string'||secret.length<32||secret.length>256)throw Error('missing_connector_key');this.secret=secret;this.fetcher=fetcher;}
   async request(action,value,method='POST'){
-    if(!/^(accounts|threads|pending|candidates|selections|replies\/[a-f0-9-]{36}\/(begin|settle))$/u.test(action))throw Error('invalid_action');
+    if(!/^(accounts|threads|history|pending|candidates|selections|replies\/[a-f0-9-]{36}\/(begin|settle))$/u.test(action))throw Error('invalid_action');
     const path=BASE+'/'+action,body=method==='GET'?'':JSON.stringify(value??{}),stamp=String(Math.floor(Date.now()/1000));
     const signature=crypto.createHmac('sha256',this.secret).update(`${stamp}\n${method}\n${path}\n`).update(body).digest('hex');
     const r=await this.fetcher(GHQ+path,{method,redirect:'error',signal:AbortSignal.timeout(20000),

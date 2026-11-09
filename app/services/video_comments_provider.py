@@ -2,8 +2,9 @@
 import base64
 import hashlib
 import json
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import urlsplit
 
 from .inbox_providers import Account, InboxError, Transport, clean, object_field, opaque, rows
@@ -65,6 +66,13 @@ class VideoComments(LinkedInComments):
 
 
 class VideoSetup(Transport):
+    def __init__(self, account, transport=None):
+        if (account.provider != "zernio" or account.channel not in CHANNELS
+                or PROFILES.get(account.brand) != account.profile_id):
+            raise InboxError("unbound_target")
+        token = os.environ.get("GHQ_INBOX_ZERNIO_ACCOUNTS_KEY", "").strip()
+        super().__init__(replace(account, token=token or account.token), transport)
+
     def inventory(self):
         response = self.request("GET", "/api/v1/accounts", params={"profileId": self.account.profile_id,
             "platform": self.account.channel, "limit": 100})

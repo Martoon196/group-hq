@@ -1,6 +1,6 @@
 {% extends "app_base.html" %}
 {% block content %}
-<div class="page-head"><div><p class="eyebrow">Your personal connections</p><h1>Messenger &amp; LinkedIn</h1>
+<div class="page-head"><div><p class="eyebrow">Your personal connections</p><h1>Personal inbox connections</h1>
 <p>Connect your accounts once, then read and reply from Growth HQ.</p></div><a class="btn btn-secondary" href="/inbox">Back to inbox</a></div>
 <div class="card"><h2>Your desktop connector</h2>
 <p>Your chosen connector needs to be running on your PC. Keep it awake to receive new chats and send replies. Sign-in credentials stay on this PC.</p>
@@ -8,6 +8,16 @@
 {% else %}<p>Last check-in: {{ catalog.seen_at }} UTC.</p>{% endif %}
 <p>The Growth HQ Messenger connection uses its own isolated browser. Connect other supported personal accounts in Beeper. If you choose a Beeper cloud connection, Beeper also handles those messages in its cloud.</p>
 </div>
+<section class="card" style="margin-top:1rem;padding:1.25rem"><h2>Personal WhatsApp messages</h2>
+<p>Collect one-to-one conversations from the number linked to your group listener, including older messages the phone makes available. Historical messages go into your private archive. You choose which conversations to add to a business CRM.</p>
+{% if whatsapp.device %}
+<p>{{ "Linked device online." if wa_online else "Linked device offline. Start your WhatsApp listener to resume." }}</p>
+<form action="/inbox/connect/whatsapp" method="post">
+<label><input type="checkbox" name="collect" value="true" {% if whatsapp.collect %}checked{% endif %}> Collect personal WhatsApp conversations and available history</label>
+<label><input type="checkbox" name="reply" value="true" {% if whatsapp.reply %}checked{% endif %}> Allow replies from this WhatsApp number</label>
+<button class="btn btn-primary" type="submit">Save WhatsApp settings</button></form>
+{% else %}<p>Waiting for your linked WhatsApp listener to check in on this PC.</p>{% endif %}
+</section>
 <section class="card" style="margin-top:1rem;padding:1.25rem"><h2>Personal LinkedIn messages</h2>
 <p>On the PC running your connector, open LinkedIn setup in Codex. Sign in through the Beeper on-device LinkedIn connection, then return here and enable your LinkedIn account.</p>
 <a class="btn btn-primary" href="http://127.0.0.1:23765/linkedin" rel="noreferrer">Connect personal LinkedIn on this PC</a>

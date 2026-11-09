@@ -1,5 +1,5 @@
 """Owner editor and a separately authenticated group adapter; no Meta credentials."""
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -39,9 +39,15 @@ def save(revision: int = Form(...), name: str = Form(...), brand: str = Form(...
 
 
 @router.api_route(service.BASE + "/{action:path}", methods=["GET", "POST"])
-async def adapter(action: str, request: Request, db: Session = Depends(get_db)):
+async def adapter(action: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     body = await service.authenticated_body(request)
-    if request.method == "GET" and action == "rules":
+    if request.method == "POST" and action.startswith("direct/"):
+        from ..services import whatsapp_direct
+        result = whatsapp_direct.dispatch(db, action[7:], service.json_object(body))
+        if action == "direct/event" and result.get("stored"):
+            from ..services.inbox_crm import sync_thread
+            background_tasks.add_task(sync_thread, whatsapp_direct.ACCOUNT_KEY, result["thread_sha256"], whatsapp_direct.personal_inbox.owner(db).id)
+    elif request.method == "GET" and action == "rules":
         result = {"schemaVersion": 1, "listenerId": service.LISTENER, **service.rules(db)}
     elif request.method == "GET" and action == "pending":
         result = {"deliveryIds": list(db.scalars(select(KeywordDelivery.id).where(KeywordDelivery.state == "pending")

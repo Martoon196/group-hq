@@ -8,7 +8,6 @@ from ..models import AppSetting, InboxThread, utcnow
 from . import personal_inbox, inbox
 from .inbox_providers import clean, opaque
 
-MAX_CANDIDATES = 2000
 
 
 def selected_candidate(saved, row):
@@ -99,16 +98,18 @@ def report(db, data):
             "name": clean(row.get("name"), 500), "textOnly": row.get("textOnly") is True, "threadKind": thread_kind,
             "selected": old["selected"] if old else inherited,
             "reason": clean(row.get("reason") or "", 200), "query": clean(data.get("query") or "", 100)}
-    if len(previous) > MAX_CANDIDATES:
-        raise HTTPException(400, "Review your existing discovered conversations before adding more.")
     saved["candidates"] = list(previous.values())
     if data.get("seed_existing") is True:
         saved["seeded"] = True
+    prior_matches = (saved.get("coverage") or {}).get("matches", [])
     saved["coverage"] = {"query": clean(data.get("query") or "", 100), "count": len(rows),
         "complete": data.get("complete") is True, "at": utcnow().isoformat(), "note": clean(data.get("note") or "", 300)}
     if saved.get("request") and data.get("request_id") == saved["request"]["id"]:
-        saved["coverage"]["matches"] = matches
-        saved["request"]["done"] = True
+        results = {r["threadId"]: r for r in request.get("matches", prior_matches)}
+        results.update({r["threadId"]: r for r in matches})
+        request["matches"] = list(results.values())
+        saved["coverage"]["matches"] = request["matches"]
+        request["done"] = data.get("request_done", True) is True
     write(db, user.id, account, saved, "desktop:native-discovery")
     return {"ok": True, "count": len(rows)}
 
@@ -117,9 +118,19 @@ def selections(db, data):
     account, user = bound(db, data)
     saved = read(db, user.id, account)
     request = saved.get("request")
-    return {"initialised": saved.get("seeded") is True,
+    threads = [r for r in saved["candidates"] if selected_candidate(saved, r)]
+    next_cursor = None
+    if "limit" in data or "cursor" in data:
+        limit, cursor = data.get("limit", 250), data.get("cursor") or ""
+        if type(limit) is not int or not 1 <= limit <= 500 or not isinstance(cursor, str) or (cursor and not cursor.isdecimal()):
+            raise HTTPException(400, "Invalid selection page.")
+        threads = sorted((r for r in threads if r["threadId"] > cursor), key=lambda r: r["threadId"])
+        if len(threads) > limit:
+            next_cursor = threads[limit-1]["threadId"]
+        threads = threads[:limit]
+    return {"initialised": saved.get("seeded") is True, "next_cursor": next_cursor,
             "sync_all": saved.get("sync_all") is True,
-            "threads": [r for r in saved["candidates"] if selected_candidate(saved, r)],
+            "threads": threads,
             "request": {k: request[k] for k in ("id", "query", "done")} if request else None}
 
 

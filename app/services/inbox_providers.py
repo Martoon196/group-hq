@@ -288,7 +288,10 @@ class Zernio(Transport):
             result.append({"id": opaque(item.get("id")), "body": clean(item.get("message") or "[Attachment]"),
                 "direction": direction, "name": clean(item.get("senderName") or "", 500),
                 "occurred_at": clean(item.get("createdAt") or "", 100)})
-        return list(reversed(result)), next_cursor(body)
+        cursor = next_cursor(body)
+        if object_field(body, "pagination").get("hasMore") is True and not cursor:
+            raise InboxError("invalid_provider_response")
+        return list(reversed(result)), cursor
 
     def send(self, thread_id, body, request_id):
         self.validate_send(thread_id, body, request_id)

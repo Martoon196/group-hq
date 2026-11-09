@@ -50,6 +50,10 @@ def accounts(db=None):
         local = (saved.value if saved else {}).get("accounts", [])
         enabled = [r for r in local if r.get("enabled") is True]
         result.extend(load_accounts(json.dumps(enabled), os.environ))
+        from . import whatsapp_direct
+        device = whatsapp_direct.account(db)
+        if device:
+            result.append(device)
     whatsapp = inbox_r72_whatsapp.account()
     if whatsapp:
         result.append(whatsapp)
@@ -182,6 +186,13 @@ def replies(db, account, thread_id):
         InboxReply.thread_sha256 == digest).order_by(InboxReply.created_at.desc()).limit(10)).all()
 
 
+def local_online(db, account, cached):
+    from . import whatsapp_direct
+    if account.key == whatsapp_direct.ACCOUNT_KEY:
+        return whatsapp_direct.online(db)
+    return (utcnow() - cached.seen_at).total_seconds() <= 120
+
+
 def send(db, user, account, thread_id, text, request_id):
     try:
         if str(uuid.UUID(request_id)) != request_id:
@@ -192,10 +203,16 @@ def send(db, user, account, thread_id, text, request_id):
         raise HTTPException(400, "Write a reply of up to 10,000 bytes.")
     if not account.can_reply or not account.configured:
         raise HTTPException(409, "Replies are not configured for this account.")
+    if account.provider == "r72_whatsapp" and len(text.encode()) > 4096:
+        raise HTTPException(400, "WhatsApp replies can contain up to 4,096 bytes.")
     thread_sha = hashlib.sha256(opaque(thread_id).encode()).hexdigest()
     if account.provider == "local":
         cached = local_thread(db, account, thread_id, user.id)
-        if (utcnow() - cached.seen_at).total_seconds() > 120:
+        if account.channel == "whatsapp":
+            from . import whatsapp_direct
+            if len(text) > 4000 or not whatsapp_direct.reply_allowed(db, account.account_id, thread_id):
+                raise HTTPException(409, "Check the WhatsApp recipient and keep the reply within 4,000 characters.")
+        if not local_online(db, account, cached):
             raise HTTPException(409, "Your personal connector is offline or catching up. Open it before replying.")
     digest = hashlib.sha256(json.dumps([user.id, account.binding, thread_id, text], ensure_ascii=False).encode()).hexdigest()
     created = db.execute(insert(InboxReply).values(id=request_id, user_id=user.id, account_key=account.key,
@@ -218,8 +235,12 @@ def send(db, user, account, thread_id, text, request_id):
         return db.get(InboxReply, request_id)
     state, reason, provider_id = "outcome_unknown", None, None
     try:
-        provider_id = client(account).send(thread_id, text, "ghq-" + request_id)
-        state = "bridge_accepted" if account.provider == "matrix" else "accepted"
+        if account.provider == "r72_whatsapp":
+            from .inbox_r72_whatsapp import WhatsAppReader
+            state = WhatsAppReader(account, user.email).queue(thread_id, text, request_id)
+        else:
+            provider_id = client(account).send(thread_id, text, "ghq-" + request_id)
+            state = "bridge_accepted" if account.provider == "matrix" else "accepted"
     except InboxError as error:
         reason = error.code
         state = "outcome_unknown" if error.code == "outcome_unknown" else "rejected"

@@ -59,3 +59,47 @@ def test_canonical_whatsapp_refuses_a_foreign_account_or_participant(monkeypatch
     monkeypatch.setattr(inbox_crm, "command", lambda *args, **kwargs: dict(brand="pp", accountId=account_id))
     with pytest.raises(InboxError, match="unbound_target"):
         reader.conversations()
+
+
+def test_owner_manual_reply_uses_received_thread_and_original_request_once(admin_client, db, canonical, monkeypatch):
+    from app.services import inbox_automations
+    _, thread, _, _ = canonical
+    monkeypatch.setattr(config, "GHQ_MHP_WHATSAPP_MANUAL_REPLIES", True)
+    account = next(a for a in inbox.accounts() if a.key == "mhp-whatsapp")
+    user = db.scalars(select(User)).first()
+    assert not inbox_automations.available(account,user)
+    request_id = str(uuid.uuid4())
+    calls = []
+
+    def bridge(actor, brand, action, **payload):
+        calls.append((actor.email,brand,action,payload))
+        return dict(brand=brand, accountId=account.account_id, threadId=thread, requestId=request_id, state="queued")
+
+    monkeypatch.setattr(inbox_crm,"command",bridge)
+    for _ in range(2):
+        receipt=inbox.send(db,user,account,thread,"An owner reply",request_id)
+        assert receipt.state=="bridge_accepted"
+    assert calls==[(user.email,"mhp","whatsappReply",dict(accountId=account.account_id,threadId=thread,
+                  body="An owner reply",request_id=request_id))]
+
+
+def test_first_contact_is_inbox_only_and_renders_eligible_reply(admin_client, db, canonical, monkeypatch):
+    account_id, thread, _, _=canonical
+    monkeypatch.setattr(config, "GHQ_MHP_WHATSAPP_MANUAL_REPLIES", True)
+    user=db.scalars(select(User)).first()
+    account=next(a for a in inbox.accounts() if a.key=="mhp-whatsapp")
+    tag=inbox.ticket(account,thread,user.id,"New sender",thread)
+
+    def bridge(actor,brand,action,**payload):
+        common=dict(brand=brand,accountId=account_id)
+        if action=="whatsappThreads": return dict(common,hasMore=False,threads=[])
+        assert action=="whatsappMessages"
+        return dict(common,threadId=thread,canReply=True,nextCursor=None,messages=[
+            dict(id=str(uuid.uuid4()),participantId=thread,contactId=None,name="New sender",body="First enquiry",
+                 direction="incoming",occurredAt="2026-11-09T14:10:00Z")])
+
+    monkeypatch.setattr(inbox_crm,"command",bridge)
+    page=admin_client.get("/inbox",params={"account":account.key,"thread":tag})
+    assert page.status_code==200 and "First enquiry" in page.text
+    assert "Open MHP CRM contact" not in page.text and 'action="/inbox/crm"' in page.text
+    assert 'action="/inbox/reply"' in page.text

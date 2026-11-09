@@ -22,6 +22,7 @@ GHQ_PERSONAL_INBOX_SECRET = os.environ.get("GHQ_INBOX_PERSONAL_SECRET", "")
 GHQ_PERSONAL_INBOX_OWNER_EMAIL = os.environ.get("GHQ_PERSONAL_INBOX_OWNER_EMAIL", "").strip().lower()
 R72_GROUP_HQ_INBOX_SECRET = os.environ.get("R72_GROUP_HQ_INBOX_SECRET", "")
 GHQ_MHP_WHATSAPP_INBOX_ID = os.environ.get("GHQ_MHP_WHATSAPP_INBOX_ID", "").strip().lower()
+GHQ_MHP_WHATSAPP_MANUAL_REPLIES = os.environ.get("GHQ_MHP_WHATSAPP_MANUAL_REPLIES") == "enabled"
 
 
 def _bool(name: str, default: bool) -> bool:

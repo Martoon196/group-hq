@@ -28,6 +28,9 @@ def connector(data):
 
 
 def connector_for(db, account_key):
+    from . import whatsapp_direct
+    if account_key == whatsapp_direct.ACCOUNT_KEY:
+        return whatsapp_direct.SOURCE
     row = next((r for r in catalog(db)["accounts"] if r["key"] == account_key), None)
     return row.get("connector_id", "beeper") if row else None
 
@@ -224,12 +227,12 @@ def begin(db, reply_id, source="beeper", channel=None):
             "user_id": account.user_id, "channel": account.channel, "thread_id": row.thread_id, "body": row.body}
 
 
-def settle(db, reply_id, data):
+def settle(db, reply_id, data, *, source=None):
     row = db.scalar(select(InboxReply).where(InboxReply.id == reply_id).with_for_update())
     if row is None:
         problem("Unknown reply", 404)
     account, user = enabled_account(db, row.account_key)
-    if connector_for(db, account.key) != connector(data):
+    if connector_for(db, account.key) != (source or connector(data)):
         problem("Wrong personal connector", 403)
     if row.user_id != user.id or row.binding_sha256 != account.binding:
         problem("Reply account changed", 409)
