@@ -29,8 +29,9 @@ function incomingMessage(packet,connectedAt,provider) {
 }
 
 class SocketClient extends EventEmitter {
-  constructor({dataPath,expectedNumber,pairOnly=false,loadProvider=()=>import('@whiskeysockets/baileys'),authFactory=openAuthState,loggerFactory}={}) {
-    super();Object.assign(this,{dataPath,expectedNumber,pairOnly,loadProvider,authFactory,loggerFactory});
+  constructor({dataPath,expectedNumber,pairOnly=false,pairedProfile,loadProvider=()=>import('@whiskeysockets/baileys'),authFactory=openAuthState,loggerFactory}={}) {
+    if(pairedProfile!==undefined&&!['chrome','desktop'].includes(pairedProfile))throw Error('Paired profile must be chrome or desktop');
+    super();Object.assign(this,{dataPath,expectedNumber,pairOnly,pairedProfile,loadProvider,authFactory,loggerFactory});
     this.ready=false;this.closed=false;this.retries=0;this.mapping=new Map();
   }
   async initialize() {
@@ -47,8 +48,13 @@ class SocketClient extends EventEmitter {
     if (!this.pairOnly && this.prepareHistory) {
       try { fullHistory=await this.prepareHistory(); } catch { /* Older servers still support group rules. */ }
     }
+    // A linked device must keep the identity it was paired with: WhatsApp closes the stream (428) when a paired
+    // session reconnects as a different browser. Only a fresh pairing may choose the desktop history profile.
+    const creds=this.auth.state.creds;
+    const profile=creds.ghqBrowser || (creds.me?.id ? (this.pairedProfile || 'chrome') : (fullHistory ? 'desktop' : 'chrome'));
+    this.profile=profile;
     const socket=p.default({auth:this.auth.state,logger:this.logger,
-      browser:fullHistory ? p.Browsers.windows('Desktop') : p.Browsers.ubuntu('Chrome'),markOnlineOnConnect:false,syncFullHistory:fullHistory,
+      browser:profile==='desktop' ? p.Browsers.windows('Desktop') : p.Browsers.ubuntu('Chrome'),markOnlineOnConnect:false,syncFullHistory:fullHistory,
       shouldSyncHistoryMessage:()=>!this.pairOnly && Boolean(this.allowHistory?.()),emitOwnEvents:false,generateHighQualityLinkPreview:false,
       connectTimeoutMs:30000,qrTimeout:60000});
     this.socket=socket;this.ready=false;
@@ -96,6 +102,7 @@ class SocketClient extends EventEmitter {
       if(actual!==this.expectedNumber+'@c.us') {
         this.closed=true;this.ready=false;socket.end(undefined);this.emit('auth_failure');return;
       }
+      if(!this.auth.state.creds.ghqBrowser)this.auth.state.creds.ghqBrowser=this.profile;
       await this.auth.saveCreds();await this.auth.flush();
       if(this.closed||socket!==this.socket)return;
       this.info={wid:{_serialized:actual}};this.connectedAt=Date.now();this.ready=true;this.retries=0;this.emit('ready');

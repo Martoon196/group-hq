@@ -68,6 +68,29 @@ test('socket confirms selected account before groups/messages; notify-only live 
  await f.client.destroy();
 });
 
+test('a paired session keeps its pairing browser when history is enabled, and a fresh pairing records its profile',async()=>{
+ // Existing link paired as Chrome, before the profile was recorded: enabling history must not change identity (428).
+ let f=fixture();f.auth.state.creds={me:{id:'447700900001:2@s.whatsapp.net'}};
+ f.client.allowHistory=()=>true;f.client.prepareHistory=async()=>true;
+ await f.client.initialize();
+ assert.deepEqual(f.sockets[0].options.browser,['Ubuntu','Chrome','22']);assert(f.sockets[0].options.syncFullHistory);
+ await f.client.connectionUpdate(f.sockets[0],{connection:'open'});assert.equal(f.auth.state.creds.ghqBrowser,'chrome');
+ await f.client.destroy();
+ // A fresh pairing with history uses the desktop profile and keeps it on later reconnects, even with history off.
+ f=fixture();f.client.prepareHistory=async()=>true;await f.client.initialize();
+ assert.deepEqual(f.sockets[0].options.browser,['Windows','Desktop','10']);
+ f.auth.state.creds.me={id:'447700900001:2@s.whatsapp.net'};
+ await f.client.connectionUpdate(f.sockets[0],{connection:'open'});assert.equal(f.auth.state.creds.ghqBrowser,'desktop');
+ f.client.prepareHistory=async()=>false;await f.client.connect();
+ assert.deepEqual(f.sockets[1].options.browser,['Windows','Desktop','10']);
+ await f.client.destroy();
+ // An explicit recovery override applies only to a paired session that has no recorded profile.
+ f=fixture();f.auth.state.creds={me:{id:'447700900001:2@s.whatsapp.net'}};
+ f.client.pairedProfile='desktop';await f.client.initialize();
+ assert.deepEqual(f.sockets[0].options.browser,['Windows','Desktop','10']);await f.client.destroy();
+ assert.throws(()=>new SocketClient({pairedProfile:'firefox'}));
+});
+
 test('the verified desktop history profile routes old and append packets only to the archive',async()=>{
  const f=fixture(), historic=[], live=[];
  f.client.allowHistory=()=>true;f.client.prepareHistory=async()=>true;
