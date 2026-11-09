@@ -39,7 +39,7 @@ app.mount("/assets", StaticFiles(directory=str(config.APP_DIR / "static")), name
 
 from .routers import (audit, auth, crm, dashboard, franchise, grants, growth, mentee_import, mentees, people,  # noqa: E402  (after templates exist)
                       programmes, sellers, settings, territories, whatsapp_keywords, inbox, personal_inbox,
-                      inbox_automations, inbox_comments)
+                      inbox_automations, inbox_comments, video_comments)
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
@@ -48,6 +48,7 @@ app.include_router(whatsapp_keywords.router)
 app.include_router(inbox.router)
 app.include_router(personal_inbox.router)
 app.include_router(inbox_comments.router)
+app.include_router(video_comments.router)
 app.include_router(inbox_automations.router)
 app.include_router(people.router)
 app.include_router(mentee_import.router)     # before mentees: /mentees/import is not /mentees/{mentee_id}

@@ -3,10 +3,10 @@ const {EngineClient,GrowthHqClient,snapshot,channel}=require('./client.cjs');
 async function openState(directory){return openAuthState(directory,{BufferJSON:{},initAuthCreds:()=>({token:null,deliveries:{}})});}
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
-async function dispatch(engine,cloud,state,replyId){
+async function dispatch(engine,cloud,state,replyId,channelScope){
   const saved=state.state.creds.deliveries;
   if(saved[replyId])return;
-  const job=await cloud.request('replies/'+replyId+'/begin',{});
+  const job=await cloud.request('replies/'+replyId+'/begin',channelScope?{channel:channelScope}:{});
   if(job.dispatch!==true)return;
   const binding={account_id:job.account_id,user_id:job.user_id,channel:job.channel};
   // Persist intent BEFORE the non-idempotent desktop send. Never repeat a begun send.
@@ -44,23 +44,32 @@ async function settlePending(engine,cloud,state){
   }
 }
 
-async function cycle(engine,cloud,state){
+async function discoverAccounts(engine,cloud){
   const accounts=await engine.accounts();
   const configured=await cloud.request('accounts',{accounts:accounts.map(a=>({account_id:a.accountID,user_id:a.user.id,channel:channel(a),
     engine_provider:a.bridge.provider,status:a.status,label:a.user.fullName||a.network||channel(a)}))});
+  return {accounts,configured};
+}
+async function cycle(engine,cloud,state,channelScope){
+  const {accounts,configured}=await discoverAccounts(engine,cloud);
+  async function drain(){
+    const queue=channelScope?await cloud.request('pending',{channel:channelScope}):await cloud.request('pending',undefined,'GET');
+    if(channelScope && queue.channel!==channelScope)return; // An older server can still ingest; only a scoped queue may dispatch.
+    for(const id of queue.reply_ids??[])await dispatch(engine,cloud,state,id,channelScope);
+  }
   await settlePending(engine,cloud,state);
-  const queue=await cloud.request('pending',undefined,'GET');
-  for(const id of queue.reply_ids??[])await dispatch(engine,cloud,state,id);
-  for(const binding of configured.accounts??[]){
-    if(binding.enabled!==true)continue;
+  await drain();
+  for(const saved of configured.accounts??[]){
+    const account=accounts.find(a=>a.accountID===saved.account_id && a.user.id===saved.user_id);
+    if(saved.enabled!==true || !account || (channelScope && channel(account)!==channelScope))continue;
+    const binding={...saved,channel:channel(account)};
     const page=await engine.chats(binding);
     for(const c of page.items){
       if(c.type!=='single'||c.merge)continue;
       try{const messages=await engine.messages(binding,c);await cloud.request('threads',snapshot(binding,c,messages));}
       catch(error){if(/cross_account|unbound/.test(error.message))throw error;}
       // Long initial histories must not starve replies queued in Growth HQ.
-      const waiting=await cloud.request('pending',undefined,'GET');
-      for(const id of waiting.reply_ids??[])await dispatch(engine,cloud,state,id);
+      await drain();
     }
   }
 }
@@ -76,5 +85,5 @@ async function run(){
   }
   await state.flush();
 }
-module.exports={openState,dispatch,settlePending,cycle};
+module.exports={openState,dispatch,settlePending,cycle,discoverAccounts};
 if(require.main===module)run().catch(()=>{console.error('Personal inbox setup needs attention.');process.exitCode=1;});

@@ -10,13 +10,20 @@ import re
 from dataclasses import dataclass
 from urllib.parse import quote
 
-from .inbox_providers import Account, InboxError, Transport, clean, load_accounts, object_field, opaque, rows
+from .inbox_providers import Account, CHANNELS, InboxError, Transport, clean, load_accounts, object_field, opaque, rows
 
 SURFACE = "linkedin_public_comments"
 COMPANIES = {
     "pp": ("6a98ae4677555aae01c8ec39", "6a98ac5a647e96173efa7ed8"),
     "kp": ("6aebc74669f0b74d1604ce03", "6acfc2c1347304c5e294a88a"),
 }
+
+
+def profile_token(environ, brand, profile_id, owner):
+    private = load_accounts(environ.get("GHQ_INBOX_ACCOUNTS", "[]"), environ)
+    tokens = {a.token for a in private if a.provider == "zernio" and a.brand == brand
+              and a.profile_id == profile_id and a.token and (not a.owner_email or a.owner_email == owner)}
+    return tokens.pop() if len(tokens) == 1 else ""
 
 
 @dataclass(frozen=True)
@@ -56,11 +63,7 @@ def load_public_accounts(raw, environ):
             token = environ.get(env_key, "")
             if env_key == "GHQ_INBOX_REUSE_PROFILE":
                 # An explicitly enabled company may reuse its own approved inbox credential.
-                private = load_accounts(environ.get("GHQ_INBOX_ACCOUNTS", "[]"), environ)
-                tokens = {a.token for a in private if a.provider == "zernio" and a.brand == brand
-                          and a.profile_id == row["profile_id"] and a.token and
-                          (not a.owner_email or a.owner_email == owner)}
-                token = tokens.pop() if len(tokens) == 1 else ""
+                token = profile_token(environ, brand, row["profile_id"], owner)
             result.append(PublicCommentAccount(key=row["key"], brand=brand, channel="linkedin",
                 label=clean(row["label"], 200), provider="zernio", account_id=row["account_id"],
                 profile_id=row["profile_id"], token=token,
@@ -109,7 +112,7 @@ class LinkedInComments(Transport):
 
     def posts(self, cursor=None):
         params = {"accountId": self.account.account_id, "profileId": self.account.profile_id,
-                  "platform": "linkedin", "limit": 100, "sortBy": "date", "sortOrder": "desc"}
+                  "platform": self.account.channel, "limit": 100, "sortBy": "date", "sortOrder": "desc"}
         if cursor:
             params["cursor"] = clean(cursor, 4096)
         body = self.request("GET", "/api/v1/inbox/comments", params=params)
@@ -118,7 +121,7 @@ class LinkedInComments(Transport):
             raise InboxError("provider_unavailable")
         result = []
         for row in rows(body, "data"):
-            if (row.get("accountId") != self.account.account_id or row.get("platform") != "linkedin"
+            if (row.get("accountId") != self.account.account_id or row.get("platform") != self.account.channel
                     or row.get("isAd", False) is not False):
                 raise InboxError("unbound_target")
             result.append({"id": opaque(row.get("id")), "body": clean(row.get("content") or ""),
@@ -132,7 +135,7 @@ class LinkedInComments(Transport):
             params["cursor"] = clean(cursor, 4096)
         body = self.request("GET", "/api/v1/inbox/comments/" + quote(post_id, safe=""), params=params)
         meta = object_field(body, "meta")
-        if (meta.get("accountId") != self.account.account_id or meta.get("platform") != "linkedin"
+        if (meta.get("accountId") != self.account.account_id or meta.get("platform") != self.account.channel
                 or meta.get("postId") != post_id):
             raise InboxError("unbound_target")
         result, count = [], [0]
@@ -141,7 +144,7 @@ class LinkedInComments(Transport):
             count[0] += 1
             if count[0] > 500 or depth > 5:
                 raise InboxError("invalid_provider_response")
-            if row.get("platform") != "linkedin":
+            if row.get("platform") != self.account.channel:
                 raise InboxError("unbound_target")
             for key, expected in (("accountId", self.account.account_id), ("postId", post_id)):
                 if key in row and row[key] != expected:
@@ -151,7 +154,7 @@ class LinkedInComments(Transport):
             if not isinstance(can_reply, bool):
                 raise InboxError("invalid_provider_response")
             result.append({"id": opaque(row.get("id")), "body": clean(row.get("message") or ""),
-                "name": clean(author.get("name") or "LinkedIn member", 500), "depth": depth,
+                "name": clean(author.get("name") or CHANNELS[self.account.channel] + " member", 500), "depth": depth,
                 "occurred_at": clean(row.get("createdTime") or "", 100), "can_reply": can_reply,
                 "more_replies": row.get("repliesHasMore") is True})
             for reply in rows({"replies": row.get("replies", [])}, "replies"):
@@ -161,9 +164,12 @@ class LinkedInComments(Transport):
             visit(row, 0)
         return result, page_cursor(body, "cursor")
 
+    def unpack_target(self, value):
+        return unpack_target(value)
+
     def send(self, thread_id, body, request_id):
         self.validate_send(thread_id, body, request_id)
-        post_id, comment_id = unpack_target(thread_id)
+        post_id, comment_id = self.unpack_target(thread_id)
         response = self.request("POST", "/api/v1/inbox/comments/" + quote(post_id, safe=""),
             payload={"accountId": self.account.account_id, "commentId": comment_id, "message": body},
             request_id=request_id)

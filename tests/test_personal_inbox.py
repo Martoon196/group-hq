@@ -470,3 +470,37 @@ def test_owner_takeover_blocks_queued_automatic_claim_and_preserves_manual_reply
         assert pending_claim.result(timeout=5) == {"state": "rejected", "dispatch": False}
     assert db.get(InboxReply, automatic).reason == "owner_handoff"
     assert personal.begin(db, manual)["dispatch"] is True
+
+
+def test_linkedin_setup_channel_claim_and_crm_keep_native_identity(admin_client, db, personal_account, monkeypatch):
+    user, facebook, _ = personal_account
+    data = {"accounts": [{"channel":"linkedin", "account_id":"li-owned", "user_id":"member-1",
+        "engine_provider":"local", "status":"connected", "label":"LinkedIn test account"}]}
+    binding = next(b for b in personal.discover(db, data)["accounts"] if b["account_id"] == "li-owned")
+    assert not binding["enabled"]
+    page = admin_client.get("/inbox/connect")
+    assert page.status_code == 200 and "http://127.0.0.1:23765/linkedin" in page.text
+    assert admin_client.post("/inbox/connect", data={"account_key":binding["key"],"enabled":"true","brand":"kp"}).status_code == 303
+    linkedin = next(a for a in inbox.accounts(db) if a.key == binding["key"])
+    personal.ingest(db, {"account_key":linkedin.key, "account_id":linkedin.account_id, "user_id":"member-1",
+        "observed_at":utcnow().isoformat()+"Z", "thread":{"id":"li-thread", "name":"Test enquiry", "participant_id":"li-peer",
+        "is_group":False, "is_merged":False, "messages":[{"id":"li-1", "body":"Fixture only", "direction":"incoming", "occurred_at":"2026-11-09T12:00:00Z"}]}})
+    manual, other = str(uuid.uuid4()), str(uuid.uuid4())
+    inbox.send(db, user, linkedin, "li-thread", "Test reply", manual)
+    inbox.send(db, user, facebook, "durham-thread", "Separate reply", other)
+    assert personal.pending(db, "beeper", "linkedin") == {"reply_ids":[manual], "channel":"linkedin"}
+    with pytest.raises(HTTPException):
+        personal.begin(db, other, "beeper", "linkedin")
+    assert db.get(InboxReply, other).state == "queued"
+    path, raw, headers = signed("replies/" + manual + "/begin", {"channel": "linkedin"})
+    response = admin_client.post(path, content=raw, headers=headers)
+    assert response.status_code == 200
+    job = response.json()
+    assert job["dispatch"] and job["channel"]=="linkedin" and job["account_id"]=="li-owned" and job["thread_id"]=="li-thread"
+    origins=[]
+    def native(actor, brand, action, **payload):
+        origins.append(payload["source"])
+        return {"brand":brand,"contactId":str(uuid.uuid4()),"workspaceId":str(uuid.uuid4())}
+    monkeypatch.setattr(inbox_crm,"command",native)
+    inbox_crm.connect(db,user,inbox.ticket(linkedin,"li-thread",user.id,"Test enquiry","li-peer"),"kp","Test enquiry")
+    assert origins == [{"accountId":"li-owned","threadId":"li-thread","participantId":"li-peer","channel":"linkedin"}]
