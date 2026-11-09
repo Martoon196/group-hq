@@ -34,6 +34,20 @@ intent and reason (short plain English), needs_owner (boolean) and draft (string
 
 SECRET = re.compile(r"(?i)\b(password|passcode|api[ _-]?key|access[ _-]?token|verification code|one[ -]time code)\s*[:=]\s*\S+|\b(?:sk-ant-|sk_live_|rk_live_|ghp_)[A-Za-z0-9_-]+")
 
+TRIAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "kind": {"type": "string", "enum": ["personal", "pitch", "business", "unclassified"]},
+        "brands": {"type": "array", "items": {"type": "string", "enum": list(BRANDS)}},
+        "intent": {"type": "string"},
+        "reason": {"type": "string"},
+        "needs_owner": {"type": "boolean"},
+        "draft": {"type": "string"},
+    },
+    "required": ["kind", "brands", "intent", "reason", "needs_owner", "draft"],
+    "additionalProperties": False,
+}
+
 
 def analyse_with_claude(messages, account_brand, post=httpx.post):
     transcript = [{"direction": m["direction"], "text": SECRET.sub("[private credential]", str(m.get("body") or ""))[:1100]}
@@ -43,6 +57,7 @@ def analyse_with_claude(messages, account_brand, post=httpx.post):
     r = post("https://api.anthropic.com/v1/messages", timeout=18, follow_redirects=False,
              headers={"x-api-key": os.environ["GHQ_INBOX_ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01"},
              json={"model": model(), "max_tokens": 500, "system": SYSTEM,
+                   "output_config": {"format": {"type": "json_schema", "schema": TRIAGE_SCHEMA}},
                    "messages": [{"role": "user", "content": json.dumps({"source_brand": account_brand, "messages": transcript})}]})
     r.raise_for_status()
     data = r.json()

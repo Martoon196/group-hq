@@ -41,6 +41,9 @@ def test_claude_limits_and_handoff(monkeypatch):
     res = inbox_claude.analyse_with_claude([msg("password: sample-secret")]*15 + [msg("I want a refund")], "kp", provider)
     assert res["needs_owner"] and not res["draft"]
     payload = json.loads(sent[0]["json"]["messages"][0]["content"])
+    output = sent[0]["json"]["output_config"]["format"]
+    assert output["type"] == "json_schema"
+    assert set(output["schema"]["required"]) == {"kind", "brands", "intent", "reason", "needs_owner", "draft"}
     assert "sample-secret" not in str(payload)
     assert len(payload["messages"]) == 12 and all(set(row) == {"text","direction"} for row in payload["messages"])
     assert "tools" not in sent[0]["json"]
