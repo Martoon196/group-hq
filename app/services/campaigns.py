@@ -45,18 +45,27 @@ PP_STEPS = (
 
 def project_pp_page(db: Session, page: LeadPage, actor: User) -> tuple[int, int]:
     """Upsert one bounded source page by its stable UUID. Caller commits the whole page."""
+    return project_leads(db, "pp", page.leads, actor)
+
+
+def project_leads(db: Session, brand: str, leads, actor: User | str) -> tuple[int, int]:
+    """Upsert one page of a brand's CRM contacts by their stable UUID. Each item carries id, name, source,
+    lifecycle and stage; the richer listing also carries the times and opportunity facts of 0016, which a page
+    from the older read bridge simply lacks (those columns are then left as they are). Caller commits."""
+    extra = ("next_task_at", "last_activity_at", "source_created_at", "opportunity_status", "value_minor",
+             "stage_changed_at")
     created = changed = 0
-    for item in page.leads:
-        lead = (db.query(CampaignLead).filter_by(brand="pp", source_system="relaunch72", external_id=item.id).first())
-        fields = dict(display_name=item.name, source=item.source, lifecycle=item.lifecycle, stage=item.stage,
-                      next_task_at=item.next_task_at, last_activity_at=item.last_activity_at)
+    for item in leads:
+        lead = (db.query(CampaignLead).filter_by(brand=brand, source_system="relaunch72", external_id=item.id).first())
+        fields = dict(display_name=item.name, source=item.source, lifecycle=item.lifecycle, stage=item.stage)
+        fields.update({key: getattr(item, key) for key in extra if hasattr(item, key)})
         if lead is None:
-            lead = CampaignLead(brand="pp", source_system="relaunch72", external_id=item.id,
+            lead = CampaignLead(brand=brand, source_system="relaunch72", external_id=item.id,
                                 synced_at=utcnow(), **fields)
             db.add(lead)
             db.flush()
             audit(db, actor, "campaign.lead.project", f"campaign_lead:{lead.id}",
-                  after={"brand": "pp", "external_id": item.id, "source_system": "relaunch72"})
+                  after={"brand": brand, "external_id": item.id, "source_system": "relaunch72"})
             created += 1
         else:
             before = {key: getattr(lead, key) for key in fields}

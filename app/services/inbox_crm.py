@@ -2,8 +2,10 @@
 import hashlib
 import hmac
 import json
+import re
 import time
 import uuid
+from dataclasses import dataclass
 
 import httpx
 from fastapi import HTTPException
@@ -56,6 +58,8 @@ def command(user, brand, action, *, transport=None, request_id=None, **payload):
         if action in ("whatsappThreads", "whatsappMessages", "whatsappReply"):
             # The dedicated reader validates each native ID and the returned account/thread binding.
             return result
+        if action == "leads":
+            return _leads_page(result, brand)
         if action == "search":
             rows = result.get("contacts")
             if not isinstance(rows, list) or len(rows) > 20:
@@ -72,6 +76,54 @@ def command(user, brand, action, *, transport=None, request_id=None, **payload):
         return result
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         raise CrmUnavailable("CRM did not return a confirmed result. Try the CRM action again; it will not create a duplicate.") from None
+
+
+@dataclass(frozen=True)
+class CrmLead:
+    """One contact from the CRM's lead listing, with where its latest opportunity stands (None fields when it has
+    no opportunity). Times are the CRM's ISO strings."""
+    id: str
+    name: str
+    source: str | None
+    lifecycle: str
+    stage: str | None
+    source_created_at: str | None
+    opportunity_status: str | None
+    value_minor: int | None
+    stage_changed_at: str | None
+
+
+def _leads_page(result, brand):
+    """Validate a `leads` answer: this brand, at most 200 well-formed contacts, an opaque cursor or none."""
+    rows, cursor = result.get("leads"), result.get("nextCursor")
+    if (result.get("brand") != brand or not isinstance(rows, list) or len(rows) > 200
+            or not (cursor is None or (isinstance(cursor, str) and re.fullmatch(r"[A-Za-z0-9_-]{4,256}", cursor)))):
+        raise ValueError()
+    leads, seen = [], set()
+
+    def text(value, limit):
+        if value is not None and (not isinstance(value, str) or len(value) > limit):
+            raise ValueError()
+        return value
+    for row in rows:
+        lead_id = str(uuid.UUID(row["id"]))
+        name = text(row["name"], 200)
+        if lead_id in seen or not name or not name.strip() or row["lifecycle"] not in ("lead", "customer", "archived"):
+            raise ValueError()
+        seen.add(lead_id)
+        deal = row.get("opportunity")
+        if deal is not None and (not isinstance(deal, dict) or deal.get("status") not in ("open", "won", "lost")):
+            raise ValueError()
+        value = deal.get("valueMinor") if deal else None
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**13):
+            raise ValueError()
+        pounds = bool(deal) and deal.get("currency") == "GBP"
+        leads.append(CrmLead(
+            id=lead_id, name=name, source=text(row.get("source"), 100), lifecycle=row["lifecycle"],
+            stage=text(deal.get("stage"), 100) if deal else None, source_created_at=text(row.get("createdAt"), 50),
+            opportunity_status=deal["status"] if deal else None, value_minor=value if pounds else None,
+            stage_changed_at=text((deal.get("closedAt") or deal.get("stageChangedAt")) if deal else None, 50)))
+    return {"leads": leads, "next_cursor": cursor}
 
 
 def source(db, user, thread_ticket):
@@ -135,7 +187,7 @@ def connect(db, user, thread_ticket, brand, display_name, contact_id="", copy_me
         syncing.discard(brand)
     # Commit local link + projection choice together. A background importer
     # must never observe a new link before the unchecked copy choice exists.
-    kind = settings["kind"] if settings["kind"] in ("personal", "pitch") else "business"
+    kind = settings["kind"] if settings["kind"] in ("personal", "pitch", "property") else "business"
     inbox_organisation.save(db, user, account, bound["thread"], kind,
         set(settings["brands"]) | {brand}, syncing, settings["note"])
     # Contacts/points are created only by Relaunch72; cache IDs here only after its confirmed response.

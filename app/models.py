@@ -18,7 +18,7 @@ from .db import Base
 
 # ---- vocabularies (mirrored by the CheckConstraints in alembic/versions/0001_baseline.py) ----
 PRODUCTS = ("pp", "ordris", "kp", "hnh")
-CAMPAIGN_BRANDS = ("pp", "mhp")
+CAMPAIGN_BRANDS = ("pp", "mhp", "kp", "piuk")     # kp and piuk since alembic/versions/0016_laps_all_brands.py
 CAMPAIGN_PLAN_STATES = ("active", "held", "completed")
 CAMPAIGN_ACTION_STATES = ("open", "done", "skipped")
 CAMPAIGN_CHANNELS = ("call", "email", "sms", "whatsapp")
@@ -411,6 +411,12 @@ class CampaignLead(TimestampMixin, Base):
     next_task_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
     last_activity_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    # What the CRM's lead listing adds (0016): when the contact was created there, and its latest opportunity's
+    # status (open, won, lost), value in minor units and last stage change. NULL from the older read bridge.
+    source_created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    opportunity_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    value_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    stage_changed_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     plans: Mapped[list["CampaignPlan"]] = relationship(back_populates="lead")
 
@@ -1016,6 +1022,7 @@ class LapsDeal(TimestampMixin, Base):
         Index("ix_laps_deals_stage", "stage"),
         Index("ix_laps_deals_lead_at", "lead_at"),
         Index("ux_laps_deals_origin", "origin", unique=True, postgresql_where=text("origin IS NOT NULL")),
+        Index("ix_laps_deals_party", "party", postgresql_where=text("party IS NOT NULL")),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -1034,6 +1041,9 @@ class LapsDeal(TimestampMixin, Base):
     next_step_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     origin: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # One person wanted by several businesses is one card per business, each with its own stage and value;
+    # party is the id those cards share (0016). NULL for a card that stands alone.
+    party: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
 
 # =====================================================================================================
@@ -1094,3 +1104,20 @@ class Acquisition(TimestampMixin, Base):
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     checks: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     origin: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class AcquisitionThread(Base):
+    """An Inbox conversation attached to a property deal (alembic/versions/0015_acquisition_threads.py). Only the
+    reference is kept: the deal page reads the messages through the Inbox, as the owner, each time it is opened,
+    so nothing is copied and a disconnected account shows nothing."""
+    __tablename__ = "acquisition_threads"
+    deal_id: Mapped[int] = mapped_column(ForeignKey("acquisitions.id", ondelete="CASCADE"), primary_key=True)
+    account_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    thread_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    thread_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    participant_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    name: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    __table_args__ = (Index("ix_acquisition_threads_thread", "account_key", "thread_sha256"),)

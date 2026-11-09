@@ -8,16 +8,18 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import check_origin, require_admin
 from ..db import get_db
-from ..models import Acquisition, User, utcnow
+from ..models import Acquisition, AcquisitionThread, User, utcnow
 from ..services import acquisitions as service
-from ..services import laps
+from ..services import inbox as inbox_service
+from ..services import inbox_crm, inbox_organisation, laps
+from ..services.inbox_providers import InboxError
 from ..services.audit import audit, changes
 from ..templating import go, render
 from .laps import _arrived, gbp, percent
@@ -26,6 +28,7 @@ from .people import get_or_404
 router = APIRouter(dependencies=[Depends(check_origin)])
 
 COMPLETED_SHOWN_DAYS = 90
+MESSAGES_SHOWN = 30
 TEXT_FIELDS = {"postcode": 10, "seller_name": 200, "seller_contact": 200, "situation": 300, "source": 100,
                "solicitor": 200, "next_step": 200, "lost_reason": 200}
 PRICE_FIELDS = ("asking_pence", "offer_pence", "agreed_pence", "value_pence", "works_pence")
@@ -83,6 +86,38 @@ def _clean(form: dict) -> dict:
     return fields
 
 
+def _mark_property(db: Session, user: User, account, bound: dict) -> None:
+    """Attaching a conversation to a property deal files it under Property in the Inbox too. Commits."""
+    settings = inbox_organisation.choices(db, user.id, account, bound["thread"],
+                                          inbox_crm.links(db, account, bound["thread"]))
+    if settings["kind"] != "property":
+        inbox_organisation.save(db, user, account, bound["thread"], "property", settings["brands"],
+                                settings["sync_brands"], settings["note"])
+
+
+def _conversations(db: Session, user: User, deal: Acquisition) -> list[dict]:
+    """The attached Inbox conversations with their latest messages, read through the Inbox as this user. Nothing
+    is stored here: an account that is gone, or one attached by someone else, shows as unavailable."""
+    from .inbox import thread_context
+    mine = {a.key: a for a in inbox_service.accounts(db) if not a.owner_email or a.owner_email == user.email.lower()}
+    result = []
+    for link in service.attached(db, deal.id):
+        entry = {"link": link, "account": mine.get(link.account_key), "messages": [], "error": None, "ticket": None}
+        if entry["account"] is None or link.user_id != user.id:
+            entry["error"] = "This conversation's inbox account is not available to you here."
+        else:
+            try:
+                entry["ticket"] = inbox_service.ticket(entry["account"], link.thread_id, user.id, link.name,
+                                                       link.participant_id)
+                context = thread_context(db, user, entry["ticket"])
+                entry["messages"] = list(context["messages"])[-MESSAGES_SHOWN:]
+                entry["error"] = context["thread_error"]
+            except (HTTPException, InboxError):
+                entry["error"] = "The messages could not be loaded just now. Open the conversation in the Inbox."
+        result.append(entry)
+    return result
+
+
 def _board(request: Request, db: Session, user: User, prefill: dict | None = None) -> HTMLResponse:
     now = utcnow()
     windows = laps.periods(now)
@@ -118,10 +153,14 @@ def board(request: Request, db: Session = Depends(get_db), user: User = Depends(
 
 
 @router.post("/acquisitions/start", response_class=HTMLResponse)
-def start(request: Request, seller_name: str = Form(""), source: str = Form(""), db: Session = Depends(get_db),
-          user: User = Depends(require_admin)):
-    """The add form, opened and filled with the name and channel of an Inbox conversation. Nothing is saved."""
-    return _board(request, db, user, {"seller_name": seller_name.strip()[:200], "source": source.strip()[:100]})
+def start(request: Request, seller_name: str = Form(""), source: str = Form(""), thread_ticket: str = Form(""),
+          db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """The add form, opened and filled with the name and channel of an Inbox conversation. Nothing is saved
+    until the form is submitted; the conversation's ticket rides along so the new deal can be attached to it."""
+    if thread_ticket:
+        inbox_service.resolve(thread_ticket, user.id, user.email, db)       # refuses a stale or foreign ticket
+    return _board(request, db, user, {"seller_name": seller_name.strip()[:200], "source": source.strip()[:100],
+                                      "thread_ticket": thread_ticket})
 
 
 @router.post("/acquisitions/deals")
@@ -136,12 +175,19 @@ async def add_deal(request: Request, db: Session = Depends(get_db), user: User =
             raise ValueError("Choose a stage for the new deal.")
     except ValueError as error:
         return go("/acquisitions#add", err=str(error))
+    ticket = form.get("thread_ticket", "")
+    account, bound = inbox_service.resolve(ticket, user.id, user.email, db) if ticket else (None, None)
     deal = Acquisition(**fields, stage="lead", lead_at=lead_at, checks={})
     service.move(deal, stage, lead_at)
     db.add(deal)
     db.flush()
     audit(db, user, "acquisition.add", f"acquisition:{deal.id}", after=_snapshot(deal))
+    if account is not None:
+        service.attach(db, deal, account, bound, user.id)
+        audit(db, user, "acquisition.attach", f"acquisition:{deal.id}", after={"account": account.key})
     db.commit()
+    if account is not None:
+        _mark_property(db, user, account, bound)
     return go(f"/acquisitions/deals/{deal.id}", ok=f"{deal.title} added to {service.LABELS[deal.stage].lower()}.")
 
 
@@ -150,12 +196,17 @@ def deal_page(deal_id: int, request: Request, db: Session = Depends(get_db), use
     deal = get_or_404(db, Acquisition, deal_id)
     pounds = {name.removesuffix("_pence"): ("" if getattr(deal, name) is None
               else f"{getattr(deal, name) / 100:.2f}".removesuffix(".00")) for name in PRICE_FIELDS}
-    return render(request, "acquisition.html", {
+    conversations = _conversations(db, user, deal)
+    response = render(request, "acquisition.html", {
         "user": user, "section": "acquisitions", "deal": deal, "pipeline": service.PIPELINE,
+        "conversations": conversations, "channels": inbox_service.CHANNELS,
         "labels": service.LABELS, "moves": service.MOVES, "kinds": service.KINDS, "plans": service.PLANS,
         "sellers": service.SELLERS, "gbp": gbp, "percent": percent, "pounds": pounds,
         "numbers": service.numbers(deal), "progress": service.progress(deal),
         "furthest": laps.furthest(deal, service.PIPELINE), "price_on_move": PRICE_ON_MOVE})
+    if conversations:
+        response.headers["Cache-Control"] = "no-store"          # the page carries private messages
+    return response
 
 
 @router.post("/acquisitions/deals/{deal_id}")
@@ -213,3 +264,32 @@ def check(deal_id: int, key: str = Form(...), db: Session = Depends(get_db), use
     audit(db, user, "acquisition.check", f"acquisition:{deal.id}", after={key: ticked})
     db.commit()
     return go(f"/acquisitions/deals/{deal.id}#checklist")
+
+
+@router.post("/acquisitions/link")
+def link(thread_ticket: str = Form(...), deal_id: int = Form(...), db: Session = Depends(get_db),
+         user: User = Depends(require_admin)):
+    """Attach an Inbox conversation to an existing deal, from the conversation."""
+    from urllib.parse import urlencode
+    account, bound = inbox_service.resolve(thread_ticket, user.id, user.email, db)
+    deal = get_or_404(db, Acquisition, deal_id)
+    back = "/inbox?" + urlencode({"account": account.key, "thread": thread_ticket})
+    if not service.attach(db, deal, account, bound, user.id):
+        return go(back, err=f"This conversation is already on {deal.title}.")
+    audit(db, user, "acquisition.attach", f"acquisition:{deal.id}", after={"account": account.key})
+    db.commit()
+    _mark_property(db, user, account, bound)
+    return go(back, ok=f"Conversation added to {deal.title}. Its messages now show on the deal.")
+
+
+@router.post("/acquisitions/deals/{deal_id}/unlink")
+def unlink(deal_id: int, account_key: str = Form(...), thread_sha256: str = Form(...),
+           db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    deal = get_or_404(db, Acquisition, deal_id)
+    row = db.get(AcquisitionThread, (deal.id, account_key, thread_sha256))
+    if row is None:
+        return go(f"/acquisitions/deals/{deal.id}", err="That conversation is not on this deal.")
+    db.delete(row)
+    audit(db, user, "acquisition.detach", f"acquisition:{deal.id}", before={"account": account_key})
+    db.commit()
+    return go(f"/acquisitions/deals/{deal.id}", ok="Conversation removed from this deal. The Inbox still has it.")

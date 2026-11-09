@@ -6,8 +6,9 @@
 {% macro card(d) %}
 <article class="laps-card laps-{{ d.stage }}{% if d.next_step_on and d.next_step_on < today and d.stage != 'sale' %} is-overdue{% endif %}">
   <header><span class="laps-avatar" aria-hidden="true">{{ initials(d.name) }}</span>
-    <span class="laps-card-id"><a class="laps-card-name" href="/laps/deals/{{ d.id }}">{{ d.name }}</a><span class="laps-card-brand">{{ brands[d.brand] }}</span></span></header>
+    <span class="laps-card-id"><a class="laps-card-name" href="/laps/deals/{{ d.id }}">{{ d.name }}</a><span class="laps-card-brand">{{ brands[d.brand] }}{% set o = origin_of(d) %}{% if o %} · <a href="{{ o.url }}" title="Brought in automatically; follows this record">{{ o.label }}</a>{% endif %}</span></span></header>
   {% if d.offer or d.value_pence is not none %}<p class="laps-card-offer"><span>{{ d.offer }}</span>{% if d.value_pence is not none %}<span class="laps-value">{{ gbp(d.value_pence) }}</span>{% endif %}</p>{% endif %}
+  {% if siblings.get(d.id) %}<p class="laps-also">Also: {% for o in siblings[d.id] %}<a href="/laps/deals/{{ o.id }}">{{ brands[o.brand] }} · {{ labels[o.stage][:-1] if o.stage != 'lost' else 'Lost' }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
   {% if d.stage == 'sale' %}<p class="small muted">Sold {{ d.sale_at|uk("%d %b") }}{% if d.value_pence is none %} · <a href="/laps/deals/{{ d.id }}">add the sale value</a>{% endif %}</p>
   {% else %}
   {% if d.next_step or d.next_step_on %}<p class="laps-card-next"><span>Next</span> {{ d.next_step or "Follow up" }}{% if d.next_step_on %} · {{ d.next_step_on|date("%d %b") }}{% if d.next_step_on < today %} (overdue){% endif %}{% endif %}</p>{% endif %}
@@ -77,7 +78,8 @@
     <summary class="btn btn-primary">Add a lead</summary>
     <form method="post" action="/laps/deals" class="form-grid mt-2">{{ view_field() }}
       <div class="field"><label for="name">Name</label><input id="name" name="name" required maxlength="200" value="{{ prefill.name or '' }}"></div>
-      <div class="field"><label for="deal-brand">Business</label><select id="deal-brand" name="brand" required>{% if not brand %}<option value="">Choose</option>{% endif %}{% for key, name in brands.items() %}<option value="{{ key }}"{% if brand == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+      <fieldset class="field full laps-pick"><legend>Which businesses is this lead for? <span class="hint">Tick every one they might buy from: each gets its own card, stage and value.</span></legend>
+        {% for key, name in brands.items() %}<label><input type="checkbox" name="brand" value="{{ key }}"{% if brand == key %} checked{% endif %}> {{ name }}</label>{% endfor %}</fieldset>
       <div class="field"><label for="contact">Phone or email</label><input id="contact" name="contact" maxlength="200"></div>
       <div class="field"><label for="source">Where they came from</label><input id="source" name="source" maxlength="100" placeholder="LinkedIn, WhatsApp, webinar, referral" value="{{ prefill.source or '' }}"></div>
       <div class="field"><label for="offer">What they might buy</label><input id="offer" name="offer" maxlength="120" placeholder="Mentorship, territory, sourcing"></div>
@@ -144,12 +146,27 @@
   </section>
 </div>
 
-{% if crm_leads %}<section class="panel mt-2">
-  <div class="panel-head"><h2>CRM leads not on the board <span class="status status-pending">{{ crm_waiting }}</span></h2><a class="btn btn-ghost btn-sm" href="/crm">CRM &amp; follow-up</a></div>
-  <div class="table-scroll"><table class="data"><thead><tr><th>Name</th><th>Business</th><th>Source</th><th></th></tr></thead><tbody>
-  {% for lead in crm_leads %}<tr><td>{{ lead.display_name }}</td><td>{{ brands[lead.brand] }}</td><td>{{ lead.source or "" }}</td>
-    <td class="row-actions"><form method="post" action="/laps/import">{{ view_field() }}<input type="hidden" name="lead_id" value="{{ lead.id }}"><button class="btn btn-ghost btn-sm">Add to board</button></form></td></tr>{% endfor %}
+<section class="panel mt-2" id="sources">
+  <div class="panel-head"><h2>Where the board gets its leads</h2>
+    <form method="post" action="/laps/refresh">{{ view_field() }}<button class="btn btn-ghost btn-sm">Refresh now</button></form></div>
+  <p>The board fills itself. You only move a card by hand when something happens that the source does not record.</p>
+  <div class="table-scroll"><table class="data"><thead><tr><th>Source</th><th>How it lands on the board</th><th class="num">On the board</th></tr></thead><tbody>
+    {% for key in crm_brands %}{% set b = (sync.brands or {}).get(key) %}
+    <tr><td><strong>{{ brands[key] }} CRM</strong></td>
+      <td>{% if loop.first %}Every contact. A new contact is a lead; a stage named like "Qualified" or "Booked" is an appointment; "Proposal" or "Offer" is a presentation; a customer or a won deal is a sale; an archived contact or a lost deal is lost.<br>{% endif %}
+        {% if not b %}<span class="small muted">Not checked yet.</span>
+        {% elif b.via and not b.problem %}<span class="ok-text">Connected</span> <span class="small muted">· {{ b.checked }} contacts read{% if b.via == 'bridge' %} through the older connection, so dates are approximate{% endif %}</span>
+        {% elif b.via %}<span class="ok-text">Connected</span> <span class="small muted">· {{ b.checked }} contacts read. {{ b.problem }}</span>
+        {% else %}<span class="bad-text">Not arriving yet.</span> <span class="small muted">{{ b.problem }} Leads for this business go on by hand until its CRM answers.</span>{% endif %}</td>
+      <td class="num">{{ crm_counts.get(key, 0) }}</td></tr>
+    {% endfor %}
+    <tr><td><strong><a href="/franchise">Franchise pipeline</a></strong><br><span class="small muted">Hello New Home territories</span></td>
+      <td>Every opportunity. Enquiry is a lead; discovery is an appointment; pack sent, follow-up and agreement are presentations; paid is a sale.</td>
+      <td class="num">{{ automatic.franchise }}</td></tr>
+    <tr><td><strong>Added by hand</strong></td><td>Anyone you add with "Add a lead", under one business or several.</td>
+      <td class="num">{{ by_hand }}</td></tr>
   </tbody></table></div>
-  {% if crm_waiting > crm_leads|length %}<p class="small muted">Showing the latest {{ crm_leads|length }} of {{ crm_waiting }}.</p>{% endif %}
-</section>{% endif %}
+  <p class="small muted">{% if sync.when %}CRMs last checked {{ sync.when|uk("%d %b at %H:%M") }}: {{ sync.checked }} contacts, {{ sync.created }} new on the board, {{ sync.moved }} moved on.{% if sync.problem %} <span class="bad-text">{{ sync.problem }}</span>{% endif %}{% else %}The CRMs have not been checked yet; they are checked in the background when you open this page.{% endif %}
+  They are checked again whenever you open the board and the last check is more than ten minutes old. A source only ever moves a card forward or marks it lost, so your own moves and notes stay. Property purchases live on the <a href="/acquisitions">Property deals</a> board, not here.</p>
+</section>
 {% endblock %}

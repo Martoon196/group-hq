@@ -68,6 +68,13 @@ table.data .num,.num{text-align:right;font-variant-numeric:tabular-nums}
 .laps-card p{margin:.45rem 0 0;font-size:.92rem}
 .laps-card-offer{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline}
 .laps-value{font-weight:900;font-variant-numeric:tabular-nums;background:var(--blush);border-radius:8px;padding:.05rem .45rem;white-space:nowrap}
+.laps-also{font-size:.8rem;color:var(--muted)}.laps-also a{font-weight:700}
+.laps-pick{border:1px solid var(--line);border-radius:12px;padding:.7rem .9rem;margin:0;display:flex;flex-wrap:wrap;gap:.4rem 1.1rem}
+.field.laps-pick{flex-direction:row}
+.laps-pick legend{font-weight:700;font-size:.92rem;padding:0 .3rem}.laps-pick legend .hint{font-weight:400}
+.laps-pick label{display:inline-flex;align-items:center;gap:.4rem;font-weight:400;cursor:pointer}
+.laps-pick input{width:auto;margin:0;accent-color:var(--pink)}
+.ok-text{color:var(--green-deep);font-weight:700}
 .laps-card-next span{font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .laps-card.is-overdue .laps-card-next{color:#9B1C4B;font-weight:700}
 .laps-card-actions{display:flex;flex-wrap:wrap;gap:.4rem;align-items:end;margin-top:.7rem}
@@ -132,6 +139,14 @@ details.hub-table{margin-top:1rem}details.hub-table>summary,details.panel>summar
 .acq-sums div{border:1px solid var(--line);border-radius:12px;padding:.7rem .8rem;display:flex;flex-direction:column}
 .acq-sums strong{font-size:1.35rem;font-weight:900;font-variant-numeric:tabular-nums;line-height:1.2}
 .acq-sums span{font-size:.8rem;color:var(--muted)}
+.acq-thread+.acq-thread{border-top:1px solid var(--line);margin-top:1rem;padding-top:1rem}
+.acq-thread-head{display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap}
+.acq-thread-head strong{display:inline-flex;align-items:center;gap:.4rem}
+.acq-messages{display:flex;flex-direction:column;gap:.5rem;max-height:26rem;overflow-y:auto;margin-top:.6rem;padding-right:.2rem}
+.acq-message{max-width:92%;padding:.55rem .75rem;border-radius:12px;background:var(--mist);align-self:flex-start;font-size:.92rem}
+.acq-message.is-out{background:var(--pink-soft);align-self:flex-end}
+.acq-message strong{font-size:.78rem}.acq-message p{margin:.15rem 0;white-space:pre-wrap;overflow-wrap:anywhere}.acq-message small{font-size:.72rem;color:var(--muted)}
+.bad-text{color:#9B1C4B;font-weight:700}
 .form-grid h3{grid-column:1/-1;font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:var(--pink);margin:.8rem 0 0}
 
 @media(max-width:1100px){.laps-board{grid-template-columns:repeat(2,minmax(0,1fr))}.hub-sparks{grid-template-columns:repeat(2,1fr)}}
