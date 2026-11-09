@@ -1,0 +1,10 @@
+{# Shared pieces of the two hubs: the selling/buying switch and the "compared with before" line on a tile. #}
+{% macro switch(active) -%}
+<nav class="hub-switch" aria-label="Selling or buying">
+  <a href="/laps"{% if active == 'laps' %} class="is-on" aria-current="page"{% endif %}>Selling · LAPS</a>
+  <a href="/acquisitions"{% if active == 'acquisitions' %} class="is-on" aria-current="page"{% endif %}>Buying · Property deals</a>
+</nav>
+{%- endmacro %}
+{% macro delta(now, before, period) -%}
+<span class="hub-delta">{% if now > before %}<b>▲ {{ now - before }} up</b> on {{ period }}{% elif now < before %}<b>▼ {{ before - now }} down</b> on {{ period }}{% else %}Same as {{ period }}{% endif %}</span>
+{%- endmacro %}

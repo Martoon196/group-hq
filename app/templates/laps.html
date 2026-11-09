@@ -1,11 +1,13 @@
 {% extends "app_base.html" %}
 {% set title = "LAPS board | Group HQ" %}
 {% block head %}<link rel="stylesheet" href="/assets/laps.css">{% endblock %}
+{% from "_hub.html" import switch, delta %}
 {% macro view_field() %}<input type="hidden" name="view" value="{{ brand }}">{% endmacro %}
 {% macro card(d) %}
-<article class="laps-card{% if d.next_step_on and d.next_step_on < today and d.stage != 'sale' %} is-overdue{% endif %}">
-  <header><a class="laps-card-name" href="/laps/deals/{{ d.id }}">{{ d.name }}</a><span class="chip">{{ brands[d.brand] }}</span></header>
-  {% if d.offer or d.value_pence is not none %}<p class="laps-card-offer">{{ d.offer }}{% if d.offer and d.value_pence is not none %} · {% endif %}{% if d.value_pence is not none %}<strong>{{ gbp(d.value_pence) }}</strong>{% endif %}</p>{% endif %}
+<article class="laps-card laps-{{ d.stage }}{% if d.next_step_on and d.next_step_on < today and d.stage != 'sale' %} is-overdue{% endif %}">
+  <header><span class="laps-avatar" aria-hidden="true">{{ initials(d.name) }}</span>
+    <span class="laps-card-id"><a class="laps-card-name" href="/laps/deals/{{ d.id }}">{{ d.name }}</a><span class="laps-card-brand">{{ brands[d.brand] }}</span></span></header>
+  {% if d.offer or d.value_pence is not none %}<p class="laps-card-offer"><span>{{ d.offer }}</span>{% if d.value_pence is not none %}<span class="laps-value">{{ gbp(d.value_pence) }}</span>{% endif %}</p>{% endif %}
   {% if d.stage == 'sale' %}<p class="small muted">Sold {{ d.sale_at|uk("%d %b") }}{% if d.value_pence is none %} · <a href="/laps/deals/{{ d.id }}">add the sale value</a>{% endif %}</p>
   {% else %}
   {% if d.next_step or d.next_step_on %}<p class="laps-card-next"><span>Next</span> {{ d.next_step or "Follow up" }}{% if d.next_step_on %} · {{ d.next_step_on|date("%d %b") }}{% if d.next_step_on < today %} (overdue){% endif %}{% endif %}</p>{% endif %}
@@ -21,32 +23,36 @@
 </article>
 {% endmacro %}
 {% block content %}
-<div class="page-title"><span class="eyebrow">Sales rhythm</span><h1>LAPS board</h1>
-<p class="help">Leads, Appointments, Presentations, Sales. A lead has asked to talk. An appointment is a time in the diary. A presentation is your offer actually made. A sale is money taken.</p>
-<nav class="laps-brands" aria-label="Business">
-  <a class="chip{% if not brand %} is-on{% endif %}" href="/laps">All businesses</a>
-  {% for key, name in brands.items() %}<a class="chip{% if brand == key %} is-on{% endif %}" href="/laps?brand={{ key }}">{{ name }}</a>{% endfor %}
-</nav></div>
-
-<section class="laps-score" aria-label="This week">
-  {% for stage in pipeline %}
-  <div class="laps-tile laps-{{ stage }}">
-    <span class="laps-letter" aria-hidden="true">{{ labels[stage][0] }}</span>
-    <strong>{{ score.this_week[stage] }}</strong>
-    <span class="laps-tile-label">{{ labels[stage] }} this week</span>
-    <span class="small muted">Last week {{ score.last_week[stage] }} · This month {{ score.this_month[stage] }}</span>
-    {% if not loop.first %}<span class="laps-rate" title="Of the {{ labels[pipeline[loop.index0 - 1]]|lower }} from leads in the last {{ stats.days }} days, the share that became {{ labels[stage]|lower }}">{{ percent(stats.rates[stage]) or "–" }}</span>{% endif %}
+<section class="hub-hero">
+  <div class="hub-top"><div><span class="eyebrow">Sales rhythm</span><h1>LAPS board</h1>
+    <p>Leads, Appointments, Presentations, Sales. A lead has asked to talk. An appointment is a time in the diary. A presentation is your offer actually made. A sale is money taken.</p></div>
+    {{ switch('laps') }}</div>
+  <nav class="laps-brands" aria-label="Business">
+    <a class="chip{% if not brand %} is-on{% endif %}" href="/laps">All businesses</a>
+    {% for key, name in brands.items() %}<a class="chip{% if brand == key %} is-on{% endif %}" href="/laps?brand={{ key }}">{{ name }}</a>{% endfor %}
+  </nav>
+  <div class="hub-score" aria-label="This week">
+    {% for stage in pipeline %}
+    <div class="hub-tile laps-{{ stage }}">
+      <span class="hub-tile-head"><span class="hub-badge" aria-hidden="true">{{ labels[stage][0] }}</span><span>{{ labels[stage] }}<small>this week</small></span></span>
+      <strong>{{ score.this_week[stage] }}</strong>
+      {{ delta(score.this_week[stage], score.last_week[stage], "last week") }}
+      <span class="hub-sub">{{ score.this_month[stage] }} this month · {{ score.last_month[stage] }} last month</span>
+      {% if not loop.first %}<span class="hub-rate" title="Of the {{ labels[pipeline[loop.index0 - 1]]|lower }} from leads in the last {{ stats.days }} days, the share that became {{ labels[stage]|lower }}">{{ percent(stats.rates[stage]) or "–" }}</span>{% endif %}
+    </div>
+    {% endfor %}
   </div>
-  {% endfor %}
+  <p class="hub-note">The percentages between the boxes follow the {{ stats.reached.lead }} lead{{ "" if stats.reached.lead == 1 else "s" }} that came in during the last {{ stats.days }} days: how many went on to the next stage. A dash means there are too few to say yet.</p>
 </section>
-<p class="small muted laps-rate-note">The percentages between the boxes follow the {{ stats.reached.lead }} lead{{ "" if stats.reached.lead == 1 else "s" }} that came in during the last {{ stats.days }} days. A dash means there are too few to say yet.</p>
 
 <section class="panel mt-2" id="plan">
   <div class="panel-head"><h2>Income goal</h2></div>
   {% if plan and not plan.missing %}
   <p class="laps-plan-line">To take <strong>{{ gbp(plan.goal_pence) }}</strong> a month at about <strong>{{ gbp((plan.sale_pence / 100)|round|int * 100) }}</strong> a sale, each week needs:</p>
   <div class="laps-plan">{% for stage in pipeline %}
-    <div class="laps-plan-step{% if score.this_week[stage] >= plan.week[stage] %} is-met{% endif %}"><strong>{{ plan.week[stage] }}</strong><span>{{ labels[stage]|lower }}</span><span class="small">{{ score.this_week[stage] }} so far this week</span></div>
+    <div class="laps-plan-step laps-{{ stage }}{% if score.this_week[stage] >= plan.week[stage] %} is-met{% endif %}"><strong>{{ plan.week[stage] }}</strong><span class="laps-plan-what">{{ labels[stage]|lower }} a week</span>
+      <progress class="hub-meter" max="{{ plan.week[stage] }}" value="{{ [score.this_week[stage], plan.week[stage]]|min }}" aria-label="{{ labels[stage] }} this week against the weekly need"></progress>
+      <span class="small">{{ score.this_week[stage] }} of {{ plan.week[stage] }} so far this week{% if score.this_week[stage] >= plan.week[stage] %} · ✓ on track{% endif %}</span></div>
   {% endfor %}</div>
   <p class="small muted">That is {{ plan.month.sale }} sale{{ "" if plan.month.sale == 1 else "s" }} a month. The sale value is {{ "the typical sale you entered" if plan.from_typical else "the average of your recent sales on the board" }}; the steps use your own conversion rates from the last {{ stats.days }} days.</p>
   {% elif plan and plan.missing == 'value' %}
@@ -67,13 +73,13 @@
 
 <section class="mt-2" aria-label="Board">
   <div class="panel-head"><h2 class="laps-h2">The board</h2><span class="small muted">{{ gbp(open_value) or "£0" }} of expected value still open</span></div>
-  <details class="panel laps-add" id="add"{% if flash and flash_kind == 'err' %} open{% endif %}>
+  <details class="panel laps-add" id="add"{% if prefill or (flash and flash_kind == 'err') %} open{% endif %}>
     <summary class="btn btn-primary">Add a lead</summary>
     <form method="post" action="/laps/deals" class="form-grid mt-2">{{ view_field() }}
-      <div class="field"><label for="name">Name</label><input id="name" name="name" required maxlength="200"></div>
+      <div class="field"><label for="name">Name</label><input id="name" name="name" required maxlength="200" value="{{ prefill.name or '' }}"></div>
       <div class="field"><label for="deal-brand">Business</label><select id="deal-brand" name="brand" required>{% if not brand %}<option value="">Choose</option>{% endif %}{% for key, name in brands.items() %}<option value="{{ key }}"{% if brand == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
       <div class="field"><label for="contact">Phone or email</label><input id="contact" name="contact" maxlength="200"></div>
-      <div class="field"><label for="source">Where they came from</label><input id="source" name="source" maxlength="100" placeholder="LinkedIn, WhatsApp, webinar, referral"></div>
+      <div class="field"><label for="source">Where they came from</label><input id="source" name="source" maxlength="100" placeholder="LinkedIn, WhatsApp, webinar, referral" value="{{ prefill.source or '' }}"></div>
       <div class="field"><label for="offer">What they might buy</label><input id="offer" name="offer" maxlength="120" placeholder="Mentorship, territory, sourcing"></div>
       <div class="field"><label for="value">Expected value (£)</label><input id="value" name="value" inputmode="decimal"></div>
       <div class="field"><label for="stage">Stage now</label><select id="stage" name="stage">{% for stage in pipeline %}<option value="{{ stage }}">{{ labels[stage] }}</option>{% endfor %}</select></div>
@@ -87,8 +93,8 @@
   <div class="laps-board">
     {% for stage in pipeline %}
     <section class="laps-column laps-{{ stage }}" aria-label="{{ labels[stage] }}">
-      <h3>{{ labels[stage] }} <span class="laps-count">{{ columns[stage]|length }}</span></h3>
-      {% if stage == 'sale' %}<p class="small muted">Last {{ sales_days }} days</p>{% endif %}
+      <div class="laps-column-head"><h3><span class="hub-badge" aria-hidden="true">{{ labels[stage][0] }}</span>{{ labels[stage] }} <span class="laps-count">{{ columns[stage]|length }}</span></h3>
+        <span class="laps-column-total">{{ gbp(columns[stage]|selectattr('value_pence')|sum(attribute='value_pence')) }}{% if stage == 'sale' %}<br>last {{ sales_days }} days{% endif %}</span></div>
       {% for d in columns[stage] %}{{ card(d) }}{% else %}<p class="laps-empty">{{ "No sales in the last " ~ sales_days ~ " days." if stage == 'sale' else "Nothing here." }}</p>{% endfor %}
     </section>
     {% endfor %}
@@ -102,13 +108,24 @@
 
 <div class="two-col mt-2">
   <section class="panel">
-    <div class="panel-head"><h2>Rhythm, week by week</h2></div>
+    <div class="panel-head"><h2>Rhythm, week by week</h2><span class="small muted">Last {{ weeks|length }} weeks · each chart has its own scale</span></div>
+    <div class="hub-sparks">
+      {% for stage in pipeline %}{% set top = [weeks|map(attribute=stage)|max, 1]|max %}
+      <figure class="hub-spark laps-{{ stage }}" role="group" aria-label="{{ labels[stage] }} per week">
+        <h3><i aria-hidden="true"></i>{{ labels[stage] }}</h3>
+        <div class="hub-bars">{% for w in weeks %}<span class="hub-bar{% if loop.last %} is-now{% endif %}" style="--h:{{ (w[stage] / top * 100)|round(1) }}" tabindex="0" data-value="{{ w[stage] }}" data-tip="Week of {{ w.monday|date('%d %b') }}: {{ w[stage] }}" aria-label="Week of {{ w.monday|date('%d %b') }}: {{ w[stage] }} {{ labels[stage]|lower }}"></span>{% endfor %}</div>
+        <div class="hub-axis"><span>{{ weeks[0].monday|date("%d %b") }}</span><span>This week</span></div>
+      </figure>
+      {% endfor %}
+    </div>
+    <details class="hub-table"><summary>Show the numbers as a table</summary>
     <div class="table-scroll"><table class="data laps-weeks"><thead><tr><th>Week starting</th><th class="num">Leads</th><th class="num">Appts</th><th class="num">Pres</th><th class="num">Sales</th><th class="num">Sales value</th></tr></thead><tbody>
     {% for w in weeks|reverse %}<tr{% if loop.first %} class="is-current"{% endif %}><td class="nowrap">{{ w.monday|date("%d %b") }}{% if loop.first %} (this week){% endif %}</td><td class="num">{{ w.lead }}</td><td class="num">{{ w.appointment }}</td><td class="num">{{ w.presentation }}</td><td class="num">{{ w.sale }}</td><td class="num">{{ gbp(w.income_pence) or "£0" }}</td></tr>{% endfor %}
-    </tbody></table></div>
+    </tbody></table></div></details>
   </section>
   <section class="panel">
     <div class="panel-head"><h2>Money</h2></div>
+    <div class="hub-money"><strong>{{ gbp(score.this_month.income_pence) or "£0" }}</strong><span>sold on the board this month · {{ gbp(score.last_month.income_pence) or "£0" }} last month</span></div>
     <div class="table-scroll"><table class="data"><thead><tr><th></th><th class="num">This month</th><th class="num">Last month</th></tr></thead><tbody>
       <tr><td><strong>Sales made on the board</strong></td><td class="num"><strong>{{ gbp(score.this_month.income_pence) or "£0" }}</strong></td><td class="num">{{ gbp(score.last_month.income_pence) or "£0" }}</td></tr>
       <tr><td colspan="3" class="small muted">Money received and cleared, as recorded elsewhere in Group HQ{% if brand %} (all businesses){% endif %}:</td></tr>

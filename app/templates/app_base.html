@@ -6,6 +6,7 @@
     <nav class="app-nav" aria-label="Group HQ">
       <a href="/"{% if section == "dashboard" %} class="is-active"{% endif %}>Dashboard</a>
       <a href="/laps"{% if section == "laps" %} class="is-active"{% endif %}>LAPS board</a>
+      <a href="/acquisitions"{% if section == "acquisitions" %} class="is-active"{% endif %}>Property deals</a>
       <a href="/crm"{% if section == "crm" %} class="is-active"{% endif %}>CRM &amp; follow-up</a>
       <a href="/inbox"{% if section == "inbox" %} class="is-active"{% endif %}>Inbox</a>
       <a href="/crm/channels/whatsapp" class="is-sub{% if section == 'whatsapp' %} is-active{% endif %}">WhatsApp</a>

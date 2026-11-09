@@ -37,6 +37,11 @@ def gbp(pence: int | None) -> str:
     return ("-" if pence < 0 else "") + f"£{pounds:,}" + (f".{rest:02d}" if rest else "")
 
 
+def initials(name: str) -> str:
+    parts = [p for p in name.split() if p[:1].isalnum()]
+    return ((parts[0][:1] + (parts[-1][:1] if len(parts) > 1 else "")) if parts else "?").upper()
+
+
 def percent(rate: float | None) -> str:
     return "" if rate is None else f"{round(rate * 100)}%"
 
@@ -86,6 +91,17 @@ def _board_url(brand: str = "") -> str:
 
 @router.get("/laps", response_class=HTMLResponse)
 def board(request: Request, brand: str = "", db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    return _board(request, db, user, brand)
+
+
+@router.post("/laps/start", response_class=HTMLResponse)
+def start(request: Request, name: str = Form(""), source: str = Form(""), db: Session = Depends(get_db),
+          user: User = Depends(require_admin)):
+    """The add form, opened and filled with the name and channel of an Inbox conversation. Nothing is saved."""
+    return _board(request, db, user, "", {"name": " ".join(name.split())[:200], "source": source.strip()[:100]})
+
+
+def _board(request: Request, db: Session, user: User, brand: str = "", prefill: dict | None = None) -> HTMLResponse:
     brand = brand if brand in laps.BRANDS else ""
     now = utcnow()
     windows = laps.periods(now)
@@ -133,7 +149,7 @@ def board(request: Request, brand: str = "", db: Session = Depends(get_db), user
                 FranchiseOpportunity.stage.not_in(("paid", "onboarding", "lost")))) or 0,
         },
         "crm_leads": crm_leads[:CRM_SUGGESTIONS], "crm_waiting": len(crm_leads),
-        "sales_days": SALES_SHOWN_DAYS,
+        "sales_days": SALES_SHOWN_DAYS, "prefill": prefill or {}, "initials": initials,
     })
 
 

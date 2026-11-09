@@ -48,6 +48,8 @@ app.include_router(auth.router)
 app.include_router(dashboard.router)
 from .routers import laps  # noqa: E402
 app.include_router(laps.router)
+from .routers import acquisitions  # noqa: E402
+app.include_router(acquisitions.router)
 app.include_router(crm.router)
 app.include_router(whatsapp_keywords.router)
 app.include_router(inbox.router)

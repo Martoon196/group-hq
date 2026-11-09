@@ -1,0 +1,91 @@
+{% extends "app_base.html" %}
+{% set title = deal.title ~ " | Property deals | Group HQ" %}
+{% block head %}<link rel="stylesheet" href="/assets/laps.css">{% endblock %}
+{% block content %}
+{% set at_index = pipeline.index(furthest) %}
+<section class="hub-hero">
+  <span class="eyebrow"><a href="/acquisitions" style="color:inherit">Property deals</a></span>
+  <h1>{{ deal.title }}</h1>
+  <p>{{ kinds[deal.kind] }}{% if deal.units %} · {{ deal.units }} unit{{ "" if deal.units == 1 else "s" }}{% endif %}{% if deal.postcode %} · {{ deal.postcode }}{% endif %} · {{ plans[deal.plan] }}{% if deal.stage == 'lost' %} · <strong>Lost{% if deal.lost_reason %}: {{ deal.lost_reason }}{% endif %}</strong>{% endif %}</p>
+  <ol class="acq-stepper" aria-label="Stages">
+    {% for stage in pipeline %}{% set at = deal[stage ~ '_at'] %}
+    <li class="{% if deal.stage == stage %}is-now{% elif at %}is-done{% endif %}"><b>{{ loop.index }}. {{ labels[stage] }}</b>{{ at|uk("%d %b %Y") if at else "Not yet" }}</li>
+    {% endfor %}
+  </ol>
+</section>
+
+<div class="two-col">
+  <section class="panel">
+    <h2>Details</h2>
+    <form method="post" action="/acquisitions/deals/{{ deal.id }}" class="form-grid">
+      <h3>The property</h3>
+      <div class="field"><label for="title">Address or working name</label><input id="title" name="title" required maxlength="200" value="{{ deal.title }}"></div>
+      <div class="field"><label for="postcode">Postcode</label><input id="postcode" name="postcode" maxlength="10" value="{{ deal.postcode }}"></div>
+      <div class="field"><label for="kind">Type</label><select id="kind" name="kind">{% for key, name in kinds.items() %}<option value="{{ key }}"{% if deal.kind == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="units">Properties or units</label><input id="units" name="units" inputmode="numeric" value="{{ deal.units or '' }}"></div>
+      <div class="field"><label for="plan">Our plan</label><select id="plan" name="plan">{% for key, name in plans.items() %}<option value="{{ key }}"{% if deal.plan == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="source">Where the lead came from</label><input id="source" name="source" maxlength="100" value="{{ deal.source }}"></div>
+      <h3>The seller</h3>
+      <div class="field"><label for="seller_name">Seller's name</label><input id="seller_name" name="seller_name" maxlength="200" value="{{ deal.seller_name }}"></div>
+      <div class="field"><label for="seller_contact">Phone or email</label><input id="seller_contact" name="seller_contact" maxlength="200" value="{{ deal.seller_contact }}"></div>
+      <div class="field"><label for="seller_type">Who they are</label><select id="seller_type" name="seller_type">{% for key, name in sellers.items() %}<option value="{{ key }}"{% if deal.seller_type == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="situation">Why they are selling</label><input id="situation" name="situation" maxlength="300" value="{{ deal.situation }}"></div>
+      <h3>The numbers (£)</h3>
+      <div class="field"><label for="asking">Asking price</label><input id="asking" name="asking" inputmode="decimal" value="{{ pounds.asking }}"></div>
+      <div class="field"><label for="offer">Our offer</label><input id="offer" name="offer" inputmode="decimal" value="{{ pounds.offer }}"></div>
+      <div class="field"><label for="agreed">Agreed price</label><input id="agreed" name="agreed" inputmode="decimal" value="{{ pounds.agreed }}"></div>
+      <div class="field"><label for="works">Cost of works</label><input id="works" name="works" inputmode="decimal" value="{{ pounds.works }}"></div>
+      <div class="field"><label for="value">Value once done</label><input id="value" name="value" inputmode="decimal" value="{{ pounds.value }}"><span class="hint">End value after any works, or the finished value of a development.</span></div>
+      <h3>Getting it done</h3>
+      <div class="field"><label for="solicitor">Our solicitor</label><input id="solicitor" name="solicitor" maxlength="200" value="{{ deal.solicitor }}"></div>
+      <div class="field"><label for="target_completion">Target completion date</label><input id="target_completion" name="target_completion" type="date" value="{{ deal.target_completion.isoformat() if deal.target_completion else '' }}"></div>
+      <div class="field"><label for="next_step">Next step</label><input id="next_step" name="next_step" maxlength="200" value="{{ deal.next_step }}"></div>
+      <div class="field"><label for="next_step_on">Next step date</label><input id="next_step_on" name="next_step_on" type="date" value="{{ deal.next_step_on.isoformat() if deal.next_step_on else '' }}"></div>
+      <div class="field full"><label for="lost_reason">Reason lost, if it was</label><input id="lost_reason" name="lost_reason" maxlength="200" value="{{ deal.lost_reason }}"></div>
+      <div class="field full"><label for="notes">Notes</label><textarea id="notes" name="notes" maxlength="5000">{{ deal.notes }}</textarea></div>
+      <div class="form-actions full"><button class="btn btn-primary">Save</button><a class="btn btn-ghost" href="/acquisitions">Back to the board</a></div>
+    </form>
+  </section>
+  <div>
+    <section class="panel">
+      <h2>Move it on</h2>
+      <div class="laps-moves">
+        {% if deal.stage == 'lost' %}
+          <form method="post" action="/acquisitions/deals/{{ deal.id }}/stage"><input type="hidden" name="to" value="reopen"><button class="btn btn-primary btn-sm">Reopen at {{ labels[furthest]|lower }}</button></form>
+        {% else %}
+          {% if deal.stage != 'completed' %}{% set next_stage = pipeline[pipeline.index(deal.stage) + 1] %}
+          <form method="post" action="/acquisitions/deals/{{ deal.id }}/stage"><input type="hidden" name="to" value="{{ next_stage }}">
+            {% if next_stage in price_on_move %}<label class="laps-sale-value"><span>{{ "Offer £" if next_stage == 'offer' else "Agreed price £" }}</span><input name="price" inputmode="decimal" value="{{ pounds[price_on_move[next_stage].replace('_pence', '')] }}"></label>{% endif %}
+            <button class="btn btn-primary btn-sm">{{ moves[next_stage] }}</button></form>{% endif %}
+          {% if deal.stage != 'lead' %}<form method="post" action="/acquisitions/deals/{{ deal.id }}/stage"><input type="hidden" name="to" value="{{ pipeline[pipeline.index(deal.stage) - 1] }}"><button class="btn btn-ghost btn-sm">Move back to {{ labels[pipeline[pipeline.index(deal.stage) - 1]]|lower }}</button></form>{% endif %}
+        {% endif %}
+      </div>
+      {% if deal.stage not in ('lost', 'completed') %}
+      <form method="post" action="/acquisitions/deals/{{ deal.id }}/stage" class="form-inline mt-1"><input type="hidden" name="to" value="lost">
+        <div class="field"><label for="why_lost">Lost or withdrawn? Say why</label><input id="why_lost" name="lost_reason" maxlength="200" placeholder="Seller chose another buyer"></div>
+        <button class="btn btn-ghost btn-sm">Mark lost</button></form>{% endif %}
+      <p class="small muted mt-1">Moving forward records today for that stage. Moving back clears the later stages.</p>
+    </section>
+    <section class="panel mt-1">
+      <h2>Rough sums</h2>
+      <div class="acq-sums">
+        <div><strong>{{ gbp(numbers.price) or "–" }}</strong><span>{{ "agreed price" if deal.agreed_pence is not none else "our offer" if deal.offer_pence is not none else "asking price" }}</span></div>
+        <div><strong>{{ percent(numbers.below_asking) or "–" }}</strong><span>below the asking price</span></div>
+        <div><strong>{{ gbp(numbers.headroom) or "–" }}</strong><span>value once done, less price and works</span></div>
+      </div>
+      <p class="small muted">Before buying costs, tax, finance and fees. A first look, not an appraisal.</p>
+    </section>
+    <section class="panel mt-1" id="checklist">
+      <div class="panel-head"><h2>Checklist</h2>{% if deal.stage != 'lost' %}<span class="small muted">{{ progress.done }} of {{ progress.total }} at this stage</span>{% endif %}</div>
+      {% for stage in pipeline %}{% set items = progress.stages[stage] %}{% set ticked = items|selectattr(2)|list|length %}
+      <details{% if stage == deal.stage or (deal.stage == 'lost' and stage == furthest) %} open{% endif %}><summary>{{ loop.index }}. {{ labels[stage] }} <span class="small muted">{{ ticked }} of {{ items|length }}</span></summary>
+        <ul class="acq-checklist">{% for key, label, at in items %}
+          <li><form method="post" action="/acquisitions/deals/{{ deal.id }}/check"><input type="hidden" name="key" value="{{ key }}">
+            <button class="acq-tick{% if at %} is-done{% endif %}" aria-pressed="{{ 'true' if at else 'false' }}"><i aria-hidden="true">{{ "✓" if at else "" }}</i><span>{{ label }}</span>{% if at %}<small>{{ at[8:10] }}/{{ at[5:7] }}</small>{% endif %}</button></form></li>{% endfor %}
+        </ul></details>
+      {% endfor %}
+      <p class="small muted mt-1">The usual steps of a purchase in England and Wales, as a prompt. Not legal advice: your solicitor's own list comes first.</p>
+    </section>
+  </div>
+</div>
+{% endblock %}

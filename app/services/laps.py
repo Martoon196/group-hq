@@ -40,7 +40,7 @@ MAX_PENCE = 2_000_000_000       # fits the integer column; £20m is beyond any s
 WEEKS_PER_MONTH = Decimal(52) / Decimal(12)
 
 
-def parse_pounds(raw: str) -> int | None:
+def parse_pounds(raw: str, limit: int = MAX_PENCE) -> int | None:
     """'1,250', '£1250.50' or '' -> pence or None. Raises ValueError with a sentence the form can show."""
     cleaned = re.sub(r"[£,\s]", "", raw or "")
     if not cleaned:
@@ -52,8 +52,8 @@ def parse_pounds(raw: str) -> int | None:
     if not pounds.is_finite() or pounds < 0 or pounds != pounds.quantize(Decimal("0.01")):
         raise ValueError("Enter the amount in pounds, for example 1500 or 1500.00.")
     pence = int(pounds * 100)
-    if pence > MAX_PENCE:
-        raise ValueError("That amount is too large for one sale.")
+    if pence > limit:
+        raise ValueError("That amount is too large.")
     return pence
 
 
@@ -61,33 +61,44 @@ def _stamp(stage: str) -> str:
     return stage + "_at"
 
 
-def furthest(deal: LapsDeal) -> str:
+def furthest(deal, pipeline: tuple[str, ...] = PIPELINE) -> str:
     """The furthest pipeline stage this deal ever reached (what a lost deal reopens at)."""
-    reached = [s for s in PIPELINE if getattr(deal, _stamp(s)) is not None]
-    return reached[-1] if reached else "lead"
+    reached = [s for s in pipeline if getattr(deal, _stamp(s)) is not None]
+    return reached[-1] if reached else pipeline[0]
 
 
-def move(deal: LapsDeal, target: str, now: datetime | None = None) -> None:
-    """Move a deal to target. Forward stamps every stage on the way that has no stamp yet; backward (a
-    correction) clears the stages after target; lost keeps what was earned; reopening a lost deal puts it back
-    at the furthest stage it reached."""
+def move(deal, target: str, now: datetime | None = None, pipeline: tuple[str, ...] = PIPELINE) -> None:
+    """Move a deal to target along pipeline (the LAPS stages unless another board passes its own; any row with
+    stage, lost_at and one <stage>_at column per stage works). Forward stamps every stage on the way that has no
+    stamp yet; backward (a correction) clears the stages after target; lost keeps what was earned; reopening a
+    lost deal puts it back at the furthest stage it reached. A deal at the final stage cannot be lost."""
     now = now or utcnow()
     if target == "lost":
-        if deal.stage == "sale":
-            raise ValueError("A sale cannot be marked lost. Move it back a stage first if the sale fell through.")
+        if deal.stage == pipeline[-1]:
+            raise ValueError("A finished deal cannot be marked lost. Move it back a stage first if it fell through.")
         deal.stage, deal.lost_at = "lost", deal.lost_at or now
         return
     if target == "reopen":
-        target = furthest(deal)
-    if target not in PIPELINE:
+        target = furthest(deal, pipeline)
+    if target not in pipeline:
         raise ValueError("Unknown stage")
-    index = PIPELINE.index(target)
-    for stage in PIPELINE[:index + 1]:
+    index = pipeline.index(target)
+    for stage in pipeline[:index + 1]:
         if getattr(deal, _stamp(stage)) is None:
             setattr(deal, _stamp(stage), now)
-    for stage in PIPELINE[index + 1:]:
+    for stage in pipeline[index + 1:]:
         setattr(deal, _stamp(stage), None)
     deal.stage, deal.lost_at = target, None
+
+
+def reached_in(db: Session, model, pipeline: tuple[str, ...], start: datetime, end: datetime, where=None) -> dict:
+    """How many rows of model reached each stage of pipeline inside [start, end)."""
+    result = {}
+    for stage in pipeline:
+        column = getattr(model, _stamp(stage))
+        query = select(func.count()).where(column >= start, column < end)
+        result[stage] = db.scalar(query.where(where) if where is not None else query) or 0
+    return result
 
 
 def _utc(local: datetime) -> datetime:
@@ -131,10 +142,7 @@ def _brand(query, brand: str | None):
 
 def counts(db: Session, start: datetime, end: datetime, brand: str | None = None) -> dict:
     """How many deals reached each stage inside [start, end), and the value of the sales made in it."""
-    result = {}
-    for stage in PIPELINE:
-        column = getattr(LapsDeal, _stamp(stage))
-        result[stage] = db.scalar(_brand(select(func.count()).where(column >= start, column < end), brand)) or 0
+    result = reached_in(db, LapsDeal, PIPELINE, start, end, LapsDeal.brand == brand if brand else None)
     result["income_pence"] = int(db.scalar(_brand(
         select(func.coalesce(func.sum(LapsDeal.value_pence), 0))
         .where(LapsDeal.sale_at >= start, LapsDeal.sale_at < end), brand)) or 0)
