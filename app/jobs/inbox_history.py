@@ -49,7 +49,7 @@ def account_page(db, owner, account, api):
 
 def message_page(db, owner, account, api):
     keys = {"owner": owner.id, "scope": account.identity}
-    row = db.execute(text("""SELECT thread_key,native_id,older_cursor,reached_start,incremental,
+    row = db.execute(text("""SELECT thread_key,native_id,participant,older_cursor,reached_start,incremental,
              provider_updated,scanned_version FROM inbox_history_threads
              WHERE owner_id=:owner AND scope=:scope AND (NOT reached_start OR incremental OR provider_updated IS DISTINCT FROM scanned_version)
              AND (last_attempt IS NULL OR last_attempt<now()-(CASE WHEN error IS NULL THEN interval '5 seconds'
@@ -60,7 +60,10 @@ def message_page(db, owner, account, api):
         return False
     keys["thread"] = row.thread_key
     try:
-        messages, following = api.messages(row.native_id, row.older_cursor)
+        if account.provider == "r72_whatsapp":
+            messages, following = api.messages(row.native_id, row.participant, row.older_cursor)
+        else:
+            messages, following = api.messages(row.native_id, row.older_cursor)
         check_cursor(row.older_cursor, following, following is not None)
         incremental = row.reached_start
         ids = [m["id"] for m in messages]
@@ -92,9 +95,13 @@ def run_cycle(stop):
             for account in inbox.accounts(db):
                 if stop.is_set():
                     return
-                if account.provider != "zernio" or not account.configured or (account.owner_email and account.owner_email != owner.email):
+                if account.provider not in ("zernio","r72_whatsapp") or not account.configured or (account.owner_email and account.owner_email != owner.email):
                     continue
-                api = client(account)
+                if account.provider == "r72_whatsapp":
+                    from ..services.inbox_r72_whatsapp import WhatsAppReader
+                    api = WhatsAppReader(account, owner.email)
+                else:
+                    api = client(account)
                 account_page(db, owner, account, api)
                 for _ in range(2):
                     if stop.is_set() or not message_page(db, owner, account, api):

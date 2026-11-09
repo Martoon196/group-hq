@@ -42,13 +42,20 @@ class WhatsAppReader:
         return result
 
     def conversations(self):
-        result = self.read("whatsappThreads")
+        threads, more, _ = self.conversation_page()
+        return threads, more
+
+    def conversation_page(self, cursor=None):
+        result = self.read("whatsappThreads", **({"cursor": clean(cursor, 4096)} if cursor else {}))
         if not isinstance(result.get("hasMore"), bool):
+            raise InboxError("invalid_provider_response")
+        following = result.get("nextCursor")
+        if following is not None and (not isinstance(following, str) or not 1 <= len(following) <= 4096):
             raise InboxError("invalid_provider_response")
         return [{"id": native_id(t.get("id")), "participant_id": native_id(t.get("participantId")),
                  "name": clean(t.get("name"), 500), "preview": clean(t.get("preview"), 500),
                  "updated_at": clean(t.get("updatedAt"), 100), "unread": None}
-                for t in rows(result, "threads")], result["hasMore"]
+                for t in rows(result, "threads")], result["hasMore"], following
 
     def messages(self, thread_id, participant_id, cursor=None):
         result = self.read("whatsappMessages", threadId=native_id(thread_id), cursor=native_id(cursor) if cursor else None)

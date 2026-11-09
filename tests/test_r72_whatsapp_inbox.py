@@ -61,6 +61,31 @@ def test_canonical_whatsapp_refuses_a_foreign_account_or_participant(monkeypatch
         reader.conversations()
 
 
+def test_canonical_history_follows_the_exact_account_thread_cursor(db, monkeypatch, canonical):
+    from app.jobs.inbox_history import account_page
+    from sqlalchemy import text
+    account_id, _, _, _ = canonical
+    account = next(a for a in inbox.accounts(db) if a.key == "mhp-whatsapp")
+    user = db.scalars(select(User)).first()
+    ids = [str(uuid.uuid4()) for _ in range(121)]
+    calls = []
+    def command(actor, brand, action, **args):
+        assert actor.email == user.email and brand == "mhp" and action == "whatsappThreads"
+        assert args["accountId"] == account_id
+        calls.append(args.get("cursor"))
+        page = ids[100:] if args.get("cursor") else ids[:100]
+        return {"brand":"mhp","accountId":account_id,"hasMore":len(page)==100,
+                "nextCursor":"bound-next-page" if len(page)==100 else None,
+                "threads":[{"id":i,"participantId":i,"name":"Test","preview":"","updatedAt":"2026-01-01"} for i in page]}
+    monkeypatch.setattr(inbox_crm, "command", command)
+    reader = WhatsAppReader(account,user.email)
+    account_page(db,user,account,reader)
+    db.execute(text("UPDATE inbox_history_accounts SET next_attempt=now()"))
+    account_page(db,user,account,reader)
+    assert calls == [None,"bound-next-page"]
+    assert db.scalar(text("SELECT count(*) FROM inbox_history_threads")) == 121
+
+
 def test_owner_manual_reply_uses_received_thread_and_original_request_once(admin_client, db, canonical, monkeypatch):
     from app.services import inbox_automations
     _, thread, _, _ = canonical

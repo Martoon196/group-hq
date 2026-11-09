@@ -68,7 +68,7 @@
     {% if triage.needs_owner %}<strong>Needs me</strong> · {% endif %}{{ triage.reason }}{% if not triage_current %}<p>Based on an earlier message window.</p>{% endif %}
     </aside>{% endif %}
     {% if handoff is defined and account.provider != 'r72_whatsapp' and account.can_reply and account.configured %}{% include 'inbox_handoff_controls.html' %}{% endif %}
-    {% if account.provider in ('local','zernio') %}<a href="/inbox/history?account={{ account.key|urlencode }}&amp;thread={{ history_key }}">Search this conversation’s history</a>{% endif %}
+    {% if account.provider in ('local','zernio','r72_whatsapp') %}<a href="/inbox/history?account={{ account.key|urlencode }}&amp;thread={{ history_key }}">Search this conversation’s history</a>{% endif %}
     {% if next_cursor %}<a class="btn btn-secondary" href="/inbox?account={{ account.key|urlencode }}&amp;thread={{ thread_ticket|urlencode }}&amp;cursor={{ next_cursor|urlencode }}">Older messages</a>{% endif %}
     <div class="inbox-messages">{% for m in messages %}<article class="inbox-message {{ m.direction }}">
       <strong>{{ 'You' if m.direction == 'outgoing' else m.name or conversation_name }}</strong>
