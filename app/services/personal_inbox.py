@@ -174,21 +174,23 @@ def ingest(db, data):
     return {"ok": True, "thread_sha256": digest}
 
 
-def pending(db, source="beeper"):
+def pending(db, source="beeper", channel=None):
     user = owner(db)
     keys = [a.key for a in inbox.accounts(db) if a.provider == "local" and a.owner_email == user.email
-            and connector_for(db, a.key) == source]
+            and connector_for(db, a.key) == source and (channel is None or a.channel == channel)]
     result = db.scalars(select(InboxReply.id).where(InboxReply.account_key.in_(keys),
         InboxReply.user_id == user.id, InboxReply.state == "queued").order_by(InboxReply.created_at).limit(20)).all()
-    return {"reply_ids": list(result)}
+    return {"reply_ids": list(result), **({"channel": channel} if channel else {})}
 
 
-def begin(db, reply_id, source="beeper"):
+def begin(db, reply_id, source="beeper", channel=None):
     from . import inbox_automations
     seen = db.get(InboxReply, reply_id)
     if seen is None:
         problem("Unknown reply", 404)
     account, user = enabled_account(db, seen.account_key)
+    if channel is not None and account.channel != channel:
+        problem("Reply belongs to a different channel", 403)
     automatic = inbox_automations.local_job(db, reply_id)
     if automatic:
         inbox_automations.lock_account(db, account)

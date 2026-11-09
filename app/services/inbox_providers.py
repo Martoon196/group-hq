@@ -377,6 +377,9 @@ class Matrix(Transport):
 
 
 def client(account, transport=None):
+    if getattr(account, "surface", None) in ("youtube_public_comments", "tiktok_public_comments"):
+        from .video_comments_provider import VideoComments
+        return VideoComments(account, transport)
     if getattr(account, "surface", None) == "linkedin_public_comments":
         from .linkedin_comments_provider import LinkedInComments
         return LinkedInComments(account, transport)

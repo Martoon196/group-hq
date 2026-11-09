@@ -17,7 +17,7 @@ jobs:
           node-version: '22'
       - run: npm ci --prefix tools/whatsapp-keywords --ignore-scripts --no-audit --no-fund
       - run: npm ci --prefix tools/native-messenger --ignore-scripts --no-audit --no-fund
-      - run: node --test tools/whatsapp-keywords/test.cjs tools/whatsapp-keywords/socket.test.cjs tools/personal-inbox/test.cjs tools/native-messenger/test.cjs
+      - run: node --test tools/whatsapp-keywords/test.cjs tools/whatsapp-keywords/socket.test.cjs tools/personal-inbox/test.cjs tools/personal-inbox/linkedin-setup.test.cjs tools/native-messenger/test.cjs
   postgres-suite:
     runs-on: ubuntu-latest
     services:
