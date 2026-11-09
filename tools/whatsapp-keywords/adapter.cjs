@@ -54,7 +54,9 @@ async function main() {
   const pairOnly = process.env.GHQ_WA_PAIR_ONLY === 'true';
   if (!listenerMatches(String(expectedNumber) + '@c.us', expectedNumber)) throw Error('Set the selected listening number privately');
   let snapshot = {revision:0, listenerId:LISTENER, rules:[]}, ready = false, busy = false, groupsAt = 0;
-  const client = new SocketClient({dataPath:path.join(root,'socket-session'),expectedNumber,pairOnly});
+  // Optional recovery override for a session paired before its browser profile was recorded: chrome or desktop.
+  const pairedProfile = process.env.GHQ_WA_PAIRED_BROWSER || undefined;
+  const client = new SocketClient({dataPath:path.join(root,'socket-session'),expectedNumber,pairOnly,pairedProfile});
   const pairing = await createPairingPage(path.dirname(root));
   const note = message => console.log(new Date().toISOString(), message); // No message bodies, phone numbers, tokens or provider errors.
   client.on('qr', value => {void pairing.showQr(value).catch(()=>{pairing.setStatus('error');});note('A fresh QR is available on the private Codex pairing page.');});
