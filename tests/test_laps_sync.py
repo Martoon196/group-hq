@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.models import AuditLog, CampaignLead, FranchiseOpportunity, LapsDeal, Person
-from app.services import laps, laps_sync, relaunch72_crm
+from app import config
+from app.models import AuditLog, CampaignLead, FranchiseOpportunity, LapsDeal, Person, User
+from app.services import inbox_crm, laps, laps_sync, relaunch72_crm
 from app.services.relaunch72_crm import CrmUnavailable, Lead, LeadPage
 
 NOW = datetime(2026, 11, 11, 15, 0)
@@ -113,7 +114,8 @@ def test_refresh_reads_every_crm_page_and_follows_later_stage_changes(admin_clie
     assert deals["Sample One"].lead_at == datetime(2026, 11, 1, 9) and deals["Sample One"].presentation_at > datetime(2026, 11, 1, 9)
     assert db.query(LapsDeal).count() == 3
     page = admin_client.get("/laps").text
-    assert "Where the board gets its leads" in page and "/crm/leads/" in page
+    assert "Where the board gets its leads" in page and "/laps/source/" in page and "older connection" in page
+    assert laps_sync.state(db)["brands"]["pp"]["via"] == "bridge" and laps_sync.state(db)["brands"]["mhp"]["via"] is None
 
 
 def test_a_silent_crm_is_reported_and_changes_nothing_else(admin_client, db, monkeypatch):
@@ -148,3 +150,123 @@ def test_owner_changes_on_an_automatic_deal_survive_a_refresh(admin_client, db, 
     assert (deal.name, deal.value_pence, deal.next_step, deal.notes, deal.stage) == (
         "Sample One (Durham)", 249000, "Send the pack", "Keen", "presentation")
     assert "Brought in automatically" in admin_client.get(f"/laps/deals/{deal.id}").text
+
+
+# ---- every business's CRM, through the signed lead listing ---------------------------------------------
+
+def listed(i, name, lifecycle="lead", created="2026-10-01T08:00:00.000Z", **deal):
+    row = {"id": IDS[i], "name": name, "source": "Webinar", "lifecycle": lifecycle, "createdAt": created,
+           "updatedAt": created, "opportunity": None}
+    if deal:
+        row["opportunity"] = {"status": "open", "stage": "New lead", "stagePosition": 1, "valueMinor": 0, "currency": "GBP",
+                              "stageChangedAt": "2026-10-05T09:00:00.000Z", "closedAt": None, **deal}
+    return row
+
+
+def listing(monkeypatch, answers):
+    """answers: brand -> list of pages (each a list of raw rows), or an exception to raise for that brand."""
+    asked = []
+
+    def command(user, brand, action, **payload):
+        asked.append((user.email, brand, action, payload.get("cursor")))
+        answer = answers.get(brand, inbox_crm.CrmUnavailable("down"))
+        if isinstance(answer, Exception):
+            raise answer
+        index = 0 if payload.get("cursor") is None else int(payload["cursor"].split("-")[1])
+        return inbox_crm._leads_page({"brand": brand, "leads": answer[index],
+                                      "nextCursor": f"page-{index + 1}" if index + 1 < len(answer) else None}, brand)
+    monkeypatch.setattr(inbox_crm, "command", command)
+    return asked
+
+
+def test_listing_answer_is_validated_before_anything_is_stored():
+    good = {"brand": "mhp", "leads": [listed(1, "A", status="won", valueMinor=300000, closedAt="2026-11-02T10:00:00.000Z"),
+                                      listed(2, "B", status="open", currency="EUR", valueMinor=500)], "nextCursor": None}
+    page = inbox_crm._leads_page(good, "mhp")
+    assert (page["leads"][0].opportunity_status, page["leads"][0].value_minor, page["leads"][0].stage_changed_at) == (
+        "won", 300000, "2026-11-02T10:00:00.000Z")
+    assert page["leads"][1].value_minor is None, "a value that is not in pounds is not counted as pounds"
+    assert page["leads"][0].source_created_at == "2026-10-01T08:00:00.000Z" and page["next_cursor"] is None
+    for bad in ({**good, "brand": "kp"}, {**good, "leads": [{**good["leads"][0], "id": "not-a-uuid"}]},
+                {**good, "leads": [good["leads"][0]] * 2}, {**good, "leads": [{**good["leads"][0], "lifecycle": "vip"}]},
+                {**good, "leads": [listed(1, "A", status="pending")]}, {**good, "nextCursor": "has spaces"},
+                {**good, "leads": [listed(i % 8, "x") for i in range(201)]}, {**good, "leads": [listed(1, "A", valueMinor=-1)]}):
+        with pytest.raises((ValueError, KeyError, TypeError)):
+            inbox_crm._leads_page(bad, "mhp")
+
+
+def test_every_connected_business_fills_the_board_with_the_crms_own_dates(admin_client, db, monkeypatch):
+    def bridge_must_not_run(cursor=None):
+        raise AssertionError("the listing answered for Property Predator; the old bridge is not needed")
+    monkeypatch.setattr(relaunch72_crm, "fetch_leads", bridge_must_not_run)
+    asked = listing(monkeypatch, {
+        "pp": [[listed(1, "Sample Subscriber", lifecycle="customer")]],
+        "mhp": [[listed(2, "Sample Mentee", status="won", stage="Won", valueMinor=300000, closedAt="2026-11-02T10:00:00.000Z"),
+                 listed(3, "Sample Webinar Lead")],
+                [listed(4, "Sample Booked", stage="Call booked"), listed(5, "Sample Gone", status="lost", stage="Lost")]],
+        "piuk": [[listed(6, "Sample Borrower", stage="Proposal")]],
+    })
+    done = admin_client.post("/laps/refresh")
+    assert "ok=" in done.headers["location"]
+    assert [(b, c) for _, b, _, c in asked] == [("pp", None), ("mhp", None), ("mhp", "page-1"), ("kp", None), ("piuk", None)]
+    assert {email for email, *_ in asked} == {db.query(User).one().email}
+    deals = {d.name: d for d in db.query(LapsDeal)}
+    assert {n: (d.brand, d.stage) for n, d in deals.items()} == {
+        "Sample Subscriber": ("pp", "sale"), "Sample Mentee": ("mhp", "sale"), "Sample Webinar Lead": ("mhp", "lead"),
+        "Sample Booked": ("mhp", "appointment"), "Sample Borrower": ("piuk", "presentation")}
+    mentee = deals["Sample Mentee"]
+    assert (mentee.lead_at, mentee.sale_at, mentee.value_pence) == (datetime(2026, 10, 1, 8), datetime(2026, 11, 2, 10), 300000)
+    assert deals["Sample Booked"].appointment_at == datetime(2026, 10, 5, 9), "the day the CRM says the stage changed"
+    state = laps_sync.state(db)
+    assert {b: (v["via"], v["checked"]) for b, v in state["brands"].items()} == {
+        "pp": ("listing", 1), "mhp": ("listing", 4), "kp": (None, 0), "piuk": ("listing", 1)}
+    assert db.query(CampaignLead).filter_by(brand="piuk").one().stage == "Proposal"
+
+    page = admin_client.get("/laps").text
+    assert page.count("Connected") == 3 and "Not arriving yet." in page and "Key Properties UK CRM" in page
+    lead = db.query(CampaignLead).filter_by(brand="mhp", display_name="Sample Mentee").one()
+    assert admin_client.get(f"/laps/source/{lead.id}").headers["location"] == f"/inbox/crm/contact?brand=mhp&contact={lead.external_id}"
+    pp = db.query(CampaignLead).filter_by(brand="pp").one()
+    assert admin_client.get(f"/laps/source/{pp.id}").headers["location"] == f"/crm/leads/{pp.id}"
+
+
+def test_the_background_refresh_asks_the_crm_as_the_inbox_owner(admin_client, db, monkeypatch):
+    owner = db.query(User).one()
+    monkeypatch.setattr(config, "GHQ_PERSONAL_INBOX_OWNER_EMAIL", owner.email.upper().lower())
+    asked = listing(monkeypatch, {"kp": [[listed(1, "Sample Vendor")]]})
+    monkeypatch.setattr(relaunch72_crm, "fetch_leads", lambda cursor=None: (_ for _ in ()).throw(CrmUnavailable()))
+    admin_client.get("/laps")
+    assert ("kp", "leads") in [(b, a) for _, b, a, _ in asked] and db.query(LapsDeal).one().brand == "kp"
+    monkeypatch.setattr(config, "GHQ_PERSONAL_INBOX_OWNER_EMAIL", "")
+    assert laps_sync.owner(db) is None and laps_sync.pull_brand(db, "kp", None, "system")["problem"]
+
+
+# ---- one person, several businesses -------------------------------------------------------------------
+
+def test_a_lead_can_be_added_under_several_businesses_each_with_its_own_card(admin_client, db):
+    assert "err=" in admin_client.post("/laps/deals", data={"name": "Sample Person"}).headers["location"]
+    added = admin_client.post("/laps/deals", data={"name": "Sample Person", "brand": ["mhp", "pp", "mhp"], "source": "LinkedIn"})
+    assert "ok=" in added.headers["location"] and "2+businesses" in added.headers["location"]
+    cards = db.query(LapsDeal).order_by(LapsDeal.id).all()
+    assert [c.brand for c in cards] == ["mhp", "pp"] and cards[0].party and cards[0].party == cards[1].party
+    admin_client.post(f"/laps/deals/{cards[1].id}/stage", data={"to": "sale", "value": "39"})
+    board = admin_client.get("/laps").text
+    assert "Also:" in board and "Property Predator · Sale" in board and "Martin Howard Property · Lead" in board
+    db.expire_all()
+    assert cards[0].stage == "lead", "a sale for one business leaves the other card where it was"
+
+    page = admin_client.get(f"/laps/deals/{cards[0].id}").text
+    assert "Other businesses" in page and "Do they want something from another business too?" in page
+    more = admin_client.post(f"/laps/deals/{cards[0].id}/also", data={"brand": ["kp", "pp", "nope"]})
+    assert "ok=" in more.headers["location"]
+    kp = db.query(LapsDeal).filter_by(brand="kp").one()
+    assert (kp.name, kp.source, kp.stage, kp.party) == ("Sample Person", "LinkedIn", "lead", cards[0].party)
+    assert "err=" in admin_client.post(f"/laps/deals/{cards[0].id}/also", data={"brand": ["kp"]}).headers["location"]
+    assert db.query(LapsDeal).count() == 3
+
+    single = LapsDeal(name="Solo", brand="hnh", stage="lead", lead_at=laps.utcnow())
+    db.add(single)
+    db.commit()
+    admin_client.post(f"/laps/deals/{single.id}/also", data={"brand": "ordris"})
+    db.expire_all()
+    assert single.party and db.query(LapsDeal).filter_by(party=single.party).count() == 2

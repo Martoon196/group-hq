@@ -2,9 +2,10 @@
 
 Two sources feed it:
 
-- CRM leads: the Relaunch72 read bridge (app.services.relaunch72_crm), every page, projected into campaign_leads
-  as the CRM screen does and then onto the board. Today the bridge serves Property Predator's workspace only; any
-  brand it serves later arrives here unchanged.
+- CRM leads, for every business with a CRM workspace (CRM_BRANDS): the CRM's signed `leads` listing
+  (app.services.inbox_crm), every page, projected into campaign_leads and then onto the board. A CRM release
+  from before that listing existed refuses it; Property Predator then falls back to the older read bridge
+  (app.services.relaunch72_crm) and the other businesses simply show as not answering yet.
 - The franchise pipeline: every territory opportunity in this database (Hello New Home).
 
 A deal made here carries origin ("crm:<campaign lead id>", "franchise:<opportunity id>") and is made once. After
@@ -13,9 +14,10 @@ the board are never overwritten, and a deal the owner marked lost stays lost. Me
 in: their money is already in the Money panel, and a sale with no lead, appointment or presentation behind it
 would make every conversion rate look better than it is.
 
-Dates. The bridge does not give the day a contact was created or changed stage, so a lead seen for the first
-time is dated by its last CRM activity (or by now when it has none), and later stage changes by the moment the
-refresh saw them. Franchise opportunities carry their own dates.
+Dates. The listing gives the day a contact was created and the day its deal last changed stage, and those are
+used. The older bridge gives neither, so a lead that arrives through it is dated by its last CRM activity (or
+by now when it has none) and its later stage changes by the moment the refresh saw them. Franchise
+opportunities carry their own dates.
 """
 from __future__ import annotations
 
@@ -23,17 +25,19 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
-from ..models import AppSetting, CampaignLead, FranchiseOpportunity, LapsDeal, utcnow
-from . import campaigns, laps, relaunch72_crm
+from .. import config
+from ..models import AppSetting, CampaignLead, FranchiseOpportunity, LapsDeal, User, utcnow
+from . import campaigns, inbox_crm, laps, relaunch72_crm
 from .audit import audit
 
 LOG = logging.getLogger(__name__)
 SYNC_KEY = "laps.sync"
 STALE = timedelta(minutes=10)
-MAX_PAGES = 40                      # 2,000 CRM contacts a refresh; the bridge serves 50 a page
+MAX_PAGES = 40                      # a refresh reads at most this many pages of one business's CRM
+CRM_BRANDS = ("pp", "mhp", "kp", "piuk")        # the businesses with a CRM workspace of their own
 LOCK = 741935840
 ACTOR = "system:laps-sync"
 
@@ -45,12 +49,12 @@ FRANCHISE_STAGES = {"enquiry": "lead", "discovery": "appointment", "pack_sent": 
                     "lost": "lost"}
 
 
-def crm_stage(lifecycle: str, stage_name: str | None) -> str:
-    """Where a CRM contact sits on the board: a customer is a sale, an archived contact is lost, and an open
-    contact follows the name of its pipeline stage."""
-    if lifecycle == "customer":
+def crm_stage(lifecycle: str, stage_name: str | None, opportunity_status: str | None = None) -> str:
+    """Where a CRM contact sits on the board: a customer or a won deal is a sale, an archived contact or a lost
+    deal is lost, and an open one follows the name of its pipeline stage."""
+    if lifecycle == "customer" or opportunity_status == "won":
         return "sale"
-    if lifecycle == "archived":
+    if lifecycle == "archived" or opportunity_status == "lost":
         return "lost"
     name = stage_name or ""
     if PRESENTATION.search(name):
@@ -74,15 +78,16 @@ def _when(raw: str | None, fallback: datetime, now: datetime) -> datetime:
 
 
 def place(db: Session, existing: dict[str, LapsDeal], origin: str, *, stage: str, first_seen: datetime,
-          now: datetime, **fields) -> str | None:
-    """Create the deal for origin, or move it forward. Returns "created", "moved" or None."""
+          now: datetime, stage_at: datetime | None = None, **fields) -> str | None:
+    """Create the deal for origin, or move it forward. stage_at is when the source says the stage was reached,
+    when it knows. Returns "created", "moved" or None."""
     deal = existing.get(origin)
     if deal is None:
         if stage == "lost":
             return None                             # never bring in a lead that is already dead
         deal = LapsDeal(origin=origin, stage="lead", lead_at=first_seen, **fields)
         if stage != "lead":
-            laps.move(deal, stage, first_seen)
+            laps.move(deal, stage, max(stage_at or first_seen, first_seen))
         db.add(deal)
         existing[origin] = deal
         return "created"
@@ -91,7 +96,7 @@ def place(db: Session, existing: dict[str, LapsDeal], origin: str, *, stage: str
     if deal.stage in ("lost", "sale") or stage == deal.stage:
         return None
     if stage == "lost" or laps.PIPELINE.index(stage) > laps.PIPELINE.index(deal.stage):
-        laps.move(deal, stage, now)
+        laps.move(deal, stage, max(stage_at, deal.lead_at) if stage_at else now)
         return "moved"
     return None                                     # the source is behind the board: the owner's move stands
 
@@ -115,31 +120,65 @@ def from_franchise(db: Session, existing: dict[str, LapsDeal], now: datetime) ->
 def from_crm_leads(db: Session, existing: dict[str, LapsDeal], now: datetime) -> dict:
     counts = {"created": 0, "moved": 0}
     for lead in db.scalars(select(CampaignLead).where(CampaignLead.brand.in_(laps.BRANDS))).all():
+        first_seen = _when(lead.source_created_at or lead.last_activity_at, lead.created_at, now)
         outcome = place(
-            db, existing, f"crm:{lead.id}", stage=crm_stage(lead.lifecycle, lead.stage), now=now,
-            first_seen=_when(lead.last_activity_at, lead.created_at, now),
-            name=lead.display_name[:200], brand=lead.brand, source=(lead.source or "CRM")[:100])
+            db, existing, f"crm:{lead.id}", stage=crm_stage(lead.lifecycle, lead.stage, lead.opportunity_status),
+            now=now, first_seen=first_seen,
+            stage_at=_when(lead.stage_changed_at, first_seen, now) if lead.stage_changed_at else None,
+            name=lead.display_name[:200], brand=lead.brand, source=(lead.source or "CRM")[:100],
+            value_pence=lead.value_minor or None)
         if outcome:
             counts[outcome] += 1
     return counts
 
 
-def pull_crm(db: Session, actor) -> tuple[int, str]:
-    """Read every page of the bridge into campaign_leads. Returns (contacts checked, "" or why it stopped)."""
+def _pull_bridge(db: Session, actor) -> dict:
+    """Property Predator through the older read bridge, 50 contacts a page."""
     checked, cursor = 0, None
     for _ in range(MAX_PAGES):
         try:
             page = relaunch72_crm.fetch_leads(cursor)
         except relaunch72_crm.CrmUnavailable:
             db.rollback()
-            return checked, "The CRM connection did not answer; leads already brought in are unchanged."
+            return {"checked": checked, "via": "bridge" if checked else None, "problem": "The CRM did not answer."}
         campaigns.project_pp_page(db, page, actor)
         db.commit()
         checked += len(page.leads)
         cursor = page.next_cursor
         if not cursor:
-            return checked, ""
-    return checked, f"Stopped after {MAX_PAGES * 50:,} CRM contacts; the rest wait for the next refresh."
+            return {"checked": checked, "via": "bridge", "problem": ""}
+    return {"checked": checked, "via": "bridge", "problem": "More contacts than one refresh reads; the rest wait for the next."}
+
+
+def pull_brand(db: Session, brand: str, asker: User | None, actor) -> dict:
+    """Read every page of one business's CRM into campaign_leads. asker is the owner the CRM authorises; actor
+    is who the audit rows name. Returns {"checked", "via", "problem"}."""
+    checked, cursor = 0, None
+    if asker is None:                       # the bridge needs no person; the listing does
+        return _pull_bridge(db, actor) if brand == "pp" else {
+            "checked": 0, "via": None, "problem": "No owner account to ask the CRM with."}
+    for _ in range(MAX_PAGES):
+        try:
+            page = inbox_crm.command(asker, brand, "leads", **({"cursor": cursor} if cursor else {}))
+        except inbox_crm.CrmUnavailable:
+            db.rollback()
+            if checked == 0 and brand == "pp":
+                return _pull_bridge(db, actor)       # a CRM release from before the listing still has the bridge
+            return {"checked": checked, "via": "listing" if checked else None,
+                    "problem": "The CRM did not answer for this business."}
+        campaigns.project_leads(db, brand, page["leads"], actor)
+        db.commit()
+        checked += len(page["leads"])
+        cursor = page["next_cursor"]
+        if not cursor:
+            return {"checked": checked, "via": "listing", "problem": ""}
+    return {"checked": checked, "via": "listing", "problem": "More contacts than one refresh reads; the rest wait for the next."}
+
+
+def owner(db: Session) -> User | None:
+    """The account whose email the CRM's brand scopes name: the inbox owner."""
+    email = (config.GHQ_PERSONAL_INBOX_OWNER_EMAIL or "").strip().lower()
+    return db.scalars(select(User).where(func.lower(User.email) == email)).first() if email else None
 
 
 def _origins(db: Session) -> dict[str, LapsDeal]:
@@ -159,17 +198,22 @@ def refresh_local(db: Session, actor=ACTOR) -> dict:
 
 
 def refresh(db: Session, actor=ACTOR) -> dict:
-    """The whole refresh: pull the CRM, then place everything. Records what happened for the board to show."""
-    checked, problem = pull_crm(db, actor)
+    """The whole refresh: pull every business's CRM, then place everything. Records what happened for the board
+    to show. `problem` is set only when no CRM answered at all; each business's own outcome is under `brands`."""
+    asker = actor if isinstance(actor, User) else owner(db)
+    brands = {brand: pull_brand(db, brand, asker, actor) for brand in CRM_BRANDS}
     totals = refresh_local(db, actor)
-    state = {"at": utcnow().isoformat(timespec="seconds"), "checked": checked, "problem": problem, **totals}
+    answered = [b for b in brands.values() if b["via"]]
+    value = {"at": utcnow().isoformat(timespec="seconds"), "brands": brands,
+             "checked": sum(b["checked"] for b in brands.values()),
+             "problem": "" if answered else "No CRM answered; leads already brought in are unchanged.", **totals}
     row = db.get(AppSetting, SYNC_KEY)
     if row:
-        row.value, row.updated_by = state, str(getattr(actor, "email", actor))[:200]
+        row.value, row.updated_by = value, str(getattr(actor, "email", actor))[:200]
     else:
-        db.add(AppSetting(key=SYNC_KEY, value=state, updated_by=str(getattr(actor, "email", actor))[:200]))
+        db.add(AppSetting(key=SYNC_KEY, value=value, updated_by=str(getattr(actor, "email", actor))[:200]))
     db.commit()
-    return state
+    return value
 
 
 def state(db: Session) -> dict:

@@ -39,6 +39,15 @@
       {% endif %}
     </div>
     <p class="small muted mt-1">Moving forward records today for each stage on the way. Moving back clears the later stages.</p>
+    <h2 class="mt-2">Other businesses</h2>
+    {% if siblings %}<ul class="laps-clients">{% for o in siblings %}<li><a href="/laps/deals/{{ o.id }}"><strong>{{ brands[o.brand] }}</strong></a> · {{ labels[o.stage] if o.stage != 'lost' else 'Lost' }}{% if o.value_pence is not none %} · {{ gbp(o.value_pence) }}{% endif %}</li>{% endfor %}</ul>
+    {% else %}<p class="small muted">This person is on the board for {{ brands[deal.brand] }} only.</p>{% endif %}
+    {% set taken = [deal.brand] + siblings|map(attribute='brand')|list %}
+    {% if brands|length > taken|length %}<form method="post" action="/laps/deals/{{ deal.id }}/also" class="mt-1">
+      <fieldset class="laps-pick"><legend>Do they want something from another business too?</legend>
+        {% for key, name in brands.items() %}{% if key not in taken %}<label><input type="checkbox" name="brand" value="{{ key }}"> {{ name }}</label>{% endif %}{% endfor %}</fieldset>
+      <button class="btn btn-ghost btn-sm">Add as a lead there too</button></form>
+    <p class="small muted">Each business gets its own card, so a sale for one does not hide a lead for another.</p>{% endif %}
   </section>
 </div>
 {% endblock %}

@@ -68,6 +68,13 @@ table.data .num,.num{text-align:right;font-variant-numeric:tabular-nums}
 .laps-card p{margin:.45rem 0 0;font-size:.92rem}
 .laps-card-offer{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline}
 .laps-value{font-weight:900;font-variant-numeric:tabular-nums;background:var(--blush);border-radius:8px;padding:.05rem .45rem;white-space:nowrap}
+.laps-also{font-size:.8rem;color:var(--muted)}.laps-also a{font-weight:700}
+.laps-pick{border:1px solid var(--line);border-radius:12px;padding:.7rem .9rem;margin:0;display:flex;flex-wrap:wrap;gap:.4rem 1.1rem}
+.field.laps-pick{flex-direction:row}
+.laps-pick legend{font-weight:700;font-size:.92rem;padding:0 .3rem}.laps-pick legend .hint{font-weight:400}
+.laps-pick label{display:inline-flex;align-items:center;gap:.4rem;font-weight:400;cursor:pointer}
+.laps-pick input{width:auto;margin:0;accent-color:var(--pink)}
+.ok-text{color:var(--green-deep);font-weight:700}
 .laps-card-next span{font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .laps-card.is-overdue .laps-card-next{color:#9B1C4B;font-weight:700}
 .laps-card-actions{display:flex;flex-wrap:wrap;gap:.4rem;align-items:end;margin-top:.7rem}

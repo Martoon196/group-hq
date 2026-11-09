@@ -144,7 +144,7 @@
     <p class="inbox-notice">The deal shows this conversation's messages by reading them from the Inbox. The conversation is filed under "Property offered to me".</p>
     {% if organisation.kind != 'property' and not property_deals %}<h3>Sales leads</h3>
     <div class="row-actions"><form method="post" action="/laps/start"><input type="hidden" name="name" value="{{ conversation_name }}"><input type="hidden" name="source" value="{{ channels[account.channel] }}"><button class="btn btn-secondary" type="submit">Add to the LAPS board by hand</button></form></div>
-    <p class="inbox-notice">The LAPS board fills itself from the CRM, so a contact you add to the Property Predator CRM above appears there on its own. Use this only for a lead whose business is not connected yet.</p>{% endif %}</aside>
+    <p class="inbox-notice">The LAPS board fills itself from each business's CRM, so a contact you add to a CRM above appears there on its own, once for every business you add them to. Use this only for someone you do not want in a CRM.</p>{% endif %}</aside>
   {% else %}<h2>Choose a conversation</h2><p>Your reply will use that conversation’s original account and channel.</p>{% endif %}
   </section>
 </div>

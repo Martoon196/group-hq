@@ -15,7 +15,7 @@ from tests.conftest import ADMIN_EMAIL, session
 
 
 def test_database_is_at_head():
-    assert migrate.current_revision() == migrate.head_revision() == "0015_acquisition_threads"
+    assert migrate.current_revision() == migrate.head_revision() == "0016_laps_all_brands"
 
 
 def test_grants_is_mounted_and_needs_a_login(client):
