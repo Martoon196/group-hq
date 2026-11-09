@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.models import AuditLog, CampaignLead, LapsDeal, Mentee, Payment, Person, Programme
+from app.models import AuditLog, LapsDeal, Mentee, Payment, Person, Programme
 from app.services import laps
 
 NOW = datetime(2026, 11, 11, 15, 0)          # a Wednesday; the UK is on GMT, so UTC and local agree
@@ -177,19 +177,6 @@ def test_deal_page_edits_fields_and_escapes_text(admin_client, db):
     assert admin_client.post(f"/laps/deals/{row.id}", data={"name": "", "brand": "pp"}).headers["location"].count("err=") == 1
     assert admin_client.get("/laps/deals/999999").status_code == 404
     assert "&lt;script&gt;" not in admin_client.get("/laps").text and "Renamed" in admin_client.get("/laps").text
-
-
-def test_crm_lead_is_offered_and_added_to_the_board_once(admin_client, db):
-    lead = CampaignLead(brand="pp", source_system="r72", external_id="x1", display_name="CRM Person", source="Webinar",
-                        lifecycle="lead")
-    db.add(lead)
-    db.commit()
-    assert "CRM leads not on the board" in admin_client.get("/laps").text
-    assert "ok=" in admin_client.post("/laps/import", data={"lead_id": lead.id}).headers["location"]
-    assert "err=" in admin_client.post("/laps/import", data={"lead_id": lead.id}).headers["location"]
-    row = db.query(LapsDeal).one()
-    assert (row.name, row.brand, row.source, row.origin) == ("CRM Person", "pp", "Webinar", f"crm:{lead.id}")
-    assert "CRM leads not on the board" not in admin_client.get("/laps").text
 
 
 def test_targets_are_saved_and_shown_as_a_plan(admin_client, db):

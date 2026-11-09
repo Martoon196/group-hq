@@ -6,7 +6,7 @@
 {% macro card(d) %}
 <article class="laps-card laps-{{ d.stage }}{% if d.next_step_on and d.next_step_on < today and d.stage != 'sale' %} is-overdue{% endif %}">
   <header><span class="laps-avatar" aria-hidden="true">{{ initials(d.name) }}</span>
-    <span class="laps-card-id"><a class="laps-card-name" href="/laps/deals/{{ d.id }}">{{ d.name }}</a><span class="laps-card-brand">{{ brands[d.brand] }}</span></span></header>
+    <span class="laps-card-id"><a class="laps-card-name" href="/laps/deals/{{ d.id }}">{{ d.name }}</a><span class="laps-card-brand">{{ brands[d.brand] }}{% set o = origin_of(d) %}{% if o %} · <a href="{{ o.url }}" title="Brought in automatically; follows this record">{{ o.label }}</a>{% endif %}</span></span></header>
   {% if d.offer or d.value_pence is not none %}<p class="laps-card-offer"><span>{{ d.offer }}</span>{% if d.value_pence is not none %}<span class="laps-value">{{ gbp(d.value_pence) }}</span>{% endif %}</p>{% endif %}
   {% if d.stage == 'sale' %}<p class="small muted">Sold {{ d.sale_at|uk("%d %b") }}{% if d.value_pence is none %} · <a href="/laps/deals/{{ d.id }}">add the sale value</a>{% endif %}</p>
   {% else %}
@@ -144,12 +144,21 @@
   </section>
 </div>
 
-{% if crm_leads %}<section class="panel mt-2">
-  <div class="panel-head"><h2>CRM leads not on the board <span class="status status-pending">{{ crm_waiting }}</span></h2><a class="btn btn-ghost btn-sm" href="/crm">CRM &amp; follow-up</a></div>
-  <div class="table-scroll"><table class="data"><thead><tr><th>Name</th><th>Business</th><th>Source</th><th></th></tr></thead><tbody>
-  {% for lead in crm_leads %}<tr><td>{{ lead.display_name }}</td><td>{{ brands[lead.brand] }}</td><td>{{ lead.source or "" }}</td>
-    <td class="row-actions"><form method="post" action="/laps/import">{{ view_field() }}<input type="hidden" name="lead_id" value="{{ lead.id }}"><button class="btn btn-ghost btn-sm">Add to board</button></form></td></tr>{% endfor %}
+<section class="panel mt-2" id="sources">
+  <div class="panel-head"><h2>Where the board gets its leads</h2>
+    <form method="post" action="/laps/refresh">{{ view_field() }}<button class="btn btn-ghost btn-sm">Refresh now</button></form></div>
+  <p>The board fills itself. You only move a card by hand when something happens that the source does not record.</p>
+  <div class="table-scroll"><table class="data"><thead><tr><th>Source</th><th>How it lands on the board</th><th class="num">On the board</th></tr></thead><tbody>
+    <tr><td><strong><a href="/crm">CRM</a></strong><br><span class="small muted">Property Predator workspace</span></td>
+      <td>Every contact. A new contact is a lead; a stage named like "Qualified" or "Booked" is an appointment; "Proposal" or "Offer" is a presentation; a customer is a sale; an archived contact is lost.{% if not crm_connected %}<br><span class="bad-text">The CRM connection is not set up on this server, so nothing is arriving from it.</span>{% endif %}</td>
+      <td class="num">{{ automatic.crm }}</td></tr>
+    <tr><td><strong><a href="/franchise">Franchise pipeline</a></strong><br><span class="small muted">Hello New Home territories</span></td>
+      <td>Every opportunity. Enquiry is a lead; discovery is an appointment; pack sent, follow-up and agreement are presentations; paid is a sale.</td>
+      <td class="num">{{ automatic.franchise }}</td></tr>
+    <tr><td><strong>Added by hand</strong></td><td>Anyone you add with "Add a lead". Leads for Martin Howard Property, Key Properties UK and Prop Invest UK arrive this way until their CRM workspaces are connected to Growth HQ.</td>
+      <td class="num">{{ by_hand }}</td></tr>
   </tbody></table></div>
-  {% if crm_waiting > crm_leads|length %}<p class="small muted">Showing the latest {{ crm_leads|length }} of {{ crm_waiting }}.</p>{% endif %}
-</section>{% endif %}
+  <p class="small muted">{% if sync.when %}CRM last checked {{ sync.when|uk("%d %b at %H:%M") }}: {{ sync.checked }} contacts, {{ sync.created }} new on the board, {{ sync.moved }} moved on.{% if sync.problem %} <span class="bad-text">{{ sync.problem }}</span>{% endif %}{% else %}The CRM has not been checked yet; it is checked in the background when you open this page.{% endif %}
+  It is checked again whenever you open the board and the last check is more than ten minutes old. A source only ever moves a card forward or marks it lost, so your own moves and notes stay. Property purchases live on the <a href="/acquisitions">Property deals</a> board, not here.</p>
+</section>
 {% endblock %}

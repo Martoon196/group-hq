@@ -5,6 +5,7 @@
 <div class="page-title"><span class="eyebrow"><a href="/laps">LAPS board</a></span><h1>{{ deal.name }}</h1>
 <p><span class="status laps-status-{{ deal.stage }}">{{ labels[deal.stage] if deal.stage != 'lost' else 'Lost' }}</span> <span class="chip">{{ brands[deal.brand] }}</span>{% if deal.value_pence is not none %} <strong>{{ gbp(deal.value_pence) }}</strong>{% endif %}</p></div>
 
+{% if origin %}<p class="flash flash-ok">Brought in automatically from the <a href="{{ origin.url }}">{{ origin.label }}</a>. When that record moves forward, this card follows. Anything you change here stays.</p>{% endif %}
 <div class="two-col">
   <section class="panel">
     <h2>Details</h2>

@@ -96,7 +96,7 @@ def test_start_a_deal_from_a_conversation_attaches_it_and_shows_its_messages(adm
     account, value = ticket(db)
     conversation = admin_client.get("/inbox", params={"thread": value})
     assert conversation.status_code == 200 and "Start a property deal from this conversation" in conversation.text
-    assert "Property offered to me" in conversation.text
+    assert "Property offered to me" in conversation.text and "Add to the LAPS board by hand" in conversation.text
 
     started = admin_client.post("/acquisitions/start", data={"thread_ticket": value, "seller_name": "Sample Landlord", "source": "Facebook"})
     assert started.status_code == 200 and 'name="thread_ticket"' in started.text and "will be attached" in started.text
@@ -116,6 +116,7 @@ def test_start_a_deal_from_a_conversation_attaches_it_and_shows_its_messages(adm
     assert "Happy to look. What are the addresses?" in page.text and "Reply in the Inbox" in page.text
     again = admin_client.get("/inbox", params={"thread": value})
     assert "Open property deal: Sample portfolio" in again.text
+    assert "Add to the LAPS board" not in again.text, "a property purchase is not a sales lead"
     assert "acquisition.attach" in [a.action for a in db.query(AuditLog)]
 
 

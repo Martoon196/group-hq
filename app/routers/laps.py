@@ -8,15 +8,15 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import check_origin, require_admin
 from ..db import get_db
-from ..models import CampaignLead, FranchiseOpportunity, LapsDeal, Mentee, User, utcnow
-from ..services import laps
+from ..models import FranchiseOpportunity, LapsDeal, Mentee, User, utcnow
+from ..services import laps, laps_sync
 from ..services.audit import audit, changes
 from ..templating import go, render
 from .people import get_or_404
@@ -24,7 +24,7 @@ from .people import get_or_404
 router = APIRouter(dependencies=[Depends(check_origin)])
 
 SALES_SHOWN_DAYS = 30
-CRM_SUGGESTIONS = 8
+ORIGINS = {"crm": ("CRM", "/crm/leads/"), "franchise": ("Franchise pipeline", "/franchise/")}
 EDITABLE = ("name", "contact", "brand", "offer", "source", "value_pence", "next_step", "next_step_on", "notes")
 MOVES = {"lead": "Back to lead", "appointment": "Appointment booked", "presentation": "Presentation done",
          "sale": "Sale made", "lost": "Mark lost", "reopen": "Reopen"}
@@ -40,6 +40,15 @@ def gbp(pence: int | None) -> str:
 def initials(name: str) -> str:
     parts = [p for p in name.split() if p[:1].isalnum()]
     return ((parts[0][:1] + (parts[-1][:1] if len(parts) > 1 else "")) if parts else "?").upper()
+
+
+def origin_of(deal: LapsDeal) -> dict | None:
+    """Where an automatic deal came from: a short label and the record it follows."""
+    kind, _, ref = (deal.origin or "").partition(":")
+    if kind not in ORIGINS or not ref.isdigit():
+        return None
+    label, path = ORIGINS[kind]
+    return {"label": label, "url": path + ref}
 
 
 def percent(rate: float | None) -> str:
@@ -90,8 +99,23 @@ def _board_url(brand: str = "") -> str:
 
 
 @router.get("/laps", response_class=HTMLResponse)
-def board(request: Request, brand: str = "", db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def board(request: Request, background_tasks: BackgroundTasks, brand: str = "", db: Session = Depends(get_db),
+          user: User = Depends(require_admin)):
+    """The board places the leads this database already holds on every visit, and asks the CRM for fresh ones
+    in the background when the last pull is older than laps_sync.STALE."""
+    laps_sync.refresh_local(db)
+    if laps_sync.due(db):
+        background_tasks.add_task(laps_sync.run_background)
     return _board(request, db, user, brand)
+
+
+@router.post("/laps/refresh")
+def refresh(view: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    result = laps_sync.refresh(db, user)
+    if result["problem"]:
+        return go(_board_url(view), err=result["problem"])
+    return go(_board_url(view), ok=f"Leads refreshed: {result['checked']} CRM contacts checked, "
+                                   f"{result['created']} new on the board, {result['moved']} moved on.")
 
 
 @router.post("/laps/start", response_class=HTMLResponse)
@@ -124,12 +148,8 @@ def _board(request: Request, db: Session, user: User, brand: str = "", prefill: 
     weeks = [{"monday": monday, **laps.counts(db, start, end, brand or None)}
              for monday, start, end in laps.week_starts(now)]
 
-    taken = {o for o in db.scalars(select(LapsDeal.origin).where(LapsDeal.origin.like("crm:%"))).all()}
-    crm_query = select(CampaignLead).where(CampaignLead.lifecycle == "lead").order_by(
-        CampaignLead.synced_at.desc(), CampaignLead.id.desc())
-    if brand:
-        crm_query = crm_query.where(CampaignLead.brand == brand)
-    crm_leads = [lead for lead in db.scalars(crm_query.limit(200)).all() if f"crm:{lead.id}" not in taken]
+    automatic = {kind: db.scalar(select(func.count()).where(LapsDeal.origin.like(kind + ":%"))) or 0 for kind in ORIGINS}
+    by_hand = db.scalar(select(func.count()).where(LapsDeal.origin.is_(None))) or 0
 
     today = now.replace(tzinfo=timezone.utc).astimezone(laps.LONDON).date()
     return render(request, "laps.html", {
@@ -148,7 +168,8 @@ def _board(request: Request, db: Session, user: User, brand: str = "", prefill: 
             "territory_open": db.scalar(select(func.count()).where(
                 FranchiseOpportunity.stage.not_in(("paid", "onboarding", "lost")))) or 0,
         },
-        "crm_leads": crm_leads[:CRM_SUGGESTIONS], "crm_waiting": len(crm_leads),
+        "automatic": automatic, "by_hand": by_hand, "sync": laps_sync.state(db), "origin_of": origin_of,
+        "crm_connected": len(laps_sync.relaunch72_crm.config.R72_CRM_TOKEN) >= 32,
         "sales_days": SALES_SHOWN_DAYS, "prefill": prefill or {}, "initials": initials,
     })
 
@@ -175,30 +196,13 @@ def add_deal(name: str = Form(""), contact: str = Form(""), brand: str = Form(""
     return go(_board_url(view), ok=f"{deal.name} added to {laps.LABELS[deal.stage].lower()}.")
 
 
-@router.post("/laps/import")
-def import_crm_lead(lead_id: int = Form(...), view: str = Form(""), db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
-    lead = get_or_404(db, CampaignLead, lead_id)
-    origin = f"crm:{lead.id}"
-    if lead.brand not in laps.BRANDS:
-        return go(_board_url(view), err="That CRM lead belongs to a business the board does not track.")
-    if db.scalar(select(LapsDeal.id).where(LapsDeal.origin == origin)):
-        return go(_board_url(view), err=f"{lead.display_name} is already on the board.")
-    deal = LapsDeal(name=lead.display_name[:200], brand=lead.brand, source=(lead.source or "CRM")[:100],
-                    stage="lead", lead_at=utcnow(), origin=origin)
-    db.add(deal)
-    db.flush()
-    audit(db, user, "laps.deal.import", f"laps_deal:{deal.id}", after=_snapshot(deal) | {"origin": origin})
-    db.commit()
-    return go(_board_url(view), ok=f"{deal.name} added to leads.")
-
-
 @router.get("/laps/deals/{deal_id}", response_class=HTMLResponse)
 def deal_page(deal_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     deal = get_or_404(db, LapsDeal, deal_id)
     return render(request, "laps_deal.html", {
         "user": user, "section": "laps", "deal": deal, "brands": laps.BRANDS, "labels": laps.LABELS,
         "pipeline": laps.PIPELINE, "moves": MOVES, "gbp": gbp, "furthest": laps.furthest(deal),
+        "origin": origin_of(deal),
         "value": "" if deal.value_pence is None else f"{deal.value_pence / 100:.2f}".removesuffix(".00")})
 
 
