@@ -1,0 +1,104 @@
+{% extends "app_base.html" %}
+{% set title = "Property deals | Group HQ" %}
+{% block head %}<link rel="stylesheet" href="/assets/laps.css">{% endblock %}
+{% from "_hub.html" import switch, delta %}
+{% macro price_line(d) %}{% set n = numbers(d) %}{% if n.price is not none %}<p class="acq-price"><span>{{ "Agreed" if d.agreed_pence is not none else "Our offer" if d.offer_pence is not none else "Asking" }}</span><span class="laps-value">{{ short(n.price) }}</span></p>{% endif %}{% endmacro %}
+{% macro card(d) %}
+<article class="laps-card{% if d.next_step_on and d.next_step_on < today and d.stage != 'completed' %} is-overdue{% endif %}">
+  <header><span class="laps-card-id"><a class="laps-card-name" href="/acquisitions/deals/{{ d.id }}">{{ d.title }}</a>
+    <span class="acq-meta">{{ kinds[d.kind] }}{% if d.units %} · {{ d.units }} unit{{ "" if d.units == 1 else "s" }}{% endif %}{% if d.postcode %} · {{ d.postcode }}{% endif %}</span></span></header>
+  {{ price_line(d) }}
+  {% if d.seller_name or d.seller_type != 'unknown' %}<p class="small muted">{{ d.seller_name }}{% if d.seller_name and d.seller_type != 'unknown' %} · {% endif %}{% if d.seller_type != 'unknown' %}{{ sellers[d.seller_type] }}{% endif %}</p>{% endif %}
+  {% if d.stage == 'completed' %}<p class="small muted">Completed {{ d.completed_at|uk("%d %b %Y") }}</p>
+  {% else %}
+  {% set p = progress(d) %}<p class="acq-check"><progress class="hub-meter" max="{{ p.total }}" value="{{ p.done }}" aria-label="Checklist steps done at this stage"></progress>{{ p.done }} of {{ p.total }} steps</p>
+  {% if d.next_step or d.next_step_on %}<p class="laps-card-next"><span>Next</span> {{ d.next_step or "Follow up" }}{% if d.next_step_on %} · {{ d.next_step_on|date("%d %b") }}{% if d.next_step_on < today %} (overdue){% endif %}{% endif %}</p>{% endif %}
+  {% if d.target_completion and d.stage in ('agreed', 'legals', 'exchanged') %}<p class="small muted">Aiming to complete {{ d.target_completion|date("%d %b %Y") }}</p>{% endif %}
+  {% set next_stage = pipeline[pipeline.index(d.stage) + 1] %}
+  <div class="laps-card-actions">
+    <form method="post" action="/acquisitions/deals/{{ d.id }}/stage"><input type="hidden" name="back" value="board"><input type="hidden" name="to" value="{{ next_stage }}">
+      {% if next_stage in price_on_move %}{% set known = d[price_on_move[next_stage]] %}<label class="laps-sale-value"><span>{{ "Offer £" if next_stage == 'offer' else "Agreed price £" }}</span><input name="price" inputmode="decimal" value="{{ '%.0f'|format(known / 100) if known is not none else '' }}" aria-label="{{ 'Offer' if next_stage == 'offer' else 'Agreed price' }} in pounds for {{ d.title }}"></label>{% endif %}
+      <button class="btn btn-primary btn-sm">{{ moves[next_stage] }}</button></form>
+    <a class="btn btn-ghost btn-sm" href="/acquisitions/deals/{{ d.id }}">Open</a>
+  </div>
+  {% endif %}
+</article>
+{% endmacro %}
+{% block content %}
+<section class="hub-hero">
+  <div class="hub-top"><div><span class="eyebrow">Buying</span><h1>Property deals</h1>
+    <p>Every property, portfolio and site we are looking at, from the seller's first message to completion. Each stage has its own checklist.</p></div>
+    {{ switch('acquisitions') }}</div>
+  <div class="hub-score" aria-label="This month">
+    {% for stage, label in (("lead", "New leads"), ("offer", "Offers made"), ("agreed", "Offers accepted"), ("completed", "Completed")) %}
+    <div class="hub-tile">
+      <span class="hub-tile-head"><span>{{ label }}<small>this month</small></span></span>
+      <strong>{{ month[stage] }}</strong>
+      {{ delta(month[stage], last_month[stage], "last month") }}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<div class="two-col">
+  <section class="panel">
+    <div class="panel-head"><h2>Where the deals are</h2><span class="small muted">{{ open_count }} open · {{ short(open_pence) or "£0" }} at best known prices</span></div>
+    <div class="acq-pipe" role="list">
+      {% for t in totals %}
+      <div class="acq-pipe-row" role="listitem"><span>{{ loop.index }}. {{ labels[t.stage] }}</span>
+        <div class="acq-pipe-track"><span class="acq-pipe-bar{% if not t.count %} is-empty{% endif %}" style="--w:{{ (t.count / most * 100 * 0.7)|round(1) }}" tabindex="0" data-tip="{{ labels[t.stage] }}: {{ t.count }} deal{{ '' if t.count == 1 else 's' }}, {{ gbp(t.pence) or '£0' }}"></span>
+          <span class="acq-pipe-value"><b>{{ t.count }}</b>{% if t.pence %} · {{ short(t.pence) }}{% endif %}</span></div></div>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2>Completed in {{ year }}</h2></div>
+    <div class="hub-money"><strong>{{ completed_year.count }}</strong><span>purchase{{ "" if completed_year.count == 1 else "s" }} completed{% if completed_year.pence %} · {{ gbp(completed_year.pence) }} paid in total{% endif %}</span></div>
+    <p class="small muted">A deal usually starts as a message. On an Inbox conversation, use "Start a property deal" and the person's name and channel are filled in for you.</p>
+    <p><a class="btn btn-ghost btn-sm" href="/inbox">Open the Inbox</a></p>
+  </section>
+</div>
+
+<section class="mt-2" aria-label="Board">
+  <div class="panel-head"><h2 class="laps-h2">The board</h2></div>
+  <details class="panel laps-add" id="add"{% if prefill or (flash and flash_kind == 'err') %} open{% endif %}>
+    <summary class="btn btn-primary">Add a property deal</summary>
+    <form method="post" action="/acquisitions/deals" class="form-grid mt-2">
+      <h3>The property</h3>
+      <div class="field"><label for="title">Address or working name</label><input id="title" name="title" required maxlength="200" placeholder="12 Sample Street, or Smith portfolio"></div>
+      <div class="field"><label for="postcode">Postcode</label><input id="postcode" name="postcode" maxlength="10"></div>
+      <div class="field"><label for="kind">Type</label><select id="kind" name="kind">{% for key, name in kinds.items() %}<option value="{{ key }}"{% if key == 'other' %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="units">Properties or units</label><input id="units" name="units" inputmode="numeric" placeholder="1"></div>
+      <div class="field"><label for="asking">Asking price (£)</label><input id="asking" name="asking" inputmode="decimal"></div>
+      <div class="field"><label for="plan">Our plan</label><select id="plan" name="plan">{% for key, name in plans.items() %}<option value="{{ key }}">{{ name }}</option>{% endfor %}</select></div>
+      <h3>The seller</h3>
+      <div class="field"><label for="seller_name">Seller's name</label><input id="seller_name" name="seller_name" maxlength="200" value="{{ prefill.seller_name or '' }}"></div>
+      <div class="field"><label for="seller_contact">Phone or email</label><input id="seller_contact" name="seller_contact" maxlength="200"></div>
+      <div class="field"><label for="seller_type">Who they are</label><select id="seller_type" name="seller_type">{% for key, name in sellers.items() %}<option value="{{ key }}">{{ name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="source">Where the lead came from</label><input id="source" name="source" maxlength="100" placeholder="WhatsApp, LinkedIn, agent, letter" value="{{ prefill.source or '' }}"></div>
+      <div class="field full"><label for="situation">Why they are selling</label><input id="situation" name="situation" maxlength="300" placeholder="Retiring, selling the whole portfolio within six months"></div>
+      <h3>What happens next</h3>
+      <div class="field"><label for="next_step">Next step</label><input id="next_step" name="next_step" maxlength="200" placeholder="Call to get the addresses"></div>
+      <div class="field"><label for="next_step_on">Next step date</label><input id="next_step_on" name="next_step_on" type="date"></div>
+      <div class="field"><label for="stage">Stage now</label><select id="stage" name="stage">{% for stage in pipeline %}<option value="{{ stage }}">{{ labels[stage] }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="arrived">Date the lead came in</label><input id="arrived" name="arrived" type="date" max="{{ today.isoformat() }}"><span class="hint">Leave blank for today.</span></div>
+      <div class="field full"><label for="notes">Notes</label><textarea id="notes" name="notes" maxlength="5000"></textarea></div>
+      <div class="form-actions full"><button class="btn btn-primary">Add to board</button></div>
+    </form>
+  </details>
+  <div class="acq-board" tabindex="0" aria-label="Deals by stage; scroll sideways for later stages">
+    {% for stage in pipeline %}
+    <section class="laps-column{% if stage == 'completed' %} is-done{% endif %}" aria-label="{{ labels[stage] }}">
+      <div class="laps-column-head"><h3><span class="acq-step" aria-hidden="true">{{ loop.index }}</span>{{ labels[stage] }} <span class="laps-count">{{ columns[stage]|length }}</span></h3>
+        {% if stage == 'completed' %}<span class="laps-column-total">last {{ completed_days }} days</span>{% endif %}</div>
+      {% for d in columns[stage] %}{{ card(d) }}{% else %}<p class="laps-empty">Nothing here.</p>{% endfor %}
+    </section>
+    {% endfor %}
+  </div>
+  {% if lost_total %}<details class="panel mt-2"><summary>Lost or withdrawn ({{ lost_total }})</summary>
+    <div class="table-scroll"><table class="data"><thead><tr><th>Deal</th><th>Reason</th><th>Lost</th><th></th></tr></thead><tbody>
+    {% for d in lost %}<tr><td><a href="/acquisitions/deals/{{ d.id }}">{{ d.title }}</a></td><td>{{ d.lost_reason }}</td><td class="nowrap">{{ d.lost_at|uk("%d %b %Y") }}</td>
+      <td class="row-actions"><form method="post" action="/acquisitions/deals/{{ d.id }}/stage"><input type="hidden" name="back" value="board"><input type="hidden" name="to" value="reopen"><button class="btn btn-ghost btn-sm">Reopen</button></form></td></tr>{% endfor %}
+    </tbody></table></div>{% if lost_total > lost|length %}<p class="small muted">Showing the latest {{ lost|length }}.</p>{% endif %}</details>{% endif %}
+</section>
+{% endblock %}
