@@ -118,8 +118,8 @@ def inbox(request: Request, background_tasks: BackgroundTasks, db: Session = Dep
         raise HTTPException(400, "Choose a valid page.") from None
     start = (page - 1) * 50
     ctx.update(threads=visible[start:start + 50], triage_filter=triage_filter, triage_filters=inbox_scanner.FILTERS,
-               older_page="/inbox?" + str(request.query_params.merge({"page": page + 1})) if start + 50 < len(visible) else None,
-               newer_page="/inbox?" + str(request.query_params.merge({"page": page - 1})) if page > 1 else None,
+               older_page="/inbox?" + request.url.include_query_params(page=page + 1).query if start + 50 < len(visible) else None,
+               newer_page="/inbox?" + request.url.include_query_params(page=page - 1).query if page > 1 else None,
                triage_enabled=inbox_scanner.enabled(db, user), claude_configured=inbox_claude.configured(),
                triage_owner=user.email.lower() == service.config.GHQ_PERSONAL_INBOX_OWNER_EMAIL)
     value = request.query_params.get("thread")

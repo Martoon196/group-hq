@@ -41,6 +41,21 @@ def test_local_snapshot_exposes_imported_metadata_beyond_100_without_per_thread_
     assert by_id["import-1"]["owner_choice"] is False
 
 
+def test_owner_can_page_a_large_inbox_and_keep_account_filter(admin_client, db, personal_account):
+    from html import unescape
+    import re
+    user, account, _ = personal_account
+    db.execute(insert(InboxThread), [imported(account, user, "page-" + str(i)) for i in range(55)])
+    db.commit()
+    page_one = admin_client.get("/inbox", params={"account": account.key})
+    assert page_one.status_code == 200
+    next_link = unescape(re.search(r'<a href="([^"]+)">Older conversations</a>', page_one.text).group(1))
+    assert "account=" + account.key in next_link and "page=2" in next_link
+    page_two = admin_client.get(next_link)
+    assert page_two.status_code == 200 and "Newer conversations" in page_two.text
+    assert page_two.text.count('class="inbox-thread') == 6
+
+
 def test_batched_default_choices_preserve_identity_bound_crm_brands(db, personal_account):
     user, account, _ = personal_account
     digest = hashlib.sha256(b"durham-thread").hexdigest()
