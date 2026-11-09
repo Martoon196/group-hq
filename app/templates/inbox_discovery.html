@@ -1,6 +1,12 @@
 {% extends "app_base.html" %}
 {% block content %}
 <div class="page-head"><div><p class="eyebrow">{{ account.label }}</p><h1>Choose conversations</h1><p>Find the chats you want in Growth HQ. Personal chats can stay personal.</p></div><a class="btn btn-secondary" href="/inbox">Back to inbox</a></div>
+<section class="card" style="padding:1.25rem;margin-bottom:1.25rem"><h2>Sync all available private chats</h2>
+<p>Include incoming and personal one-to-one conversations in your private inbox, without a search phrase. Your connector checks each person's identity before importing and works through available chats in batches. Older, unloaded, group or unverified chats may be missing. This does not add people to a CRM or a marketing list.</p>
+<form method="post" action="/inbox/discover/sync-all"><input type="hidden" name="account_key" value="{{ account.key }}">
+{% if registry.sync_all %}<p><strong>Automatic discovery is on.</strong> Your previous named selections are kept for when you turn this off.</p><button class="btn btn-secondary">Turn off automatic discovery</button>
+{% else %}<input type="hidden" name="sync_all" value="true"><label style="display:block;margin:1rem 0"><input type="checkbox" name="acknowledge" value="true" required> I want my available private one-to-one chats, including personal chats, synced to my private Growth HQ inbox.</label><button class="btn btn-primary">Sync all available chats</button>{% endif %}
+</form></section>
 <form method="post" action="/inbox/discover/search" class="card"><input type="hidden" name="account_key" value="{{ account.key }}">
 <label>Search message contents <input name="query" required minlength="2" maxlength="100" placeholder="Durham or keypropertiesuk.co.uk/app"></label><button class="btn btn-primary">Find conversations</button></form>
 {% if registry.request and not registry.request.done %}<p>Search pending. Keep your desktop connector running, then refresh this page.</p>{% endif %}
@@ -12,5 +18,5 @@
 {% if registry.coverage.matches %}<ul>{% for item in registry.coverage.matches %}<li>{{ item.name }} · {{ item.status }}</li>{% endfor %}</ul>{% endif %}{% endif %}
 <form method="post" action="/inbox/discover/select" class="card"><input type="hidden" name="account_key" value="{{ account.key }}">
 {% for c in registry.candidates %}<label class="inbox-checkbox" style="display:block;padding:0.6rem"><input type="checkbox" name="threads" value="{{ c.threadId }}"{% if c.selected %} checked{% endif %}{% if c.reason or not c.participantId %} disabled{% endif %}> <strong>{{ c.name }}</strong>{% if c.reason %} — {{ c.reason }}{% elif not c.participantId %} — Identity still being checked{% elif c.textOnly %} — Text only; attachments remain in Messenger{% endif %}</label>{% else %}<p>No conversations discovered yet. Search above while the connector is running.</p>{% endfor %}
-<button class="btn btn-primary">Save selected conversations</button><p>This only selects inbox syncing. Add CRM contacts and business associations separately while chatting.</p></form>
+<button class="btn btn-primary">Save selected conversations</button><p>{% if registry.sync_all %}Automatic discovery also includes other verified conversations. These named selections will apply when you turn automatic discovery off. {% endif %}This only selects inbox syncing. Add CRM contacts and business associations separately while chatting.</p></form>
 {% endblock %}

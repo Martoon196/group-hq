@@ -19,10 +19,16 @@
 {% block content %}
 <div class="page-head"><div><p class="eyebrow">Growth HQ</p><h1>Inbox</h1>
 <p>Personal and business conversations in one place. Replies use the original account and channel.</p></div>
-<a class="btn btn-secondary" href="/crm/channels/whatsapp/keywords">WhatsApp keywords</a></div>
+<a class="btn btn-secondary" href="/inbox/automations">Reply rules &amp; handoff</a></div>
+<p><a href="/inbox/comments">Public LinkedIn comments</a> · <a href="/crm/channels/whatsapp/keywords">WhatsApp group keywords</a></p>
 <p><a class="btn btn-primary" href="/inbox/channels">Inbox connections</a> <a class="btn btn-secondary" href="/inbox/connect">Connect personal Messenger &amp; LinkedIn</a></p>
 {% if setup_error %}<div class="flash flash-err">{{ setup_error }}</div>{% endif %}
+{% if triage_owner %}<form method="post" action="/inbox/scan" class="card scan-control">
+  <div><strong>Inbox triage</strong><p>{{ 'Scanning recent messages on connected accounts.' if triage_enabled else 'Scan connected conversations for enquiries, personal chats and sales pitches.' }} {{ 'Claude can suggest replies for your review.' if claude_configured else 'Using the local classifier.' }}</p></div>
+  <input type="hidden" name="enabled" value="{{ 'false' if triage_enabled else 'true' }}"><button class="btn btn-secondary">{{ 'Pause scanning' if triage_enabled else 'Start scanning' }}</button>
+</form>{% endif %}
 <form class="inbox-filters card" method="get" action="/inbox">
+  <label>Show <select name="triage"><option value="">All inbox labels</option>{% for key,name in triage_filters|default({})|items %}<option value="{{ key }}"{% if triage_filter == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
   <label>Conversation type <select name="kind"><option value="">All conversations</option>{% for key,name in kinds.items() %}<option value="{{ key }}"{% if kind_filter == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
   <label>Business <select name="brand"><option value="">All businesses</option>{% for key,name in brands.items() %}
     <option value="{{ key }}"{% if brand_filter == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
@@ -38,13 +44,17 @@
 <p>Your existing email, SMS and WhatsApp workspaces continue to work. Personal Messenger and LinkedIn need their own account connection.</p>
 <a class="btn btn-primary" href="/crm">Open your workspaces</a></div>{% endif %}
 {% for result in results %}{% if result.error or result.has_more %}<p class="inbox-notice"><strong>{{ result.account.label }}:</strong>
-{{ result.error or 'Showing the latest 100 conversations; this is not the whole inbox.' }}</p>{% endif %}{% endfor %}
+{{ result.error or ('Showing the latest 2,000 imported conversations.' if result.account.provider == 'local' else 'More conversations are available in the original inbox.') }}</p>{% endif %}{% endfor %}
 <div class="inbox-layout">
   <section class="inbox-list card" aria-label="Conversations">
     <h2>Conversations</h2>
+    {% if older_page or newer_page %}<nav aria-label="Conversation pages">{% if newer_page %}<a href="{{ newer_page }}">Newer conversations</a>{% endif %} {% if older_page %}<a href="{{ older_page }}">Older conversations</a>{% endif %}</nav>{% endif %}
     {% for t in threads %}<a class="inbox-thread{% if thread_ticket is defined and thread_ticket == t.ticket %} is-active{% endif %}"
         href="/inbox?account={{ t.account.key|urlencode }}&amp;thread={{ t.ticket|urlencode }}">
       <strong>{{ t.name }}</strong><span>{{ t.account.label }} · {{ channels[t.account.channel] }}</span>
+      {% if t.category %}<span class="triage-label triage-{{ t.category }}">{{ triage_filters[t.category] }}</span>{% endif %}
+      {% if t.triage.intent %}<small>{{ t.triage.intent }}{% for b in t.triage.brands %} · {{ brands[b] }}{% endfor %}</small>{% endif %}
+      {% if t.needs_owner %}<small>Needs me</small>{% endif %}
       <p>{{ t.preview[:180] }}</p><small>{{ kinds[t.organisation.kind] }}{% for b in t.organisation.brands %} · {{ brands[b] }}{% endfor %} · {{ t.updated_at }}</small></a>
     {% else %}<p>{% if results %}No conversations were returned for this selection. Check any connection notices above.{% else %}Your conversations will appear here when connected.{% endif %}</p>{% endfor %}
   </section>
@@ -52,6 +62,11 @@
   {% if account is defined %}
     <h2>{{ conversation_name }}</h2><p class="inbox-channel">Private message · {{ channels[account.channel] }} · {{ account.label }}</p>
     {% if thread_error %}<div class="flash flash-err">{{ thread_error }}</div>{% endif %}
+    {% if triage and triage.kind %}<aside class="card scan-detail"><strong>{{ triage.source }} · {{ triage_labels[triage.kind] }}</strong>
+    <p>{{ triage.intent }}{% for b in triage.brands %} · {{ brands[b] }}{% endfor %}</p>
+    {% if triage.needs_owner %}<strong>Needs me</strong> · {% endif %}{{ triage.reason }}{% if not triage_current %}<p>Based on an earlier message window.</p>{% endif %}
+    </aside>{% endif %}
+    {% if handoff is defined and account.can_reply and account.configured %}{% include 'inbox_handoff_controls.html' %}{% endif %}
     {% if message_window_limited %}<p>This is a partial text history. Older messages or unsupported attachments remain in the original app.</p>{% endif %}
     {% if next_cursor %}<a class="btn btn-secondary" href="/inbox?account={{ account.key|urlencode }}&amp;thread={{ thread_ticket|urlencode }}&amp;cursor={{ next_cursor|urlencode }}">Older messages</a>{% endif %}
     <div class="inbox-messages">{% for m in messages %}<article class="inbox-message {{ m.direction }}">
@@ -61,9 +76,11 @@
     <form method="post" action="/inbox/reply" class="inbox-compose">
       <input type="hidden" name="thread_ticket" value="{{ thread_ticket }}"><input type="hidden" name="request_id" value="{{ request_id }}">
       <label for="inbox-reply">Reply to {{ conversation_name }} on {{ channels[account.channel] }}</label>
-      <textarea id="inbox-reply" name="message" rows="4" required maxlength="10000">{{ draft or '' }}</textarea>
+      {% set can_suggest = triage_current and triage and triage.draft and organisation.kind in ['business','unclassified'] %}
+      {% if can_suggest and not draft %}<small>Suggested by {{ triage.source }}. Edit before sending.</small>{% endif %}
+      <textarea id="inbox-reply" name="message" rows="4" required maxlength="10000">{{ draft if draft is defined else (triage.draft if can_suggest else '') }}</textarea>
       <button type="submit" class="btn btn-primary">Send reply</button>
-    </form>{% else %}<p>Replying needs a working account connection with send access.</p>{% endif %}
+    </form>{% elif account.provider == 'r72_whatsapp' %}<p>Showing received WhatsApp messages. Replies from Growth HQ are unavailable for this number.</p>{% else %}<p>Replying needs a working account connection with send access.</p>{% endif %}
     {% for r in reply_receipts %}<p class="inbox-notice">{{ r.created_at|uk }} · {% if r.state == 'queued' %}Queued for your personal connector.
       {% elif r.state == 'accepted' %}Channel accepted the reply.
       {% elif r.state == 'bridge_accepted' %}Connector accepted the reply; delivery to the original app is not confirmed.
@@ -81,7 +98,9 @@
     </form>
     {% for link in crm_links %}<p><a class="btn btn-secondary" href="/inbox/crm/contact?brand={{ link.brand|urlencode }}&amp;contact={{ link.contact_id|urlencode }}">Open {{ brands[link.brand] }} contact</a></p>
       {% if link.last_error %}<p>{{ link.last_error }}</p>{% endif %}{% endfor %}
-    {% if crm_configured %}
+    {% if account.provider == 'r72_whatsapp' %}
+      {% if canonical_contact %}<a class="btn btn-secondary" href="/inbox/crm/contact?brand=mhp&amp;contact={{ canonical_contact|urlencode }}">Open MHP CRM contact</a>{% endif %}
+    {% elif crm_configured %}
       <form method="post" action="/inbox/crm"><input type="hidden" name="thread_ticket" value="{{ thread_ticket }}">
       {{ crm_business_select() }}
       <label>Contact name <input name="display_name" value="{{ conversation_name }}" required maxlength="200"></label>
@@ -95,5 +114,5 @@
   {% else %}<h2>Choose a conversation</h2><p>Your reply will use that conversation’s original account and channel.</p>{% endif %}
   </section>
 </div>
-<p class="inbox-notice">Private messages and public comments are separate. TikTok, YouTube and public comment feeds have not been connected to this screen yet. X’s encrypted chats are not available through its legacy messaging API.</p>
+<p class="inbox-notice">For LinkedIn company post replies, open <a href="/inbox/comments">public comments</a>. Inbox connections shows which accounts can receive private messages.</p>
 {% endblock %}

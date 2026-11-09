@@ -7,7 +7,7 @@ from ..models import AppSetting, utcnow
 from .inbox_providers import BRANDS
 from .audit import audit
 
-KINDS = {"unclassified": "Unclassified", "personal": "Personal", "business": "Business"}
+KINDS = {"unclassified": "Unclassified", "personal": "Friends & personal", "pitch": "Selling to me", "business": "Business for me"}
 
 
 def key(user_id, account, thread_id):
@@ -30,6 +30,8 @@ def save(db, user, account, thread_id, kind, brands, sync_brands, note=""):
     if len(note) > 2000:
         raise HTTPException(400, "Keep the private note within 2,000 characters.")
     value = {"kind": kind, "brands": brands, "sync_brands": sync_brands, "note": note.strip()}
+    from .inbox_automations import lock_account
+    lock_account(db, account)
     setting_key = key(user.id, account, thread_id)
     db.execute(insert(AppSetting).values(key=setting_key, value=value, updated_by=user.email, updated_at=utcnow())
         .on_conflict_do_update(index_elements=[AppSetting.key], set_={"value": value, "updated_by": user.email, "updated_at": utcnow()}))

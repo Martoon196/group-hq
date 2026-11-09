@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import User
-from ..services import inbox as service, inbox_crm, inbox_organisation
+from ..services import inbox as service, inbox_crm, inbox_organisation, inbox_scanner, inbox_claude, inbox_automations
 from ..services.inbox_providers import InboxError, client
 from ..templating import go, render
 
@@ -29,7 +29,7 @@ def channel_brand(account_key: str = Form(...), brand: str = Form(...), db: Sess
     from ..models import AppSetting, utcnow
     from ..services.audit import audit
     account = next((a for a in service.accounts(db) if a.key == account_key and not a.owner_email), None)
-    if account is None or brand not in service.BRANDS:
+    if account is None or account.provider == "r72_whatsapp" or brand not in service.BRANDS:
         raise HTTPException(400, "Choose a business account and valid brand.")
     key = service.account_brand_key(account)
     db.execute(insert(AppSetting).values(key=key, value={"brand": brand}, updated_by=user.email, updated_at=utcnow())
@@ -48,13 +48,23 @@ def thread_context(db, user, value, cursor=None):
             messages, next_cursor = cached.messages, None
             if (service.utcnow() - cached.seen_at).total_seconds() > 120:
                 error = "Your personal connector is offline or catching up. These are the last synced messages."
+        elif account.provider == "r72_whatsapp":
+            from ..services.inbox_r72_whatsapp import WhatsAppReader
+            messages, next_cursor = WhatsAppReader(account, user.email).messages(bound["thread"], bound["participant"], cursor)
         else:
             messages, next_cursor = client(account).messages(bound["thread"], cursor)
     except InboxError as exc:
         error = service.MESSAGES.get(exc.code, "Connection unavailable.")
     linked = inbox_crm.links(db, account, bound["thread"])
-    return {"account": account, "conversation_name": bound["name"], "thread_ticket": value,
+    from ..models import AppSetting
+    analysis = db.get(AppSetting, inbox_scanner.result_key(user.id, account, bound["thread"]))
+    triage = analysis.value if analysis and not cursor else {}
+    current = bool(triage and triage.get("message_stamp") == inbox_scanner.message_stamp(messages))
+    return {"triage": triage, "triage_current": current, "triage_labels": inbox_scanner.LABELS,
+            "handoff": inbox_automations.handoff_state(db, user.id, account, bound["thread"]),
+            "account": account, "conversation_name": bound["name"], "thread_ticket": value,
             "messages": messages, "next_cursor": next_cursor, "thread_error": error,
+            "canonical_contact": bound.get("participant") if account.provider == "r72_whatsapp" and not error else None,
             "message_window_limited": account.provider == "local" and cached.has_more,
             "crm_links": linked, "organisation": inbox_organisation.choices(db, user.id, account, bound["thread"], linked),
             "kinds": inbox_organisation.KINDS, "crm_configured": bool(service.config.R72_GROUP_HQ_INBOX_SECRET),
@@ -70,19 +80,69 @@ def inbox(request: Request, background_tasks: BackgroundTasks, db: Session = Dep
     ctx = {"user": user, "section": "inbox", "brands": service.BRANDS, "channels": service.CHANNELS,
            "selected": selected, "brand_filter": brand, "channel_filter": channel,
            "accounts": [], "results": [], "threads": [], "setup_error": None, "kind_filter": kind, "kinds": inbox_organisation.KINDS}
+    if brand and brand not in service.BRANDS:
+        raise HTTPException(400, "Choose a valid business.")
     try:
-        ctx["accounts"], ctx["results"], ctx["threads"] = service.snapshot(user.id, selected, brand, channel, db=db, user_email=user.email, kind=kind)
+        ctx["accounts"], ctx["results"], ctx["threads"] = service.snapshot(user.id, selected, channel=channel, db=db, user_email=user.email, kind=kind)
     except InboxError:
         ctx["setup_error"] = "Inbox account configuration needs checking. Existing channels remain available in their workspaces."
+    triage_filter = request.query_params.get("triage", "")
+    if triage_filter and triage_filter not in inbox_scanner.FILTERS:
+        raise HTTPException(400, "Choose an inbox triage filter.")
+    history = inbox_scanner.read_results(db, user.id, ctx["threads"])
+    from sqlalchemy import select
+    from ..models import AppSetting
+    hold_keys = {inbox_automations._hold_key(user.id, t["account"], t["id"]) for t in ctx["threads"]}
+    holds = {row.key for row in db.scalars(select(AppSetting).where(AppSetting.key.in_(hold_keys))) if row.value.get("held")} if hold_keys else set()
+    visible = []
+    for thread in ctx["threads"]:
+        result = history.get(inbox_scanner.result_key(user.id, thread["account"], thread["id"]), {})
+        thread["triage"] = result
+        choice = thread["organisation"]
+        manual = thread.get("owner_choice", False)
+        thread["category"] = inbox_scanner.effective_kind(result, choice, manual) or "unscanned"
+        related = set(choice["brands"])
+        if not manual and thread["category"] == "business":
+            related.update(result.get("brands", []))
+        if not manual and not thread["account"].owner_email:
+            related.add(thread["account"].brand)
+        if brand and (thread["category"] in ("pitch", "personal") or brand not in related):
+            continue
+        thread["needs_owner"] = result.get("needs_owner") or inbox_automations._hold_key(user.id, thread["account"], thread["id"]) in holds
+        if (not triage_filter or triage_filter == thread["category"] or
+                (triage_filter == "handoff" and thread["needs_owner"])):
+            visible.append(thread)
+    try:
+        page = max(1, min(int(request.query_params.get("page", "1")), max(1, (len(visible) + 49) // 50)))
+    except ValueError:
+        raise HTTPException(400, "Choose a valid page.") from None
+    start = (page - 1) * 50
+    ctx.update(threads=visible[start:start + 50], triage_filter=triage_filter, triage_filters=inbox_scanner.FILTERS,
+               older_page="/inbox?" + str(request.query_params.merge({"page": page + 1})) if start + 50 < len(visible) else None,
+               newer_page="/inbox?" + str(request.query_params.merge({"page": page - 1})) if page > 1 else None,
+               triage_enabled=inbox_scanner.enabled(db, user), claude_configured=inbox_claude.configured(),
+               triage_owner=user.email.lower() == service.config.GHQ_PERSONAL_INBOX_OWNER_EMAIL)
     value = request.query_params.get("thread")
     if value:
         ctx.update(thread_context(db, user, value, request.query_params.get("cursor")))
-        if ctx['account'].provider != 'local' and not ctx['thread_error'] and ctx['crm_links']:
+        if ctx['account'].provider not in ('local', 'r72_whatsapp') and not ctx['thread_error'] and ctx['crm_links']:
             account, bound = service.resolve(value, user.id, user.email, db)
             background_tasks.add_task(inbox_crm.sync_official_window, account.key, account.binding, bound['thread'], user.id, ctx['messages'])
     response = render(request, "inbox.html", ctx)
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@router.post("/inbox/scan", dependencies=[Depends(check_origin)])
+def scan(enabled: bool = Form(...), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    if user.email.lower() != service.config.GHQ_PERSONAL_INBOX_OWNER_EMAIL:
+        raise HTTPException(403, "Only the personal inbox owner can change scanning.")
+    from ..services.audit import audit
+    key = inbox_scanner.setting_key(user.id)
+    inbox_scanner.save_value(db, key, {"enabled": enabled}, user.email)
+    audit(db, user, "inbox.scan.settings", key, after={"enabled": enabled})
+    db.commit()
+    return go("/inbox", ok="Scanning connected conversations." if enabled else "Inbox scanning paused.")
 
 
 @router.post(service.PAGE + "/reply", dependencies=[Depends(check_origin)])

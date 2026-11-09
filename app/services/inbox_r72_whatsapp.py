@@ -1,0 +1,63 @@
+"""Read signed, canonical MHP WhatsApp projections as the current Growth HQ actor."""
+import uuid
+from types import SimpleNamespace
+from .inbox_providers import Account, InboxError, clean, rows
+from .. import config
+
+
+def account():
+    raw = config.GHQ_MHP_WHATSAPP_INBOX_ID
+    try:
+        if not raw or str(uuid.UUID(raw)) != raw:
+            return None
+    except ValueError:
+        return None
+    return Account(key="mhp-whatsapp", brand="mhp", channel="whatsapp", label="Martin Howard Property · WhatsApp",
+                   provider="r72_whatsapp", account_id=raw, token=config.R72_GROUP_HQ_INBOX_SECRET)
+
+
+def native_id(value):
+    try:
+        if not isinstance(value, str) or str(uuid.UUID(value)) != value:
+            raise ValueError()
+    except ValueError:
+        raise InboxError("invalid_provider_response") from None
+    return value
+
+
+class WhatsAppReader:
+    def __init__(self, connection, actor_email):
+        self.connection = connection
+        self.actor = SimpleNamespace(email=actor_email)
+
+    def read(self, action, **args):
+        from .inbox_crm import command, CrmUnavailable
+        try:
+            result = command(self.actor, "mhp", action, accountId=self.connection.account_id, **args)
+        except CrmUnavailable:
+            raise InboxError("provider_rejected") from None
+        if result.get("brand") != "mhp" or result.get("accountId") != self.connection.account_id:
+            raise InboxError("unbound_target")
+        return result
+
+    def conversations(self):
+        result = self.read("whatsappThreads")
+        if not isinstance(result.get("hasMore"), bool):
+            raise InboxError("invalid_provider_response")
+        return [{"id": native_id(t.get("id")), "participant_id": native_id(t.get("participantId")),
+                 "name": clean(t.get("name"), 500), "preview": clean(t.get("preview"), 500),
+                 "updated_at": clean(t.get("updatedAt"), 100), "unread": None}
+                for t in rows(result, "threads")], result["hasMore"]
+
+    def messages(self, thread_id, participant_id, cursor=None):
+        result = self.read("whatsappMessages", threadId=native_id(thread_id), cursor=native_id(cursor) if cursor else None)
+        if result.get("threadId") != thread_id or "nextCursor" not in result:
+            raise InboxError("unbound_target")
+        messages = []
+        for m in rows(result, "messages"):
+            if native_id(m.get("participantId")) != participant_id:
+                raise InboxError("unbound_target")
+            messages.append({"id": native_id(m.get("id")), "direction": "incoming", "body": clean(m.get("body"), 4096),
+                             "name": clean(m.get("name"), 500), "occurred_at": clean(m.get("occurredAt"), 100)})
+        cursor = result["nextCursor"]
+        return list(reversed(messages)), native_id(cursor) if cursor is not None else None

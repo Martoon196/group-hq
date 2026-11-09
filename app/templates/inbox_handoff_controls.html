@@ -1,0 +1,9 @@
+{% if thread_ticket and handoff is defined %}
+<section aria-label="Conversation handling">
+{% if handoff.held %}<strong>Owner handling this conversation</strong>{% if handoff.reason %}<p>{{ handoff.reason }}</p>{% endif %}
+{% else %}<p>Enabled account rules can handle new business messages.</p>{% endif %}
+<form method="post" action="/inbox/automations/handoff">
+<input type="hidden" name="thread_ticket" value="{{ thread_ticket }}">
+<button class="btn btn-secondary" name="action" value="{{ 'resume' if handoff.held else 'takeover' }}">{{ 'Resume rules for new messages' if handoff.held else 'Take over this conversation' }}</button>
+</form></section>
+{% endif %}

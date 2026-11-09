@@ -34,7 +34,7 @@ def discovery_search(account_key: str = Form(...), query: str = Form(...), db: S
     db.execute(text("SELECT pg_advisory_xact_lock(741935835)"))
     saved = inbox_discovery.read(db, user.id, account)
     saved["request"] = {"id": str(uuid.uuid4()), "query": query.strip(), "done": False,
-                        "cached": inbox_discovery.cached_matches(db, user.id, account, saved["candidates"], query)}
+                        "cached": inbox_discovery.cached_matches(db, user.id, account, saved["candidates"], query, saved.get("sync_all") is True)}
     saved["coverage"] = None
     inbox_discovery.write(db, user.id, account, saved, user.email)
     return go("/inbox/discover?account=" + account.key, ok="Search requested. Your running connector will search Messenger; refresh this page for results.")
@@ -54,6 +54,24 @@ def discovery_select(account_key: str = Form(...), threads: list[str] = Form([])
             raise HTTPException(400, "A selected conversation still needs its identity or channel support checked.")
     inbox_discovery.write(db, user.id, account, saved, user.email)
     return go("/inbox/discover?account=" + account.key, ok="Conversation selection saved. This creates no CRM contacts or marketing subscriptions.")
+
+
+@router.post("/inbox/discover/sync-all", dependencies=[Depends(check_origin)])
+def discovery_sync_all(account_key: str = Form(...), sync_all: bool = Form(False), acknowledge: bool = Form(False),
+                       db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    account = inbox_discovery.owner_account(db, user, account_key)
+    if sync_all and not acknowledge:
+        raise HTTPException(400, "Confirm that your available private one-to-one chats, including personal chats, may sync to your private Growth HQ inbox.")
+    db.execute(text("SELECT pg_advisory_xact_lock(741935835)"))
+    saved = inbox_discovery.read(db, user.id, account)
+    before = saved.get("sync_all") is True
+    saved["sync_all"] = sync_all
+    audit(db, user, "inbox.discovery.sync_all", "inbox-account:" + account.key,
+          before={"sync_all": before}, after={"sync_all": sync_all})
+    inbox_discovery.write(db, user.id, account, saved, user.email)
+    return go("/inbox/discover?account=" + account.key, ok=(
+        "All available verified one-to-one chats will sync privately while your connector runs. Personal chats stay personal; nothing is added to a CRM."
+        if sync_all else "Automatic discovery is off. Your previous named conversation selections are retained."))
 
 
 def require_personal_owner(user):

@@ -19,11 +19,17 @@ over and erase previously cached history. Full archival pagination is not built.
 `sendOnce`) and reuses Growth HQ's HMAC ingestion, owner access, durable reply
 queue and canonical Relaunch72 CRM. Native and Beeper workers have distinct
 discovery and queue namespaces; default legacy calls remain Beeper-scoped.
-The private allowlist supports at most three explicitly chosen threads.
+The initial private allowlist seeds already named conversations. The owner can
+keep selecting named chats or enable **Sync all available chats** at
+`/inbox/discover`. This includes rendered incoming/personal one-to-one chats,
+checks each participant, and imports in batches without a search phrase. It
+uses a fixed number of reusable browser pages rather than a tab per contact.
+The registry is bounded to 2,000 discovered candidates; unavailable, unverified
+or unsupported chats are excluded. Older/unloaded history may still be missing.
 An optional `textOnly: true` descriptor omits unsupported attachment/edited rows,
 marks that window incomplete and skips an entirely unsupported window without
 overwriting history. Native identities are still checked before filtering.
-No other inbox is imported. The actual configuration and histories stay outside
+No other account's inbox is imported. The actual configuration and histories stay outside
 Git. Additional channels need independent identity/history/send/receipt proof;
 the contract is reusable, not an implementation of every social network.
 
@@ -39,8 +45,9 @@ Install with `npm ci --ignore-scripts`. Set `GHQ_NATIVE_DATA_DIR` to a private
 absolute directory, `GHQ_NATIVE_BROWSER_PATH` to the installed official Edge
 binary, `GHQ_NATIVE_CONFIG` to a private JSON file, and
 `GHQ_INBOX_PERSONAL_SECRET` to the existing authorised local adapter key.
-The JSON contains `ownerUserId` and a `threads` array of one to three objects
-with `threadId`, `participantId`, `name`. Do not commit these values or secrets.
+The JSON contains `ownerUserId` and a `threads` array of existing named objects
+with `threadId`, `participantId`, `name` (an empty array is allowed). New chats
+can be discovered from the dashboard. Do not commit these values or secrets.
 
 Run `node login.cjs`. Open the URL saved in the private directory's
 `connection.json` in Codex. It is a random capability URL bound to 127.0.0.1;

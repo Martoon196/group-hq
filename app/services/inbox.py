@@ -7,15 +7,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import HTTPException
 from itsdangerous import BadData, URLSafeTimedSerializer
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 
 from .. import config
-from ..models import AppSetting, InboxReply, InboxThread, utcnow
+from ..models import AppSetting, InboxCrmLink, InboxReply, InboxThread, utcnow
 from .audit import audit
 from .inbox_providers import BRANDS, CHANNELS, InboxError, client, load_accounts, opaque
 
 PAGE = "/inbox"
+LOCAL_METADATA_LIMIT = 2000
 MESSAGES = {
     "setup_needed": "Connection needs setting up.",
     "sign_in_needed": "Please reconnect this account.",
@@ -36,6 +37,7 @@ def account_brand_key(account):
 
 
 def accounts(db=None):
+    from . import inbox_r72_whatsapp
     result = list(load_accounts(config.GHQ_INBOX_ACCOUNTS, os.environ))
     if db is not None:
         from dataclasses import replace
@@ -48,6 +50,9 @@ def accounts(db=None):
         local = (saved.value if saved else {}).get("accounts", [])
         enabled = [r for r in local if r.get("enabled") is True]
         result.extend(load_accounts(json.dumps(enabled), os.environ))
+    whatsapp = inbox_r72_whatsapp.account()
+    if whatsapp:
+        result.append(whatsapp)
     keys = [a.key for a in result]
     if len(set(keys)) != len(keys):
         raise InboxError("invalid_account_configuration")
@@ -81,7 +86,7 @@ def snapshot(user_id, selected, brand="", channel="", *, db=None, user_email="",
     allowed = tuple(a for a in accounts(db) if not a.owner_email or a.owner_email == user_email.lower())
     if set(selected) - {a.key for a in allowed} or (brand and brand not in BRANDS) or (channel and channel not in CHANNELS):
         raise HTTPException(400, "Unknown inbox filter")
-    from . import inbox_organisation, inbox_crm
+    from . import inbox_organisation
     if kind and kind not in inbox_organisation.KINDS:
         raise HTTPException(400, "Choose a conversation type.")
     chosen = [a for a in allowed if (not selected or a.key in selected)
@@ -94,7 +99,7 @@ def snapshot(user_id, selected, brand="", channel="", *, db=None, user_email="",
                 saved = db.execute(select(InboxThread.thread_id, InboxThread.name, InboxThread.participant_id,
                     InboxThread.preview, InboxThread.provider_updated_at, InboxThread.seen_at).where(InboxThread.account_key == account.key,
                     InboxThread.owner_user_id == user_id, InboxThread.binding_sha256 == account.binding)
-                    .order_by(InboxThread.provider_updated_at.desc()).limit(101)).all()
+                    .order_by(InboxThread.provider_updated_at.desc(), InboxThread.thread_id).limit(LOCAL_METADATA_LIMIT + 1)).all()
                 local[account.key] = [{"id": r.thread_id, "name": r.name, "participant_id": r.participant_id,
                     "preview": r.preview, "updated_at": r.provider_updated_at, "unread": None, "seen_at": r.seen_at} for r in saved]
 
@@ -104,7 +109,10 @@ def snapshot(user_id, selected, brand="", channel="", *, db=None, user_email="",
                 raise InboxError("setup_needed")
             if account.provider == "local":
                 conversations = local.get(account.key, [])
-                conversations, has_more = conversations[:100], len(conversations) > 100
+                conversations, has_more = conversations[:LOCAL_METADATA_LIMIT], len(conversations) > LOCAL_METADATA_LIMIT
+            elif account.provider == "r72_whatsapp":
+                from .inbox_r72_whatsapp import WhatsAppReader
+                conversations, has_more = WhatsAppReader(account, user_email).conversations()
             else:
                 conversations, has_more = client(account).conversations()
             seen, result = set(), []
@@ -119,15 +127,16 @@ def snapshot(user_id, selected, brand="", channel="", *, db=None, user_email="",
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(read, chosen))
+    metadata = conversation_metadata(db, user_id, [t for result in results for t in result["threads"]])
     threads = []
     for result in results:
         for thread in result["threads"]:
-            linked = inbox_crm.links(db, thread["account"], thread["id"]) if db is not None else ()
-            settings = inbox_organisation.choices(db, user_id, thread["account"], thread["id"], linked)
+            settings, owner_choice = metadata[(thread["account"].key, thread["id"])]
             thread["organisation"] = settings
+            thread["owner_choice"] = owner_choice
             if kind and settings["kind"] != kind:
                 continue
-            if brand and settings["kind"] == "personal":
+            if brand and settings["kind"] in ("personal", "pitch"):
                 continue
             if brand and brand not in settings["brands"]:
                 # Official business inboxes retain their connection default;
@@ -137,6 +146,34 @@ def snapshot(user_id, selected, brand="", channel="", *, db=None, user_email="",
             threads.append(thread)
     threads.sort(key=lambda t: t["updated_at"], reverse=True)
     return allowed, results, threads
+
+
+def conversation_metadata(db, user_id, threads):
+    """Batch metadata only. Never fetch message bodies or issue per-chat queries."""
+    from . import inbox_organisation
+    targets = {(t["account"].key, t["id"]): t["account"] for t in threads}
+    keys = {target: inbox_organisation.key(user_id, account, target[1]) for target, account in targets.items()}
+    bindings = {target: (account.key, account.identity, hashlib.sha256(target[1].encode()).hexdigest())
+                for target, account in targets.items()}
+    saved, brands = {}, {}
+    if db is not None:
+        setting_keys, link_keys = list(keys.values()), list(bindings.values())
+        for offset in range(0, len(setting_keys), 500):
+            saved.update({r.key: r.value for r in db.execute(select(AppSetting.key, AppSetting.value)
+                .where(AppSetting.key.in_(setting_keys[offset:offset + 500])))})
+            for row in db.execute(select(InboxCrmLink.account_key, InboxCrmLink.account_identity_sha256,
+                    InboxCrmLink.thread_sha256, InboxCrmLink.brand).where(tuple_(InboxCrmLink.account_key,
+                    InboxCrmLink.account_identity_sha256, InboxCrmLink.thread_sha256).in_(link_keys[offset:offset + 500]))):
+                brands.setdefault((row.account_key, row.account_identity_sha256, row.thread_sha256), set()).add(row.brand)
+    result = {}
+    for target in targets:
+        if keys[target] in saved:
+            result[target] = (saved[keys[target]], True)
+        else:
+            linked = sorted(brands.get(bindings[target], ()))
+            result[target] = ({"kind": "business" if linked else "unclassified", "brands": linked,
+                              "sync_brands": linked, "note": ""}, False)
+    return result
 
 
 def replies(db, account, thread_id):

@@ -24,14 +24,22 @@ from .templating import templates
 async def lifespan(app: FastAPI):
     migrate.upgrade_head()
     seed(quiet=False)
-    yield
+    from .jobs.inbox_automations import polling
+    from .services import inbox_scanner
+    scan_stop = inbox_scanner.start()
+    try:
+        with polling():
+            yield
+    finally:
+        scan_stop.set()
 
 
 app = FastAPI(title="Group HQ", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/assets", StaticFiles(directory=str(config.APP_DIR / "static")), name="assets")
 
 from .routers import (audit, auth, crm, dashboard, franchise, grants, growth, mentee_import, mentees, people,  # noqa: E402  (after templates exist)
-                      programmes, sellers, settings, territories, whatsapp_keywords, inbox, personal_inbox)
+                      programmes, sellers, settings, territories, whatsapp_keywords, inbox, personal_inbox,
+                      inbox_automations, inbox_comments)
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
@@ -39,6 +47,8 @@ app.include_router(crm.router)
 app.include_router(whatsapp_keywords.router)
 app.include_router(inbox.router)
 app.include_router(personal_inbox.router)
+app.include_router(inbox_comments.router)
+app.include_router(inbox_automations.router)
 app.include_router(people.router)
 app.include_router(mentee_import.router)     # before mentees: /mentees/import is not /mentees/{mentee_id}
 app.include_router(mentees.router)

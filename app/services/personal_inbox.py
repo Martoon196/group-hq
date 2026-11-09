@@ -184,16 +184,25 @@ def pending(db, source="beeper"):
 
 
 def begin(db, reply_id, source="beeper"):
-    row = db.scalar(select(InboxReply).where(InboxReply.id == reply_id).with_for_update())
-    if row is None:
+    from . import inbox_automations
+    seen = db.get(InboxReply, reply_id)
+    if seen is None:
         problem("Unknown reply", 404)
-    account, user = enabled_account(db, row.account_key)
+    account, user = enabled_account(db, seen.account_key)
+    automatic = inbox_automations.local_job(db, reply_id)
+    if automatic:
+        inbox_automations.lock_account(db, account)
+    row = db.scalar(select(InboxReply).where(InboxReply.id == reply_id).with_for_update().execution_options(populate_existing=True))
     if connector_for(db, account.key) != source:
         problem("Wrong personal connector", 403)
     if row.user_id != user.id or row.binding_sha256 != account.binding:
         problem("Reply account changed", 409)
     if row.state != "queued":
         return {"state": row.state, "dispatch": False}
+    if automatic and not inbox_automations.local_claim_allowed(db, user, account, row, automatic):
+        row.state, row.reason, row.settled_at = "rejected", "automation_paused", utcnow()
+        db.commit()
+        return {"state": "rejected", "dispatch": False}
     if source == "native-messenger":
         from .inbox_discovery import permits_thread
         cached = inbox.local_thread(db, account, row.thread_id, user.id)

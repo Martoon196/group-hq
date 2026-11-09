@@ -3,14 +3,14 @@ const fs=require('node:fs/promises'),path=require('node:path');
 const {readConversation,normalise}=require('./reader.cjs');
 const {GrowthHqClient}=require('../personal-inbox/client.cjs');
 const {openAuthState}=require('../whatsapp-keywords/socket-auth.cjs');
-const {discover,validateTargets}=require('./discovery.cjs');
+const {discover,validateTargets,AvailableDiscovery}=require('./discovery.cjs');
 const CONNECTOR='native-messenger';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 // Channel-independent boundary: verifyIdentity(), observe(thread), sendOnce(job).
 // Other adapters must advertise their own actual history/receipt capabilities.
 class MessengerAdapter {
-  constructor(context,identity,threads){this.context=context;this.identity=identity;this.threads=threads;this.pages=new Map();this.identityPage=null;}
+  constructor(context,identity,threads){this.context=context;this.identity=identity;this.threads=threads;this.readPage=null;this.identityPage=null;}
   async verifyIdentity(){
     this.identityPage??=await this.context.newPage();
     await this.identityPage.goto('https://www.facebook.com/me/',{waitUntil:'domcontentloaded',timeout:30000});
@@ -21,8 +21,8 @@ class MessengerAdapter {
   }
   target(threadId){const t=this.threads.find(t=>t.threadId===threadId);if(!t)throw Error('thread_not_authorised');return t;}
   async page(threadId){
-    const target=this.target(threadId);let page=this.pages.get(threadId);
-    if(!page||page.isClosed()){page=await this.context.newPage();this.pages.set(threadId,page);}
+    const target=this.target(threadId);let page=this.readPage;
+    if(!page||page.isClosed()){page=await this.context.newPage();this.readPage=page;}
     const expected=`https://www.facebook.com/messages/${target.threadKind==='page'?'':'e2ee/'}t/${target.threadId}`;
     if(page.url().replace(/\/$/,'')!==expected)await page.goto(expected,{waitUntil:'domcontentloaded',timeout:30000});
     // Messenger renders the log before its participant header on reload.
@@ -88,9 +88,23 @@ async function settle(cloud,state){
     await cloud.request(`replies/${id}/settle`,entry.result);entry.state='settled';await state.saveCreds();
   }
 }
+function nextBatch(threads,offset,size=20){
+  if(!Number.isInteger(size)||size<1||size>20)throw Error('invalid_sync_batch');
+  if(!threads.length)return {threads:[],next:0};
+  const start=offset%threads.length,count=Math.min(size,threads.length);
+  return {threads:Array.from({length:count},(_,i)=>threads[(start+i)%threads.length]),next:(start+count)%threads.length};
+}
+async function seedExisting(cloud,identityPacket,threads){
+  const count=Math.max(1,Math.ceil(threads.length/100));
+  for(let batch=0;batch<count;batch++)await cloud.request('candidates',{...identityPacket,
+    candidates:threads.slice(batch*100,(batch+1)*100),seed_existing:batch===count-1,
+    query:'Existing imported conversations',complete:false,
+    note:'Retained existing named conversations. Available-chat discovery is controlled by the owner in Growth HQ.'});
+}
 async function run({context,identity,directory,setStatus,isPaused,secret,threads}){
   validateTargets(threads);
   const adapter=new MessengerAdapter(context,identity,threads),cloud=new GrowthHqClient(secret);
+  const available=new AvailableDiscovery(context);let syncOffset=0;
   const state=await openAuthState(path.join(directory,'journal'),{BufferJSON:{},initAuthCreds:()=>({deliveries:{}})});
   let stopped=false,searching=null;context.on('close',()=>{stopped=true;});
   const statusFile=path.join(directory,'runtime-status.json');
@@ -108,12 +122,15 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
       const identityPacket={connector_id:CONNECTOR,account_key:binding.key,account_id:binding.account_id,user_id:binding.user_id};
       let selection=await cloud.request('selections',identityPacket);
       if(!selection.initialised){
-        await cloud.request('candidates',{...identityPacket,candidates:threads,seed_existing:true,query:'Existing imported conversations',complete:false,
-          note:'Retained the existing imported conversations. Use Find conversations to discover more.'});
+        await seedExisting(cloud,identityPacket,threads);
         selection=await cloud.request('selections',identityPacket);
       }
+      if(selection.sync_all===true&&!searching){
+        const result=await available.scan(selection.threads);
+        if(result){await cloud.request('candidates',{...identityPacket,...result,query:'All available private chats'});
+          selection=await cloud.request('selections',identityPacket);}
+      }else if(selection.sync_all!==true){await available.close();}
       adapter.threads=validateTargets(selection.threads);
-      for(const [id,page] of adapter.pages)if(!adapter.threads.some(t=>t.threadId===id)){await page.close();adapter.pages.delete(id);}
       if(selection.request&&!selection.request.done&&!searching){
         const request=selection.request;
         searching=discover(context,request.query).then(result=>cloud.request('candidates',{...identityPacket,...result,query:request.query,request_id:request.id}))
@@ -121,8 +138,10 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
             note:'Messenger search could not finish. Check the connection and try again.'}).catch(()=>{})).finally(()=>{searching=null;});
       }
       const counts=[];
+      await adapter.verifyIdentity(); // Recheck the owner after discovery, before ingesting any body.
+      const batch=nextBatch(adapter.threads,syncOffset);syncOffset=batch.next;
       // One unavailable conversation must not stop all other selected inboxes.
-      for(const target of adapter.threads){
+      for(const target of batch.threads){
         if(isPaused())break;
         try{const packet=await adapter.observe(target.threadId,binding);if(!packet){counts.push({threadId:target.threadId,count:0,skipped:'no_supported_text'});continue;}
           await cloud.request('threads',{connector_id:CONNECTOR,...packet});counts.push({threadId:target.threadId,count:packet.thread.messages.length,hasMore:packet.thread.has_more});}
@@ -131,8 +150,10 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
       if(isPaused())continue;
       const pending=await cloud.request('pending',{connector_id:CONNECTOR});
       for(const id of pending.reply_ids??[]){if(isPaused())break;await dispatch(adapter,cloud,state,binding,id,isPaused);}
-      const result={at:new Date().toISOString(),state:'connected',counts};await fs.writeFile(statusFile,JSON.stringify(result),{mode:0o600});
-      setStatus('Connected. Your selected conversations are syncing to Growth HQ. Replies use this Facebook account.');
+      const result={at:new Date().toISOString(),state:'connected',syncAll:selection.sync_all===true,
+        selectedCount:adapter.threads.length,batchCount:batch.threads.length,counts};await fs.writeFile(statusFile,JSON.stringify(result),{mode:0o600});
+      setStatus(selection.sync_all===true?'Connected. Available private one-to-one chats are being discovered and synced in batches. Personal chats stay personal.'
+        :'Connected. Your selected conversations are syncing to Growth HQ. Replies use this Facebook account.');
     }catch(error){
       const reason=/^[a-z_]+$/.test(error.message)?error.message:'connection_needs_attention';
       await fs.writeFile(statusFile,JSON.stringify({at:new Date().toISOString(),state:'attention_required',reason}),{mode:0o600});
@@ -142,6 +163,7 @@ async function run({context,identity,directory,setStatus,isPaused,secret,threads
     }
     await sleep(20000);
   }
+  await available.close();
   await state.flush();
 }
-module.exports={MessengerAdapter,dispatch,settle,run};
+module.exports={MessengerAdapter,dispatch,settle,nextBatch,seedExisting,run};

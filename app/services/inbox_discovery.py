@@ -8,6 +8,13 @@ from ..models import AppSetting, InboxThread, utcnow
 from . import personal_inbox, inbox
 from .inbox_providers import clean, opaque
 
+MAX_CANDIDATES = 2000
+
+
+def selected_candidate(saved, row):
+    return bool((row["selected"] or saved.get("sync_all") is True)
+                and row["participantId"] and not row["reason"])
+
 
 def registry_key(user_id, account):
     return "inbox.disc.v1." + hashlib.sha256(json.dumps([user_id, account.identity]).encode()).hexdigest()
@@ -18,10 +25,10 @@ def read(db, user_id, account):
     return row.value if row else {"candidates": [], "request": None, "coverage": None}
 
 
-def cached_matches(db, user_id, account, candidates, query):
+def cached_matches(db, user_id, account, candidates, query, sync_all=False):
     """Search selected, identity-bound inbox text. Return only names and thread IDs."""
     selected = {r["threadId"]: r["participantId"] for r in candidates
-                if r["selected"] and r["participantId"] and not r["reason"]}
+                if selected_candidate({"sync_all": sync_all}, r)}
     if not selected:
         return []
     rows = db.execute(text(r"""
@@ -92,7 +99,7 @@ def report(db, data):
             "name": clean(row.get("name"), 500), "textOnly": row.get("textOnly") is True, "threadKind": thread_kind,
             "selected": old["selected"] if old else inherited,
             "reason": clean(row.get("reason") or "", 200), "query": clean(data.get("query") or "", 100)}
-    if len(previous) > 200:
+    if len(previous) > MAX_CANDIDATES:
         raise HTTPException(400, "Review your existing discovered conversations before adding more.")
     saved["candidates"] = list(previous.values())
     if data.get("seed_existing") is True:
@@ -111,7 +118,8 @@ def selections(db, data):
     saved = read(db, user.id, account)
     request = saved.get("request")
     return {"initialised": saved.get("seeded") is True,
-            "threads": [r for r in saved["candidates"] if r["selected"] and r["participantId"] and not r["reason"]],
+            "sync_all": saved.get("sync_all") is True,
+            "threads": [r for r in saved["candidates"] if selected_candidate(saved, r)],
             "request": {k: request[k] for k in ("id", "query", "done")} if request else None}
 
 
@@ -121,7 +129,7 @@ def permits_thread(db, user_id, account, thread_id, participant_id):
     # new client seeds the registry from already imported conversations.
     if row is None:
         return True
-    return any(r["selected"] and not r["reason"] and r["threadId"] == thread_id
+    return any(selected_candidate(row.value, r) and r["threadId"] == thread_id
                and r["participantId"] == participant_id for r in row.value["candidates"])
 
 

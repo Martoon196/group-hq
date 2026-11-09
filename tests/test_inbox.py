@@ -227,4 +227,4 @@ def test_empty_inbox_is_setup_not_claimed_connected(admin_client, monkeypatch):
     page = admin_client.get("/inbox")
     assert page.status_code == 200
     assert "No inbox account has been connected" in page.text
-    assert "YouTube and public comment feeds have not been connected" in page.text
+    assert '/inbox/comments' in page.text and "public comments" in page.text

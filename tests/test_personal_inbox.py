@@ -319,3 +319,154 @@ def test_deselect_after_queue_rejects_native_reply_without_dispatch(db, native_d
     discovery.write(db, user.id, account, saved, user.email)
     assert personal.begin(db, reply_id, 'native-messenger') == {'state':'rejected','dispatch':False}
     assert db.get(InboxReply, reply_id).reason == 'conversation_deselected'
+
+
+def test_sync_all_requires_owner_explicit_consent_and_origin(admin_client, db, native_discovery, monkeypatch):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    data = {'account_key': account.key, 'sync_all': 'true'}
+    assert admin_client.post('/inbox/discover/sync-all', data=data).status_code == 400
+    assert not discovery.selections(db, payload)['sync_all']
+    data['acknowledge'] = 'true'
+    assert admin_client.post('/inbox/discover/sync-all', data=data, headers={'Origin': 'https://foreign.example.test'}).status_code == 403
+    monkeypatch.setattr(config, 'GHQ_PERSONAL_INBOX_OWNER_EMAIL', 'other@example.test')
+    assert admin_client.post('/inbox/discover/sync-all', data=data).status_code == 403
+
+
+def test_sync_all_imports_verified_incoming_personal_chat_without_crm_grant(admin_client, db, native_discovery):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    response = admin_client.post('/inbox/discover/sync-all', data={
+        'account_key': account.key, 'sync_all': 'true', 'acknowledge': 'true'})
+    assert response.status_code == 303
+    discovery.report(db, {**payload, 'candidates': [
+        {'threadId': '1234', 'participantId': '9876', 'name': 'A friend'},
+        {'threadId': '1235', 'participantId': '', 'name': 'Unverified friend', 'reason': 'Identity not supplied'}]})
+    selected = discovery.selections(db, payload)
+    assert selected['sync_all'] and [r['threadId'] for r in selected['threads']] == ['1234']
+    assert discovery.permits_thread(db, user.id, account, '1234', '9876')
+    assert not discovery.permits_thread(db, user.id, account, '1235', '1111')
+    personal.ingest(db, {**payload, 'observed_at': utcnow().isoformat() + 'Z', 'thread': {
+        'id': '1234', 'participant_id': '9876', 'name': 'A friend', 'updated_at': '2026-11-09T12:00:00Z',
+        'is_group': False, 'is_merged': False, 'messages': [{'id': 'incoming-native-id', 'name': 'A friend',
+        'direction': 'incoming', 'body': 'Personal incoming chat', 'occurred_at': '2026-11-09T12:00:00Z'}]}})
+    assert not db.scalars(select(InboxCrmLink)).all()
+    page = admin_client.get('/inbox/discover', params={'account': account.key})
+    assert 'Automatic discovery is on' in page.text and 'Personal incoming chat' not in page.text
+
+
+def test_sync_all_off_restores_named_selections_and_blocks_auto_only_ingest(admin_client, db, native_discovery):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    discovery.report(db, {**payload, 'candidates': [
+        {'threadId': '1234', 'participantId': '9876', 'name': 'Named buyer'},
+        {'threadId': '2234', 'participantId': '8876', 'name': 'Personal friend'}]})
+    admin_client.post('/inbox/discover/select', data={'account_key': account.key, 'threads': '1234'})
+    admin_client.post('/inbox/discover/sync-all', data={'account_key': account.key, 'sync_all': 'true', 'acknowledge': 'true'})
+    assert len(discovery.selections(db, payload)['threads']) == 2
+    assert admin_client.post('/inbox/discover/sync-all', data={'account_key': account.key}).status_code == 303
+    selection = discovery.selections(db, payload)
+    assert not selection['sync_all'] and [r['threadId'] for r in selection['threads']] == ['1234']
+    with pytest.raises(HTTPException) as error:
+        personal.ingest(db, {**payload, 'thread': {'id': '2234', 'participant_id': '8876', 'is_group': False, 'is_merged': False}})
+    assert error.value.status_code == 409
+
+
+def test_sync_all_incremental_batches_extend_existing_registry_without_search(admin_client, db, native_discovery):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    admin_client.post('/inbox/discover/sync-all', data={'account_key': account.key, 'sync_all': 'true', 'acknowledge': 'true'})
+    for batch in range(3):
+        rows = [{'threadId': str(1000 + batch * 100 + i), 'participantId': str(9000 + batch * 100 + i),
+                 'name': 'Private person ' + str(batch * 100 + i)} for i in range(100)]
+        discovery.report(db, {**payload, 'candidates': rows, 'complete': False})
+    selected = discovery.selections(db, payload)
+    assert len(selected['threads']) == 300 and selected['request'] is None
+    assert all(not r['selected'] for r in selected['threads'])  # Manual choices are not overwritten.
+    assert not discovery.read(db, user.id, account)['coverage']['complete']
+
+
+def test_sync_all_still_rejects_changed_participant_and_groups(admin_client, db, native_discovery):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    admin_client.post('/inbox/discover/sync-all', data={'account_key': account.key, 'sync_all': 'true', 'acknowledge': 'true'})
+    discovery.report(db, {**payload, 'candidates': [{'threadId': '1234', 'participantId': '9876', 'name': 'Friend'}]})
+    with pytest.raises(HTTPException) as error:
+        discovery.report(db, {**payload, 'candidates': [{'threadId': '1234', 'participantId': '1111', 'name': 'Different'}]})
+    assert error.value.status_code == 409
+    for field in ('is_group', 'is_merged'):
+        with pytest.raises(HTTPException):
+            personal.ingest(db, {**payload, 'thread': {'id': '1234', 'participant_id': '9876',
+                'is_group': False, 'is_merged': False, field: True}})
+
+
+def test_sync_all_off_revokes_pending_auto_only_reply(db, native_discovery):
+    from app.services import inbox_discovery as discovery
+    user, account, payload = native_discovery
+    discovery.report(db, {**payload, 'candidates': [{'threadId': '1234', 'participantId': '9876', 'name': 'Friend'}]})
+    saved = discovery.read(db, user.id, account)
+    saved['sync_all'] = True
+    discovery.write(db, user.id, account, saved, user.email)
+    personal.ingest(db, {**payload, 'observed_at': utcnow().isoformat() + 'Z', 'thread': {
+        'id': '1234', 'participant_id': '9876', 'name': 'Friend', 'updated_at': '2026-11-09T12:00:00Z',
+        'is_group': False, 'is_merged': False, 'messages': []}})
+    reply_id = str(uuid.uuid4())
+    inbox.send(db, user, account, '1234', 'Owner draft', reply_id)
+    saved['sync_all'] = False
+    discovery.write(db, user.id, account, saved, user.email)
+    assert personal.begin(db, reply_id, 'native-messenger') == {'state': 'rejected', 'dispatch': False}
+    assert db.get(InboxReply, reply_id).reason == 'conversation_deselected'
+
+
+def test_owner_takeover_blocks_queued_automatic_claim_and_preserves_manual_reply(db, personal_account, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import datetime, timedelta, timezone
+    from threading import Event
+    from app.db import SessionLocal
+    from app.services import inbox_automations as auto
+    from app.services.inbox_triage import analyse
+
+    user, account, _ = personal_account
+    clock = [datetime(2026, 11, 9, 9, tzinfo=timezone.utc)]
+    monkeypatch.setattr(auto, "now", lambda: clock[0])
+    auto.update(db, user, account, "add", keyword="income", reply="Here is your requested guide.")
+    rule = auto.settings(db, user, account)["rules"][0]
+    auto.update(db, user, account, "enable", rule_id=rule["id"])
+    auto.update(db, user, account, "start")
+    clock[0] += timedelta(minutes=1)
+    cached = inbox.local_thread(db, account, "durham-thread", user.id)
+    cached.messages = [{"body": "INCOME!", "direction": "incoming", "id": "income-message", "occurred_at": clock[0].isoformat()}]
+    db.commit()
+    messages = cached.messages
+    automatic = auto.receipt_id(account, "durham-thread", "income-message")
+
+    auto.process_thread(db, user, account, "durham-thread", messages, analyse)
+    assert db.get(InboxReply, automatic) is None  # Personal account with no owner business choice.
+    from app.services import inbox_organisation
+    inbox_organisation.save(db, user, account, "durham-thread", "business", ["kp"], [])
+    auto.process_thread(db, user, account, "durham-thread", messages, analyse)
+    assert db.get(InboxReply, automatic).state == "queued"
+    manual = str(uuid.uuid4())
+    inbox.send(db, user, account, "durham-thread", "Personal reply from the owner", manual)
+
+    entered = Event()
+    real_lock = auto.lock_account
+    real_lock(db, account)
+    def observed_lock(session, account):
+        if session is not db:
+            entered.set()
+        real_lock(session, account)
+    monkeypatch.setattr(auto, "lock_account", observed_lock)
+    def claim():
+        with SessionLocal() as connector:
+            return personal.begin(connector, automatic)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending_claim = pool.submit(claim)
+        try:
+            assert entered.wait(5), "Connector did not reach the shared account lock"
+            auto.set_handoff(db, user, account, "durham-thread", True)
+        finally:
+            db.rollback()
+        assert pending_claim.result(timeout=5) == {"state": "rejected", "dispatch": False}
+    assert db.get(InboxReply, automatic).reason == "owner_handoff"
+    assert personal.begin(db, manual)["dispatch"] is True

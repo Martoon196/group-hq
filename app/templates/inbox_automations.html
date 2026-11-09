@@ -1,0 +1,47 @@
+{% extends "app_base.html" %}
+{% block content %}
+<div class="page-head"><div><h1>Inbox auto-replies</h1><p>Choose the words people use and the exact reply they will receive from each account.</p></div>
+<a class="btn btn-secondary" href="/inbox">Back to inbox</a></div>
+<p>Rules check new incoming business messages. A conversation that needs your attention stays with you until you resume it in the inbox.</p>
+{% macro fields(card, rule_id='') %}
+<input type="hidden" name="account_ticket" value="{{ card.ticket }}">
+{% if rule_id %}<input type="hidden" name="rule_id" value="{{ rule_id }}">{% endif %}
+{% endmacro %}
+{% for card in cards %}
+<section class="card" id="account-{{ card.account.key }}" style="padding:1.25rem;margin-bottom:1.25rem">
+<h2>{{ card.account.label }}</h2><p>{{ card.account.channel|title }} Ã‚Â· {{ card.account.key }}</p>
+{% if not card.supported %}<p>Enable replies on this connection to use keyword rules. <a href="/inbox/channels">Manage connection</a></p>
+{% elif not card.own %}<p>Another inbox owner manages this account's rules.</p>
+{% else %}
+<p><strong>{{ card.config.status }}</strong>{% if card.config.checked_at %} Ã‚Â· Last checked {{ card.config.checked_at[:19]|replace('T',' ') }} UTC{% endif %}</p>
+<form method="post" action="/inbox/automations/rules">{{ fields(card) }}
+{% if card.config.enabled %}<button name="action" value="pause" class="btn btn-secondary">Pause this account</button>
+{% else %}<button name="action" value="start" class="btn btn-primary"{% if not card.config.ai_enabled and not card.config.rules|selectattr('enabled')|list %} disabled{% endif %}>Start enabled replies on this account</button>{% endif %}</form>
+<details style="margin-top:1.25rem"{% if card.config.ai_enabled %} open{% endif %}><summary>Claude replies Â· {{ 'Enabled' if card.config.ai_enabled else 'Paused' }}</summary>
+<p>Let Claude answer routine business enquiries containing an allowed phrase. Set up inbox scanning first. A matching fixed reply takes priority. Sensitive or uncertain requests go to you.</p>
+<form method="post" action="/inbox/automations/rules">{{ fields(card) }}
+<label>Allowed words or phrases, one per line<textarea name="topics" rows="3" placeholder="e.g. arrange a viewing" required>{{ card.config.ai_topics|default([])|join('\n') }}</textarea></label>
+<button class="btn btn-secondary" name="action" value="ai-save">Save phrases and pause Claude replies</button></form>
+{% if card.config.ai_topics %}<form method="post" action="/inbox/automations/rules">{{ fields(card) }}
+<button class="btn btn-secondary" name="action" value="{{ 'ai-disable' if card.config.ai_enabled else 'ai-enable' }}">{{ 'Pause Claude replies' if card.config.ai_enabled else 'Enable Claude replies for these phrases' }}</button></form>{% endif %}</details>
+{% for rule in card.config.rules %}
+<article style="margin:1.25rem 0"><h3>{{ rule.keyword }}</h3><p>{{ 'Enabled' if rule.enabled else 'Paused' }}</p>
+<p style="white-space:pre-wrap">{{ rule.reply }}</p>
+<form method="post" action="/inbox/automations/rules">{{ fields(card, rule.id) }}
+<button class="btn btn-secondary" name="action" value="{{ 'disable' if rule.enabled else 'enable' }}">{{ 'Pause keyword' if rule.enabled else 'Enable keyword' }}</button></form>
+<details><summary>Edit keyword or reply</summary>
+<form method="post" action="/inbox/automations/rules">{{ fields(card, rule.id) }}
+<label>Keyword or phrase<input name="keyword" value="{{ rule.keyword }}" maxlength="100" required></label>
+<label>Reply<textarea name="reply" rows="3" required>{{ rule.reply }}</textarea></label>
+<button class="btn btn-secondary" name="action" value="edit">Save and pause keyword</button>
+<button class="btn btn-secondary" name="action" value="delete" formnovalidate>Remove keyword</button></form></details></article>
+{% endfor %}
+<form method="post" action="/inbox/automations/rules" style="margin-top:1.25rem">{{ fields(card) }}
+<h3>Add a keyword</h3><label>Keyword or phrase<input name="keyword" maxlength="100" placeholder="e.g. viewing" required></label>
+<label>Your reply<textarea name="reply" rows="3" placeholder="Write the message to send when this keyword matches" required></textarea></label>
+<p>The whole message must match the keyword or phrase. Capital letters, spacing and surrounding punctuation are ignored.</p>
+<button class="btn btn-secondary" name="action" value="add">Save paused keyword</button></form>
+{% endif %}
+</section>
+{% else %}<p>Connect a messaging account to create a rule. <a href="/inbox/channels">Open inbox connections</a></p>{% endfor %}
+{% endblock %}

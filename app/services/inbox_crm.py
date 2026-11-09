@@ -47,6 +47,9 @@ def command(user, brand, action, *, transport=None, **payload):
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError()
+        if action in ("whatsappThreads", "whatsappMessages"):
+            # The dedicated reader validates each native ID and the returned account/thread binding.
+            return result
         if action == "search":
             rows = result.get("contacts")
             if not isinstance(rows, list) or len(rows) > 20:
@@ -87,6 +90,8 @@ def links(db, account, thread_id):
 
 def connect(db, user, thread_ticket, brand, display_name, contact_id="", copy_messages=True):
     account, bound, origin = source(db, user, thread_ticket)
+    if account.provider == "r72_whatsapp":
+        raise CrmUnavailable("This conversation already belongs to its MHP CRM contact.")
     if brand not in inbox.BRANDS:
         raise HTTPException(400, "Choose a business for this CRM contact.")
     if contact_id:
@@ -115,7 +120,8 @@ def connect(db, user, thread_ticket, brand, display_name, contact_id="", copy_me
         syncing.discard(brand)
     # Commit local link + projection choice together. A background importer
     # must never observe a new link before the unchecked copy choice exists.
-    inbox_organisation.save(db, user, account, bound["thread"], "personal" if settings["kind"] == "personal" else "business",
+    kind = settings["kind"] if settings["kind"] in ("personal", "pitch") else "business"
+    inbox_organisation.save(db, user, account, bound["thread"], kind,
         set(settings["brands"]) | {brand}, syncing, settings["note"])
     # Contacts/points are created only by Relaunch72; cache IDs here only after its confirmed response.
     return result

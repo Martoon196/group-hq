@@ -9,7 +9,74 @@ test('owner-selected conversations are no longer limited to three; selection ide
   assert.equal(validateTargets(many).length,20);assert.deepEqual(validateTargets([]),[]);
   assert.throws(()=>validateTargets([...many,many[0]]),/invalid_selection/);
   assert.throws(()=>validateTargets([{...expected,participantId:'not-a-native-id'}]),/invalid_selection/);
-  assert.throws(()=>validateTargets(Array(101).fill(expected)),/invalid_selection/);
+  assert.throws(()=>validateTargets(Array(2001).fill(expected)),/invalid_selection/);
+});
+test('available inbox discovery includes visible incoming and personal rows without a sent preview or phrase',()=>{
+  const {readAvailable}=require('./discovery.cjs'),vm=require('node:vm');
+  const item=(url,text,visible=true)=>({href:url,innerText:text,getClientRects:()=>visible?[{}]:[]});
+  const root={innerText:'Personal chats',querySelectorAll:()=>[
+    item('https://www.facebook.com/messages/e2ee/t/111/','A Friend\nCan we catch up?'),
+    item('https://www.facebook.com/messages/e2ee/t/222/','Incoming Buyer\nHello'),
+    item('https://www.facebook.com/messages/e2ee/t/333/','Hidden\nHello',false),
+    item('https://evil.test/messages/e2ee/t/444/','Wrong origin'),
+    item('https://www.facebook.com/groups/555/','Group'),
+    item('https://www.facebook.com/messages/e2ee/t/111/?tracking=1','A Friend\nCan we catch up?')]};
+  const result=vm.runInNewContext('('+readAvailable.toString()+')()',{URL,document:{querySelector:()=>root}});
+  assert.deepEqual(Array.from(result.rows,r=>r.threadId),['111','222']);
+  assert.ok(result.rows.every(row=>!('body' in row)&&!row.url.includes('?')));
+});
+test('available discovery resumes a full viewport across batches with two reusable pages and verified peers',async()=>{
+  const {AvailableDiscovery,readAvailable}=require('./discovery.cjs');let created=0,scrolls=0,peerId='';
+  const rows=['111','222','333'].map(id=>({threadId:id,name:'Provisional',url:'https://www.facebook.com/messages/e2ee/t/'+id,encrypted:true}));
+  const list={closed:false,isClosed(){return this.closed;},close:async function(){this.closed=true;},goto:async()=>{},
+    evaluate:async fn=>{assert.equal(fn,readAvailable);return {rows,loading:false,restoring:false};},waitForTimeout:async()=>{},
+    locator:()=>({waitFor:async()=>{},filter:()=>({count:async()=>3,last:()=>({scrollIntoViewIfNeeded:async()=>{scrolls++;}})})})};
+  const peer={closed:false,isClosed(){return this.closed;},close:async function(){this.closed=true;},
+    goto:async url=>{peerId=url.split('/').at(-1);},waitForFunction:async()=>{},
+    evaluate:async()=>peerId==='333'?null:{name:'Verified '+peerId,participantId:'9'+peerId}};
+  const context={newPage:async()=>++created===1?list:peer},scan=new AvailableDiscovery(context);
+  const first=await scan.scan([],1),second=await scan.scan([],1),third=await scan.scan([],1);
+  assert.equal(first.candidates[0].name,'Verified 111');assert.equal(first.candidates[0].participantId,'9111');
+  assert.equal(second.candidates[0].threadId,'222');assert.equal(first.complete,false);
+  assert.equal(third.candidates[0].participantId,'');assert.ok(third.candidates[0].reason);
+  assert.equal(created,2);assert.equal(scrolls,1);await scan.close();assert.ok(list.closed&&peer.closed);
+});
+test('known verified chats are skipped during available discovery without reopening their conversation',async()=>{
+  const {AvailableDiscovery}=require('./discovery.cjs');let created=0,opened=0;
+  const list={closed:false,isClosed(){return this.closed;},close:async function(){this.closed=true;},goto:async()=>{},
+    evaluate:async()=>({rows:[{threadId:'111',name:'Known friend',url:'https://www.facebook.com/messages/e2ee/t/111',encrypted:true}],loading:false,restoring:false}),
+    waitForTimeout:async()=>{},locator:()=>({waitFor:async()=>{},filter:()=>({count:async()=>1,last:()=>({scrollIntoViewIfNeeded:async()=>{}})})})};
+  const peer={closed:false,isClosed(){return this.closed;},close:async function(){this.closed=true;},goto:async()=>{opened++;}};
+  const scan=new AvailableDiscovery({newPage:async()=>++created===1?list:peer});
+  const result=await scan.scan([{threadId:'111',participantId:'9111'}]);
+  assert.deepEqual(result.candidates,[]);assert.equal(opened,0);assert.equal(result.complete,false);
+  assert.ok(list.closed&&peer.closed);assert.equal(await scan.scan([]),null);
+});
+test('bounded round-robin covers every selected chat',async()=>{
+  const {nextBatch}=require('./runtime.cjs');const many=Array.from({length:55},(_,i)=>({...expected,threadId:String(1000+i)}));
+  let offset=0;const seen=new Set();
+  for(let pass=0;pass<3;pass++){const batch=nextBatch(many,offset);assert.equal(batch.threads.length,20);offset=batch.next;for(const t of batch.threads)seen.add(t.threadId);}
+  assert.equal(seen.size,55);assert.deepEqual(nextBatch([],0),{threads:[],next:0});
+  assert.throws(()=>nextBatch(many,0,21),/invalid_sync_batch/);
+  assert.equal(validateTargets(Array.from({length:150},(_,i)=>({...expected,threadId:String(2000+i)}))).length,150);
+});
+test('reading many selected chats reuses one conversation page instead of a tab per person',async()=>{
+  const {MessengerAdapter}=require('./runtime.cjs');let created=0,url='';
+  const page={isClosed:()=>false,url:()=>url,goto:async value=>{url=value;},waitForFunction:async()=>{}};
+  const threads=Array.from({length:30},(_,i)=>({...expected,threadId:String(1000+i)}));
+  const adapter=new MessengerAdapter({newPage:async()=>{created++;return page;}},{userId:'123'},threads);
+  for(const thread of threads)assert.equal(await adapter.page(thread.threadId),page);
+  assert.equal(created,1);assert.ok(url.endsWith('/1029'));
+});
+test('existing named registry seeds in compatible hundred-candidate packets before initialisation',async()=>{
+  const {seedExisting}=require('./runtime.cjs'),packets=[];
+  const many=Array.from({length:215},(_,i)=>({...expected,threadId:String(1000+i)}));
+  await seedExisting({request:async(action,value)=>{assert.equal(action,'candidates');packets.push(value);}},{account_key:'owner-account'},many);
+  assert.deepEqual(packets.map(p=>p.candidates.length),[100,100,15]);
+  assert.deepEqual(packets.map(p=>p.seed_existing),[false,false,true]);
+  assert.ok(packets.every(p=>p.account_key==='owner-account'));
+  const empty=[];await seedExisting({request:async(a,p)=>empty.push(p)},{},[]);
+  assert.equal(empty.length,1);assert.equal(empty[0].seed_existing,true);
 });
 test('discovery extracts only visible Facebook thread links and reports restoration',()=>{
   const vm=require('node:vm');

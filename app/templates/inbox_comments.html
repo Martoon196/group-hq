@@ -1,0 +1,24 @@
+{% extends "app_base.html" %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">Growth HQ · Public social</p><h1>LinkedIn company comments</h1><p>Read and reply to public comments for your company accounts.</p></div><a class="btn btn-secondary" href="/inbox">Private inbox</a></div>
+<section class="card" style="padding:1.25rem;margin-bottom:1.25rem"><strong>These are public LinkedIn comments.</strong><p>Your replies appear as the selected company and can be read on LinkedIn. Private conversations and their drafts stay in the private inbox. This does not send a direct message or add someone to your CRM.</p></section>
+<nav aria-label="Company comments">{% for a in accounts %}<a class="btn btn-secondary" href="/inbox/comments?account={{ a.key|urlencode }}">{{ a.label }} · {{ brands[a.brand] }}</a> {% else %}<p>No company comment connection is configured for your account.</p>{% endfor %}</nav>
+{% if error %}<div class="flash flash-err" role="alert">{{ error }}</div>{% endif %}
+{% if account %}<h2>{{ account.label }} · Public comments</h2>{% if not account.can_reply %}<p>This connection is read-only.</p>{% endif %}
+{% if post_ticket %}
+<p><a href="/inbox/comments?account={{ account.key|urlencode }}">Back to company posts</a></p>
+<p class="small">Post: {{ post_id }}</p>
+{% for c in comments %}<article class="card" style="padding:1.25rem;margin:1rem 0{% if c.depth %};border-left:4px solid #888{% endif %}"><h3>{{ c.name }}{% if c.depth %} · reply{% endif %}</h3><p class="small">{{ c.occurred_at }}</p><div style="white-space:pre-wrap;overflow-wrap:anywhere">{{ c.body }}</div>
+{% if c.more_replies %}<p>More nested replies are available on LinkedIn.</p>{% endif %}
+{% if c.reply_ticket %}<details style="margin-top:1rem"><summary>Write a public reply as {{ account.label }}</summary>
+<form method="post" action="/inbox/comments/reply" style="margin-top:1rem">
+<input type="hidden" name="target" value="{{ c.reply_ticket }}"><input type="hidden" name="request_id" value="{{ c.request_id }}"><input type="hidden" name="audience" value="public_linkedin">
+<label>Public reply to {{ c.name }} <textarea name="message" rows="4" maxlength="10000" required style="width:100%;font-size:1rem"></textarea></label>
+<label style="display:block;margin:1rem 0"><input type="checkbox" name="acknowledge" value="true" required> I understand this reply is public on LinkedIn, from {{ account.label }}.</label>
+<button class="btn btn-primary" type="submit">Post public reply</button></form></details>{% else %}<p>Replies are unavailable for this comment.</p>{% endif %}</article>{% else %}{% if not error %}<p>No comments are available in this page.</p>{% endif %}{% endfor %}
+{% if comments_next %}<a class="btn btn-secondary" href="/inbox/comments?account={{ account.key|urlencode }}&amp;post={{ post_ticket|urlencode }}&amp;cursor={{ comments_next|urlencode }}">More comments</a>{% endif %}
+{% else %}
+{% for p in posts %}<article class="card" style="padding:1.25rem;margin:1rem 0"><p class="small">{{ p.occurred_at }}</p><div style="white-space:pre-wrap;overflow-wrap:anywhere">{{ p.body }}</div><p><a class="btn btn-primary" href="/inbox/comments?account={{ account.key|urlencode }}&amp;post={{ p.ticket|urlencode }}">Open public comments</a></p></article>{% else %}{% if not error %}<p>No company posts are available in this page.</p>{% endif %}{% endfor %}
+{% if posts_next %}<a class="btn btn-secondary" href="/inbox/comments?account={{ account.key|urlencode }}&amp;cursor={{ posts_next|urlencode }}">More company posts</a>{% endif %}
+{% endif %}{% endif %}
+{% endblock %}

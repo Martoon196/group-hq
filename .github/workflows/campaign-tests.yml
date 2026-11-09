@@ -51,5 +51,9 @@ jobs:
           python -c "from app import migrate; assert migrate.current_revision() == migrate.head_revision() == '0011_unified_inbox'"
       - name: Check inbox transports without provider calls
         run: python -m unittest discover -s unit_checks -p inbox_providers.py -v
+      - name: Check inbox automation and LinkedIn comment transports
+        run: |
+          python -m unittest discover -s unit_checks -p inbox_keyword_policy.py -v
+          python -m unittest discover -s unit_checks -p linkedin_comments.py -v
       - name: Run exact source suite
         run: pytest -q

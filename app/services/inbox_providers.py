@@ -83,7 +83,7 @@ class Account:
 
     @property
     def configured(self):
-        return bool(self.token) and (self.provider in ("zernio", "local") or bool(self.origin and self.user_id and self.rooms))
+        return bool(self.token) and (self.provider in ("zernio", "local", "r72_whatsapp") or bool(self.origin and self.user_id and self.rooms))
 
     @property
     def binding(self):
@@ -329,6 +329,9 @@ class Matrix(Transport):
 
 
 def client(account, transport=None):
+    if getattr(account, "surface", None) == "linkedin_public_comments":
+        from .linkedin_comments_provider import LinkedInComments
+        return LinkedInComments(account, transport)
     if account.provider == "zernio":
         return Zernio(account, transport)
     if account.provider == "matrix":
