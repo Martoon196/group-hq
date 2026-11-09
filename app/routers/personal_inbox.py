@@ -117,8 +117,13 @@ def save(account_key: str = Form(...), enabled: bool = Form(False), brand: str =
 
 
 @router.api_route(service.BASE + "/{action:path}", methods=["GET", "POST"])
-async def desktop(action: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    data = await service.authenticated_body(request)
+def desktop(action: str, request: Request, background_tasks: BackgroundTasks,
+            data: dict = Depends(service.authenticated_body), db: Session = Depends(get_db)):
+    with db:
+        return dispatch_desktop(action, request, background_tasks, db, data)
+
+
+def dispatch_desktop(action, request, background_tasks, db, data):
     try:
         if request.method == "POST" and action == "accounts":
             db.execute(text("SELECT pg_advisory_xact_lock(741935834)"))

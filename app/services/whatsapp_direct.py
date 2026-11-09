@@ -164,7 +164,8 @@ def ingest(db, saved, user, data):
 
 def dispatch(db, action, data):
     # This entry point is called only after the listener-specific HMAC is verified.
-    keywords.lock_rules(db)
+    if action not in ("policy", "pending"):
+        keywords.lock_rules(db)
     user = personal_inbox.owner(db)
     saved = dict(status(db))
     device = data.get("device")

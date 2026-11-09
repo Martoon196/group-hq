@@ -39,8 +39,14 @@ def save(revision: int = Form(...), name: str = Form(...), brand: str = Form(...
 
 
 @router.api_route(service.BASE + "/{action:path}", methods=["GET", "POST"])
-async def adapter(action: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    body = await service.authenticated_body(request)
+def adapter(action: str, request: Request, background_tasks: BackgroundTasks,
+            body: bytes = Depends(service.authenticated_body), db: Session = Depends(get_db)):
+    # Release database locks in the dispatching thread before response/background processing.
+    with db:
+        return dispatch_adapter(action, request, background_tasks, db, body)
+
+
+def dispatch_adapter(action, request, background_tasks, db, body):
     if request.method == "POST" and action.startswith("direct/"):
         from ..services import whatsapp_direct
         result = whatsapp_direct.dispatch(db, action[7:], service.json_object(body))

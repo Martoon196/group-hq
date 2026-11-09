@@ -37,6 +37,26 @@ def event(**kw):
         "name":"Fixture", "at":direct.iso(utcnow()), "phone":PEER.split("@")[0], **kw}
 
 
+def test_signed_polling_leaves_event_loop_free_and_releases_its_session(wa, monkeypatch):
+    import asyncio
+    from app.routers import whatsapp_keywords as routes
+    calls = []
+    original = routes.dispatch_adapter
+    def checked(action, request, tasks, db, body):
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        response = original(action, request, tasks, db, body)
+        calls.append((action, db))
+        return response
+    monkeypatch.setattr(routes, "dispatch_adapter", checked)
+    _, call = wa
+    assert call("status").status_code == 200
+    assert call("policy").status_code == 200
+    assert call("pending").status_code == 200
+    assert [item[0] for item in calls] == ["direct/status", "direct/policy", "direct/pending"]
+    assert all(not db.in_transaction() for _, db in calls)
+
+
 def test_owner_opts_in_to_new_one_to_one_text_and_original_channel(admin_client, db, wa, monkeypatch):
     user, call = wa
     assert call("status").json() == {"collect":False, "reply":False, "since":None, "history":False}
