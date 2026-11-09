@@ -46,6 +46,8 @@ from .routers import (audit, auth, crm, dashboard, franchise, grants, growth, me
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
+from .routers import laps  # noqa: E402
+app.include_router(laps.router)
 app.include_router(crm.router)
 app.include_router(whatsapp_keywords.router)
 app.include_router(inbox.router)

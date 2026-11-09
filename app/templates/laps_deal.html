@@ -1,0 +1,43 @@
+{% extends "app_base.html" %}
+{% set title = deal.name ~ " | LAPS board | Group HQ" %}
+{% block head %}<link rel="stylesheet" href="/assets/laps.css">{% endblock %}
+{% block content %}
+<div class="page-title"><span class="eyebrow"><a href="/laps">LAPS board</a></span><h1>{{ deal.name }}</h1>
+<p><span class="status laps-status-{{ deal.stage }}">{{ labels[deal.stage] if deal.stage != 'lost' else 'Lost' }}</span> <span class="chip">{{ brands[deal.brand] }}</span>{% if deal.value_pence is not none %} <strong>{{ gbp(deal.value_pence) }}</strong>{% endif %}</p></div>
+
+<div class="two-col">
+  <section class="panel">
+    <h2>Details</h2>
+    <form method="post" action="/laps/deals/{{ deal.id }}" class="form-grid">
+      <div class="field"><label for="name">Name</label><input id="name" name="name" required maxlength="200" value="{{ deal.name }}"></div>
+      <div class="field"><label for="brand">Business</label><select id="brand" name="brand" required>{% for key, name in brands.items() %}<option value="{{ key }}"{% if deal.brand == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="contact">Phone or email</label><input id="contact" name="contact" maxlength="200" value="{{ deal.contact }}"></div>
+      <div class="field"><label for="source">Where they came from</label><input id="source" name="source" maxlength="100" value="{{ deal.source }}"></div>
+      <div class="field"><label for="offer">What they might buy</label><input id="offer" name="offer" maxlength="120" value="{{ deal.offer }}"></div>
+      <div class="field"><label for="value">{{ "Sale value (£)" if deal.stage == 'sale' else "Expected value (£)" }}</label><input id="value" name="value" inputmode="decimal" value="{{ value }}"></div>
+      <div class="field"><label for="next_step">Next step</label><input id="next_step" name="next_step" maxlength="200" value="{{ deal.next_step }}"></div>
+      <div class="field"><label for="next_step_on">Next step date</label><input id="next_step_on" name="next_step_on" type="date" value="{{ deal.next_step_on.isoformat() if deal.next_step_on else '' }}"></div>
+      <div class="field full"><label for="notes">Notes</label><textarea id="notes" name="notes" maxlength="5000">{{ deal.notes }}</textarea></div>
+      <div class="form-actions full"><button class="btn btn-primary">Save</button><a class="btn btn-ghost" href="/laps">Back to the board</a></div>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>Stage</h2>
+    <table class="data"><tbody>
+      {% for stage in pipeline %}{% set at = deal[stage ~ '_at'] %}<tr><td class="k">{{ labels[stage][:-1] }}</td><td>{{ at|uk("%d %b %Y") if at else "Not yet" }}</td></tr>{% endfor %}
+      {% if deal.lost_at %}<tr><td class="k">Lost</td><td>{{ deal.lost_at|uk("%d %b %Y") }}</td></tr>{% endif %}
+    </tbody></table>
+    <div class="laps-moves mt-1">
+      {% if deal.stage == 'lost' %}
+        <form method="post" action="/laps/deals/{{ deal.id }}/stage"><input type="hidden" name="back" value="deal"><input type="hidden" name="to" value="reopen"><button class="btn btn-primary btn-sm">Reopen at {{ labels[furthest]|lower }}</button></form>
+      {% else %}
+        {% for stage in pipeline %}{% if stage != deal.stage %}
+        <form method="post" action="/laps/deals/{{ deal.id }}/stage"><input type="hidden" name="back" value="deal"><input type="hidden" name="to" value="{{ stage }}"><button class="btn {{ 'btn-primary' if pipeline.index(stage) == pipeline.index(deal.stage) + 1 else 'btn-ghost' }} btn-sm">{{ moves[stage] if pipeline.index(stage) > pipeline.index(deal.stage) else "Move back to " ~ labels[stage]|lower }}</button></form>
+        {% endif %}{% endfor %}
+        {% if deal.stage != 'sale' %}<form method="post" action="/laps/deals/{{ deal.id }}/stage"><input type="hidden" name="back" value="deal"><input type="hidden" name="to" value="lost"><button class="btn btn-ghost btn-sm">Mark lost</button></form>{% endif %}
+      {% endif %}
+    </div>
+    <p class="small muted mt-1">Moving forward records today for each stage on the way. Moving back clears the later stages.</p>
+  </section>
+</div>
+{% endblock %}

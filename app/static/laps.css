@@ -1,0 +1,51 @@
+/* LAPS board. Stage colours carry no meaning on their own: every stage is also named in text. */
+table.data .num,.num{text-align:right;font-variant-numeric:tabular-nums}
+.laps-brands{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.9rem}
+.laps-brands .chip{text-decoration:none;color:var(--ink);background:#fff}
+.laps-brands .chip:hover{border-color:var(--ink)}
+.laps-brands .chip.is-on{background:var(--ink);border-color:var(--ink);color:#fff}
+.laps-score{display:grid;grid-template-columns:repeat(4,1fr);gap:1.6rem}
+.laps-tile{position:relative;background:var(--paper);border:1px solid var(--line);border-top:5px solid var(--stage,var(--pink));border-radius:var(--radius);padding:1.1rem 1.2rem 1rem;display:flex;flex-direction:column;gap:.15rem;font-variant-numeric:tabular-nums;min-width:0}
+.laps-tile strong{font-size:2.6rem;font-weight:900;line-height:1;letter-spacing:-.02em}
+.laps-tile-label{font-weight:700}
+.laps-letter{position:absolute;top:.7rem;right:.9rem;font-weight:900;font-size:1.5rem;color:var(--stage,var(--pink));opacity:.9}
+.laps-rate{position:absolute;left:-1.6rem;top:50%;transform:translate(-50%,-50%);width:3rem;text-align:center;background:var(--ink);color:#fff;font-size:.78rem;font-weight:700;border-radius:999px;padding:.2rem 0;z-index:1}
+.laps-rate-note{margin:.6rem 0 0}
+.laps-lead{--stage:#2B4A9B}.laps-appointment{--stage:#B7791F}.laps-presentation{--stage:#5B2A86}.laps-sale{--stage:#17814A}
+.laps-plan-line{font-size:1.05rem;margin:0 0 .8rem}
+.laps-plan{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem}
+.laps-plan-step{border:2px solid var(--line);border-radius:12px;padding:.8rem 1rem;display:flex;flex-direction:column;font-variant-numeric:tabular-nums}
+.laps-plan-step strong{font-size:1.8rem;font-weight:900;line-height:1.1}
+.laps-plan-step span{color:var(--muted)}.laps-plan-step span:first-of-type{color:var(--ink);font-weight:700}
+.laps-plan-step.is-met{border-color:#BFE3CD;background:#F1FAF4}
+.laps-add{margin-bottom:1.2rem}.laps-add summary{display:inline-block;cursor:pointer;list-style:none}.laps-add summary::-webkit-details-marker{display:none}
+.laps-add:not([open]){border:0;padding:0;background:none}
+.laps-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem;align-items:start}
+.laps-column{background:var(--mist);border-radius:var(--radius);border-top:5px solid var(--stage);padding:.9rem .8rem;min-width:0}
+.laps-column h3{font-size:1rem;margin:0 0 .6rem;display:flex;justify-content:space-between;align-items:center}
+.laps-count{background:#fff;border-radius:999px;padding:.05rem .6rem;font-size:.85rem;font-variant-numeric:tabular-nums}
+.laps-empty{color:var(--muted);font-size:.9rem;margin:.4rem 0}
+.laps-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:.8rem .85rem;margin-bottom:.6rem;overflow-wrap:anywhere}
+.laps-card.is-overdue{border-color:#9B1C4B}
+.laps-card header{display:flex;flex-wrap:wrap;gap:.35rem .5rem;align-items:center;justify-content:space-between}
+.laps-card-name{font-weight:900;color:var(--ink);text-decoration:none}.laps-card-name:hover{color:var(--pink-deep);text-decoration:underline}
+.laps-card .chip{font-size:.72rem;padding:.1rem .5rem}
+.laps-card p{margin:.35rem 0 0;font-size:.92rem}
+.laps-card-next span{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.laps-card.is-overdue .laps-card-next{color:#9B1C4B;font-weight:700}
+.laps-card-actions{display:flex;flex-wrap:wrap;gap:.4rem;align-items:end;margin-top:.7rem}
+.laps-card-actions form{margin:0;display:flex;flex-wrap:wrap;gap:.4rem;align-items:end}
+.laps-sale-value{display:flex;flex-direction:column;font-size:.74rem;font-weight:700;color:var(--muted)}
+.laps-sale-value input{font:inherit;font-size:.9rem;width:6.5rem;padding:.35rem .5rem;border:2px solid var(--line);border-radius:8px}
+.laps-weeks tr.is-current td{font-weight:700;background:var(--blush)}
+.laps-clients{list-style:none;padding:0;margin:0;display:grid;gap:.4rem}
+.laps-moves{display:flex;flex-wrap:wrap;gap:.4rem}.laps-moves form{margin:0}
+.laps-status-lead{background:#E8EEFF;color:#2B4A9B}.laps-status-appointment{background:#FFF1C9;color:#7A5200}
+.laps-status-presentation{background:#EFE3FA;color:#5B2A86}.laps-status-sale{background:#E3F5EA;color:#17814A}.laps-status-lost{background:#EEE;color:#666}
+details.panel>summary{cursor:pointer;font-weight:700}
+@media(max-width:1100px){.laps-board{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.laps-score,.laps-plan{grid-template-columns:repeat(2,1fr);gap:.8rem}.laps-rate{display:none}.laps-board{grid-template-columns:1fr}}
+.laps-column{max-height:46rem;overflow-y:auto;overscroll-behavior:contain}
+@media(max-width:700px){.laps-column{max-height:none;overflow:visible}}
+.laps-h2{font-size:1.15rem;margin:0}
+#plan .form-inline .field{flex:0 1 15rem}

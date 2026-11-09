@@ -993,3 +993,44 @@ class MetricRun(Base):
     dry_run: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     actor: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     plan: Mapped[list | dict | None] = mapped_column(JSONB, nullable=True)
+
+
+# =====================================================================================================
+# LAPS board (alembic/versions/0013_laps_board.py): Leads, Appointments, Presentations, Sales.
+# =====================================================================================================
+LAPS_STAGES = ("lead", "appointment", "presentation", "sale", "lost")
+LAPS_BRANDS = ("mhp", "pp", "kp", "piuk", "hnh", "ordris")
+
+
+class LapsDeal(TimestampMixin, Base):
+    """One prospect on the LAPS board. Each <stage>_at is when the deal first reached that stage, so the weekly
+    scoreboard counts what happened in the week whatever the deal's stage is today. A deal that jumps stages has
+    the skipped ones stamped with the same moment (a sale implies its presentation and appointment), and a lost
+    deal keeps the stamps it earned. value_pence is the expected value until the sale, the agreed value after.
+    origin names the record a deal was added from (crm:<campaign lead id>) so it is added once."""
+    __tablename__ = "laps_deals"
+    __table_args__ = (
+        _one_of("stage", LAPS_STAGES, "ck_laps_deals_stage"),
+        _one_of("brand", LAPS_BRANDS, "ck_laps_deals_brand"),
+        CheckConstraint("value_pence IS NULL OR value_pence >= 0", name="ck_laps_deals_value"),
+        Index("ix_laps_deals_stage", "stage"),
+        Index("ix_laps_deals_lead_at", "lead_at"),
+        Index("ux_laps_deals_origin", "origin", unique=True, postgresql_where=text("origin IS NOT NULL")),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    contact: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    brand: Mapped[str] = mapped_column(String(8), nullable=False)
+    offer: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    stage: Mapped[str] = mapped_column(String(12), default="lead", nullable=False)
+    value_pence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lead_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    appointment_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    presentation_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sale_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lost_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_step: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    next_step_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    origin: Mapped[str | None] = mapped_column(String(80), nullable=True)

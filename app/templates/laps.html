@@ -1,0 +1,138 @@
+{% extends "app_base.html" %}
+{% set title = "LAPS board | Group HQ" %}
+{% block head %}<link rel="stylesheet" href="/assets/laps.css">{% endblock %}
+{% macro view_field() %}<input type="hidden" name="view" value="{{ brand }}">{% endmacro %}
+{% macro card(d) %}
+<article class="laps-card{% if d.next_step_on and d.next_step_on < today and d.stage != 'sale' %} is-overdue{% endif %}">
+  <header><a class="laps-card-name" href="/laps/deals/{{ d.id }}">{{ d.name }}</a><span class="chip">{{ brands[d.brand] }}</span></header>
+  {% if d.offer or d.value_pence is not none %}<p class="laps-card-offer">{{ d.offer }}{% if d.offer and d.value_pence is not none %} · {% endif %}{% if d.value_pence is not none %}<strong>{{ gbp(d.value_pence) }}</strong>{% endif %}</p>{% endif %}
+  {% if d.stage == 'sale' %}<p class="small muted">Sold {{ d.sale_at|uk("%d %b") }}{% if d.value_pence is none %} · <a href="/laps/deals/{{ d.id }}">add the sale value</a>{% endif %}</p>
+  {% else %}
+  {% if d.next_step or d.next_step_on %}<p class="laps-card-next"><span>Next</span> {{ d.next_step or "Follow up" }}{% if d.next_step_on %} · {{ d.next_step_on|date("%d %b") }}{% if d.next_step_on < today %} (overdue){% endif %}{% endif %}</p>{% endif %}
+  {% if d.source %}<p class="small muted">From {{ d.source }}</p>{% endif %}
+  {% set next_stage = pipeline[pipeline.index(d.stage) + 1] %}
+  <div class="laps-card-actions">
+    <form method="post" action="/laps/deals/{{ d.id }}/stage">{{ view_field() }}<input type="hidden" name="to" value="{{ next_stage }}">
+      {% if next_stage == 'sale' %}<label class="laps-sale-value"><span>Sale value £</span><input name="value" inputmode="decimal" value="{{ '%.2f'|format(d.value_pence / 100) if d.value_pence is not none else '' }}" aria-label="Sale value in pounds for {{ d.name }}"></label>{% endif %}
+      <button class="btn btn-primary btn-sm">{{ moves[next_stage] }}</button></form>
+    <form method="post" action="/laps/deals/{{ d.id }}/stage">{{ view_field() }}<input type="hidden" name="to" value="lost"><button class="btn btn-ghost btn-sm">Lost</button></form>
+  </div>
+  {% endif %}
+</article>
+{% endmacro %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">Sales rhythm</span><h1>LAPS board</h1>
+<p class="help">Leads, Appointments, Presentations, Sales. A lead has asked to talk. An appointment is a time in the diary. A presentation is your offer actually made. A sale is money taken.</p>
+<nav class="laps-brands" aria-label="Business">
+  <a class="chip{% if not brand %} is-on{% endif %}" href="/laps">All businesses</a>
+  {% for key, name in brands.items() %}<a class="chip{% if brand == key %} is-on{% endif %}" href="/laps?brand={{ key }}">{{ name }}</a>{% endfor %}
+</nav></div>
+
+<section class="laps-score" aria-label="This week">
+  {% for stage in pipeline %}
+  <div class="laps-tile laps-{{ stage }}">
+    <span class="laps-letter" aria-hidden="true">{{ labels[stage][0] }}</span>
+    <strong>{{ score.this_week[stage] }}</strong>
+    <span class="laps-tile-label">{{ labels[stage] }} this week</span>
+    <span class="small muted">Last week {{ score.last_week[stage] }} · This month {{ score.this_month[stage] }}</span>
+    {% if not loop.first %}<span class="laps-rate" title="Of the {{ labels[pipeline[loop.index0 - 1]]|lower }} from leads in the last {{ stats.days }} days, the share that became {{ labels[stage]|lower }}">{{ percent(stats.rates[stage]) or "–" }}</span>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+<p class="small muted laps-rate-note">The percentages between the boxes follow the {{ stats.reached.lead }} lead{{ "" if stats.reached.lead == 1 else "s" }} that came in during the last {{ stats.days }} days. A dash means there are too few to say yet.</p>
+
+<section class="panel mt-2" id="plan">
+  <div class="panel-head"><h2>Income goal</h2></div>
+  {% if plan and not plan.missing %}
+  <p class="laps-plan-line">To take <strong>{{ gbp(plan.goal_pence) }}</strong> a month at about <strong>{{ gbp((plan.sale_pence / 100)|round|int * 100) }}</strong> a sale, each week needs:</p>
+  <div class="laps-plan">{% for stage in pipeline %}
+    <div class="laps-plan-step{% if score.this_week[stage] >= plan.week[stage] %} is-met{% endif %}"><strong>{{ plan.week[stage] }}</strong><span>{{ labels[stage]|lower }}</span><span class="small">{{ score.this_week[stage] }} so far this week</span></div>
+  {% endfor %}</div>
+  <p class="small muted">That is {{ plan.month.sale }} sale{{ "" if plan.month.sale == 1 else "s" }} a month. The sale value is {{ "the typical sale you entered" if plan.from_typical else "the average of your recent sales on the board" }}; the steps use your own conversion rates from the last {{ stats.days }} days.</p>
+  {% elif plan and plan.missing == 'value' %}
+  <p>Enter a typical sale value below, or record a sale with its value, and the board will work out how many sales <strong>{{ gbp(plan.goal_pence) }}</strong> a month needs.</p>
+  {% elif plan %}
+  <p class="laps-plan-line"><strong>{{ gbp(plan.goal_pence) }}</strong> a month at about <strong>{{ gbp((plan.sale_pence / 100)|round|int * 100) }}</strong> a sale is <strong>{{ plan.month.sale }} sale{{ "" if plan.month.sale == 1 else "s" }} a month</strong>, about {{ plan.week.sale }} a week.</p>
+  <p class="small muted">The board cannot yet say how many leads, appointments and presentations that takes: it needs at least 5 recent {{ labels[pipeline[pipeline.index(plan.missing) - 1]]|lower }} with some reaching the next stage to know your conversion rate. Keep the board up to date and the numbers will appear.</p>
+  {% else %}
+  <p>Set a monthly income goal and the board works backwards to the leads, appointments, presentations and sales you need each week.</p>
+  {% endif %}
+  <form method="post" action="/laps/targets" class="form-inline mt-2">{{ view_field() }}
+    <div class="field"><label for="monthly_goal">Monthly income goal (£)</label><input id="monthly_goal" name="monthly_goal" inputmode="decimal" value="{{ '%.0f'|format(goals.monthly_goal_pence / 100) if goals.monthly_goal_pence else '' }}"></div>
+    <div class="field"><label for="typical_sale">Typical sale value (£)</label><input id="typical_sale" name="typical_sale" inputmode="decimal" value="{{ '%.0f'|format(goals.typical_sale_pence / 100) if goals.typical_sale_pence else '' }}"></div>
+    <button class="btn btn-primary">Save goal</button>
+  </form>
+  <p class="hint">Leave the typical sale value blank to use the average of your recent sales on the board.</p>
+</section>
+
+<section class="mt-2" aria-label="Board">
+  <div class="panel-head"><h2 class="laps-h2">The board</h2><span class="small muted">{{ gbp(open_value) or "£0" }} of expected value still open</span></div>
+  <details class="panel laps-add" id="add"{% if flash and flash_kind == 'err' %} open{% endif %}>
+    <summary class="btn btn-primary">Add a lead</summary>
+    <form method="post" action="/laps/deals" class="form-grid mt-2">{{ view_field() }}
+      <div class="field"><label for="name">Name</label><input id="name" name="name" required maxlength="200"></div>
+      <div class="field"><label for="deal-brand">Business</label><select id="deal-brand" name="brand" required>{% if not brand %}<option value="">Choose</option>{% endif %}{% for key, name in brands.items() %}<option value="{{ key }}"{% if brand == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="contact">Phone or email</label><input id="contact" name="contact" maxlength="200"></div>
+      <div class="field"><label for="source">Where they came from</label><input id="source" name="source" maxlength="100" placeholder="LinkedIn, WhatsApp, webinar, referral"></div>
+      <div class="field"><label for="offer">What they might buy</label><input id="offer" name="offer" maxlength="120" placeholder="Mentorship, territory, sourcing"></div>
+      <div class="field"><label for="value">Expected value (£)</label><input id="value" name="value" inputmode="decimal"></div>
+      <div class="field"><label for="stage">Stage now</label><select id="stage" name="stage">{% for stage in pipeline %}<option value="{{ stage }}">{{ labels[stage] }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="arrived">Date they came in</label><input id="arrived" name="arrived" type="date" max="{{ today.isoformat() }}"><span class="hint">Leave blank for today.</span></div>
+      <div class="field"><label for="next_step">Next step</label><input id="next_step" name="next_step" maxlength="200" placeholder="Call to book a time"></div>
+      <div class="field"><label for="next_step_on">Next step date</label><input id="next_step_on" name="next_step_on" type="date"></div>
+      <div class="field full"><label for="notes">Notes</label><textarea id="notes" name="notes" maxlength="5000"></textarea></div>
+      <div class="form-actions full"><button class="btn btn-primary">Add to board</button></div>
+    </form>
+  </details>
+  <div class="laps-board">
+    {% for stage in pipeline %}
+    <section class="laps-column laps-{{ stage }}" aria-label="{{ labels[stage] }}">
+      <h3>{{ labels[stage] }} <span class="laps-count">{{ columns[stage]|length }}</span></h3>
+      {% if stage == 'sale' %}<p class="small muted">Last {{ sales_days }} days</p>{% endif %}
+      {% for d in columns[stage] %}{{ card(d) }}{% else %}<p class="laps-empty">{{ "No sales in the last " ~ sales_days ~ " days." if stage == 'sale' else "Nothing here." }}</p>{% endfor %}
+    </section>
+    {% endfor %}
+  </div>
+  {% if lost_total %}<details class="panel mt-2"><summary>Lost ({{ lost_total }})</summary>
+    <div class="table-scroll"><table class="data"><thead><tr><th>Name</th><th>Business</th><th>Lost</th><th></th></tr></thead><tbody>
+    {% for d in lost %}<tr><td><a href="/laps/deals/{{ d.id }}">{{ d.name }}</a></td><td>{{ brands[d.brand] }}</td><td class="nowrap">{{ d.lost_at|uk("%d %b %Y") }}</td>
+      <td class="row-actions"><form method="post" action="/laps/deals/{{ d.id }}/stage">{{ view_field() }}<input type="hidden" name="to" value="reopen"><button class="btn btn-ghost btn-sm">Reopen</button></form></td></tr>{% endfor %}
+    </tbody></table></div>{% if lost_total > lost|length %}<p class="small muted">Showing the latest {{ lost|length }}.</p>{% endif %}</details>{% endif %}
+</section>
+
+<div class="two-col mt-2">
+  <section class="panel">
+    <div class="panel-head"><h2>Rhythm, week by week</h2></div>
+    <div class="table-scroll"><table class="data laps-weeks"><thead><tr><th>Week starting</th><th class="num">Leads</th><th class="num">Appts</th><th class="num">Pres</th><th class="num">Sales</th><th class="num">Sales value</th></tr></thead><tbody>
+    {% for w in weeks|reverse %}<tr{% if loop.first %} class="is-current"{% endif %}><td class="nowrap">{{ w.monday|date("%d %b") }}{% if loop.first %} (this week){% endif %}</td><td class="num">{{ w.lead }}</td><td class="num">{{ w.appointment }}</td><td class="num">{{ w.presentation }}</td><td class="num">{{ w.sale }}</td><td class="num">{{ gbp(w.income_pence) or "£0" }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2>Money</h2></div>
+    <div class="table-scroll"><table class="data"><thead><tr><th></th><th class="num">This month</th><th class="num">Last month</th></tr></thead><tbody>
+      <tr><td><strong>Sales made on the board</strong></td><td class="num"><strong>{{ gbp(score.this_month.income_pence) or "£0" }}</strong></td><td class="num">{{ gbp(score.last_month.income_pence) or "£0" }}</td></tr>
+      <tr><td colspan="3" class="small muted">Money received and cleared, as recorded elsewhere in Group HQ{% if brand %} (all businesses){% endif %}:</td></tr>
+      <tr><td><a href="/mentees">Mentee payments</a></td><td class="num">{{ gbp(money.this_month.mentees) or "£0" }}</td><td class="num">{{ gbp(money.last_month.mentees) or "£0" }}</td></tr>
+      <tr><td><a href="/franchise">Territory fees</a></td><td class="num">{{ gbp(money.this_month.territory) or "£0" }}</td><td class="num">{{ gbp(money.last_month.territory) or "£0" }}</td></tr>
+      <tr><td><a href="/growth">Product purchases</a></td><td class="num">{{ gbp(money.this_month.products) or "£0" }}</td><td class="num">{{ gbp(money.last_month.products) or "£0" }}</td></tr>
+      <tr><td><strong>Received in total</strong></td><td class="num"><strong>{{ gbp(money.this_month.total) or "£0" }}</strong></td><td class="num">{{ gbp(money.last_month.total) or "£0" }}</td></tr>
+    </tbody></table></div>
+    <p class="small muted">A sale on the board and its payment can be the same money, so the two are not added together.</p>
+    <h2 class="mt-2">Clients</h2>
+    <ul class="laps-clients">
+      <li><a href="/mentees"><strong>{{ clients.mentees }}</strong> active mentee{{ "" if clients.mentees == 1 else "s" }}</a></li>
+      <li><a href="/franchise"><strong>{{ clients.territories }}</strong> territor{{ "y" if clients.territories == 1 else "ies" }} sold</a> · {{ clients.territory_open }} in the franchise pipeline</li>
+      <li><a href="/growth">Paying product customers and MRR</a> are on Growth</li>
+    </ul>
+  </section>
+</div>
+
+{% if crm_leads %}<section class="panel mt-2">
+  <div class="panel-head"><h2>CRM leads not on the board <span class="status status-pending">{{ crm_waiting }}</span></h2><a class="btn btn-ghost btn-sm" href="/crm">CRM &amp; follow-up</a></div>
+  <div class="table-scroll"><table class="data"><thead><tr><th>Name</th><th>Business</th><th>Source</th><th></th></tr></thead><tbody>
+  {% for lead in crm_leads %}<tr><td>{{ lead.display_name }}</td><td>{{ brands[lead.brand] }}</td><td>{{ lead.source or "" }}</td>
+    <td class="row-actions"><form method="post" action="/laps/import">{{ view_field() }}<input type="hidden" name="lead_id" value="{{ lead.id }}"><button class="btn btn-ghost btn-sm">Add to board</button></form></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if crm_waiting > crm_leads|length %}<p class="small muted">Showing the latest {{ crm_leads|length }} of {{ crm_waiting }}.</p>{% endif %}
+</section>{% endif %}
+{% endblock %}
