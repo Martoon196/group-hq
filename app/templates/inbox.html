@@ -134,10 +134,17 @@
       <label>Find existing contact <input name="q" required maxlength="200"></label><button class="btn btn-secondary" type="submit">Search CRM</button></form>
       <p>Add the same person to another brand whenever it is relevant. Personal conversations stay Personal and do not copy messages. For Business conversations, messages are copied only to the CRMs you select. Linking does not subscribe anyone to marketing.</p>
     {% else %}<p>CRM connection needs setting up. No contact or consent has been created.</p>{% endif %}
-    <h3>Boards</h3>
-    <div class="row-actions"><form method="post" action="/laps/start"><input type="hidden" name="name" value="{{ conversation_name }}"><input type="hidden" name="source" value="{{ channels[account.channel] }}"><button class="btn btn-secondary" type="submit">Add to the LAPS board</button></form>
-    <form method="post" action="/acquisitions/start"><input type="hidden" name="seller_name" value="{{ conversation_name }}"><input type="hidden" name="source" value="{{ channels[account.channel] }}"><button class="btn btn-secondary" type="submit">Start a property deal</button></form></div>
-    <p class="inbox-notice">Opens the board's form with this person's name and channel filled in. No message text is copied.</p></aside>
+    <h3>Property deals</h3>
+    {% for d in property_deals %}<p><a class="btn btn-secondary" href="/acquisitions/deals/{{ d.id }}">Open property deal: {{ d.title }}</a></p>{% endfor %}
+    <div class="row-actions"><form method="post" action="/acquisitions/start"><input type="hidden" name="thread_ticket" value="{{ thread_ticket }}"><input type="hidden" name="seller_name" value="{{ conversation_name }}"><input type="hidden" name="source" value="{{ channels[account.channel] }}"><button class="btn btn-primary" type="submit">Start a property deal from this conversation</button></form></div>
+    {% set other_deals = open_property_deals|rejectattr('id', 'in', property_deals|map(attribute='id')|list)|list %}
+    {% if other_deals %}<form method="post" action="/acquisitions/link" style="margin-top:1rem"><input type="hidden" name="thread_ticket" value="{{ thread_ticket }}">
+      <label>Or add it to a deal already on the board <select name="deal_id" required><option value="">Choose a deal</option>{% for d in other_deals %}<option value="{{ d.id }}">{{ d.title }}</option>{% endfor %}</select></label>
+      <button class="btn btn-secondary" type="submit">Add conversation to this deal</button></form>{% endif %}
+    <p class="inbox-notice">The deal shows this conversation's messages by reading them from the Inbox. The conversation is filed under "Property offered to me".</p>
+    <h3>Sales leads</h3>
+    <div class="row-actions"><form method="post" action="/laps/start"><input type="hidden" name="name" value="{{ conversation_name }}"><input type="hidden" name="source" value="{{ channels[account.channel] }}"><button class="btn btn-secondary" type="submit">Add to the LAPS board</button></form></div>
+    <p class="inbox-notice">Opens the LAPS form with this person's name and channel filled in. To copy messages into a brand's CRM, use "Add to this brand's CRM" above.</p></aside>
   {% else %}<h2>Choose a conversation</h2><p>Your reply will use that conversation’s original account and channel.</p>{% endif %}
   </section>
 </div>

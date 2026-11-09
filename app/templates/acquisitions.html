@@ -54,7 +54,7 @@
   <section class="panel">
     <div class="panel-head"><h2>Completed in {{ year }}</h2></div>
     <div class="hub-money"><strong>{{ completed_year.count }}</strong><span>purchase{{ "" if completed_year.count == 1 else "s" }} completed{% if completed_year.pence %} · {{ gbp(completed_year.pence) }} paid in total{% endif %}</span></div>
-    <p class="small muted">A deal usually starts as a message. On an Inbox conversation, use "Start a property deal" and the person's name and channel are filled in for you.</p>
+    <p class="small muted">A deal usually starts as a message. On an Inbox conversation, use "Start a property deal from this conversation": the deal is attached to it and shows its messages.</p>
     <p><a class="btn btn-ghost btn-sm" href="/inbox">Open the Inbox</a></p>
   </section>
 </div>
@@ -64,6 +64,8 @@
   <details class="panel laps-add" id="add"{% if prefill or (flash and flash_kind == 'err') %} open{% endif %}>
     <summary class="btn btn-primary">Add a property deal</summary>
     <form method="post" action="/acquisitions/deals" class="form-grid mt-2">
+      {% if prefill.thread_ticket %}<input type="hidden" name="thread_ticket" value="{{ prefill.thread_ticket }}">
+      <p class="flash flash-ok full" style="grid-column:1/-1;margin:0">This deal will be attached to your conversation with {{ prefill.seller_name or "this person" }}, and its messages will show on the deal.</p>{% endif %}
       <h3>The property</h3>
       <div class="field"><label for="title">Address or working name</label><input id="title" name="title" required maxlength="200" placeholder="12 Sample Street, or Smith portfolio"></div>
       <div class="field"><label for="postcode">Postcode</label><input id="postcode" name="postcode" maxlength="10"></div>

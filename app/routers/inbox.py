@@ -8,6 +8,7 @@ from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import User
 from ..services import inbox as service, inbox_crm, inbox_organisation, inbox_scanner, inbox_claude, inbox_automations
+from ..services import acquisitions
 from ..services.inbox_providers import InboxError, client
 from ..templating import go, render
 
@@ -69,6 +70,8 @@ def thread_context(db, user, value, cursor=None):
             "whatsapp_window_open": bool(messages and messages[0].get("can_reply")),
             "history_key": digest(bound["thread"]),
             "message_window_limited": account.provider == "local" and cached.has_more,
+            "property_deals": acquisitions.deals_for(db, account, bound["thread"]),
+            "open_property_deals": acquisitions.open_deals(db),
             "crm_links": linked, "organisation": inbox_organisation.choices(db, user.id, account, bound["thread"], linked),
             "kinds": inbox_organisation.KINDS, "crm_configured": bool(service.config.R72_GROUP_HQ_INBOX_SECRET),
             "piuk_crm_enabled": service.config.GHQ_INBOX_PIUK_CRM_ENABLED,

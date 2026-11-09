@@ -135,7 +135,7 @@ def connect(db, user, thread_ticket, brand, display_name, contact_id="", copy_me
         syncing.discard(brand)
     # Commit local link + projection choice together. A background importer
     # must never observe a new link before the unchecked copy choice exists.
-    kind = settings["kind"] if settings["kind"] in ("personal", "pitch") else "business"
+    kind = settings["kind"] if settings["kind"] in ("personal", "pitch", "property") else "business"
     inbox_organisation.save(db, user, account, bound["thread"], kind,
         set(settings["brands"]) | {brand}, syncing, settings["note"])
     # Contacts/points are created only by Relaunch72; cache IDs here only after its confirmed response.

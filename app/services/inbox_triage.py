@@ -22,6 +22,14 @@ EXAMPLES = {
         "can i send you our pricing for my agency", "would you be interested in trying our software",
         "my team can build you a new website", "we offer virtual assistants for busy business owners",
     ],
+    "property": [
+        "i am selling my house what would you offer", "i have a portfolio of rental properties i want to sell",
+        "i am a landlord looking to sell up would you buy my properties",
+        "would you be interested in buying my property", "i have a development site for sale with planning",
+        "we are selling a block of flats off market are you buying", "i want a quick sale on my house can you make an offer",
+        "i have land for sale would you like the details", "selling my buy to let with tenants in place interested",
+        "i am retiring and want to sell my six rental houses", "we have an off market property available for you to buy",
+    ],
     "business": [
         "i am looking to buy an investment property in durham",
         "can you send the details for that house and arrange a viewing",
@@ -30,7 +38,6 @@ EXAMPLES = {
         "i am looking for bridging finance on a development project",
         "how do i join your mentoring course and what does it cost",
         "can i get the webinar link and the action plan",
-        "i am selling my house what would you offer",
         "do you have any deals that fit my budget",
         "what is the address and asking price of the property",
         "my tenants need help with repairs who do i contact",
@@ -47,6 +54,14 @@ SERVICES = (
     ("pp", "Buying, selling or sourcing a deal", r"\b(?:property predator|sell(?:ing)? my (?:house|property)|sourc(?:e|ing) (?:a |property )?deal|property sourc\w*|off.market deal)\b"),
     ("ordris", "Ordris enquiry", r"\bordris\b"),
 )
+# Someone offering Martin a property to buy. Checked on inbound text only, like everything else here. "Are you
+# selling the house?" is a buyer asking, so a possessive (my, our) or a plain "for sale" is required.
+_NOUN = r"(?:house|houses|home|flat|flats|property|properties|portfolio|land|plot|site|block|hmo|hmos|bungalow|building|rentals?|buy to lets?)"
+SELLER = re.compile(r"\b(?:(?:sell(?:ing)?|sale of|offload(?:ing)?) (?:up |off )?(?:my|our|some of my|several of my|\w+ of my) (?:(?!course|service|software|book|training|product|app\b)\w+ ){0,3}?" + _NOUN +
+                    r"|" + _NOUN + r" (?:for sale|to sell)"
+                    r"|(?:buy|purchase|make (?:me )?an offer (?:on|for)) (?:my|our) (?:(?!course|service|software|book|training|product|app\b)\w+ ){0,3}?" + _NOUN + r")\b", re.I)
+SELL_INTENT = re.compile(r"\b(?:(?:looking|want(?:ing|ed)?|need(?:ing)?|hoping|plan(?:ning)?|decided|have) to sell|thinking of selling|sell(?:ing)? up)\b", re.I)
+PROPERTY_NOUN = re.compile(r"\b" + _NOUN + r"\b", re.I)
 HUMAN = re.compile(r"\b(?:complain\w*|refund|solicitor|court|formal notice|lawyer|fraud|payment details|bank details|transfer money|urgent|emergency|stop|unsubscribe|do not contact|don't contact|speak to (?:martin|a person|a human))\b", re.I)
 def tokens(text):
     return re.findall(r"[a-z]{2,}", text.casefold())
@@ -67,6 +82,14 @@ def analyse(messages, account_brand=None):
     certain = len(set(words)) >= 3 and scores[0][0] - scores[1][0] >= 1.0
     kind = scores[0][1] if certain else "unclassified"
     routes = [(brand, intent) for brand, intent, pattern in SERVICES if re.search(pattern, evidence, re.I)]
+    seller = bool(SELLER.search(evidence) or (SELL_INTENT.search(evidence) and PROPERTY_NOUN.search(evidence)))
+    if kind == "property" and not seller:
+        kind = "unclassified"           # the word counts alone are not enough to call someone a seller
+    if seller and kind in ("unclassified", "business"):
+        kind = "property"
+    if kind == "property":
+        return {"kind": kind, "brands": [], "intent": "Offering a property to buy", "needs_owner": True,
+                "reason": "A possible property to buy: yours to answer", "draft": "", "source": "Local classifier"}
     if kind == "unclassified" and routes and re.search(r"\b(?:need|looking for|looking to|interested in|would like|can you|could you|how do i)\b", latest, re.I):
         kind = "business"
     brands = [b for b, _ in routes] if kind == "business" else []

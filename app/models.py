@@ -1094,3 +1094,20 @@ class Acquisition(TimestampMixin, Base):
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     checks: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     origin: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class AcquisitionThread(Base):
+    """An Inbox conversation attached to a property deal (alembic/versions/0015_acquisition_threads.py). Only the
+    reference is kept: the deal page reads the messages through the Inbox, as the owner, each time it is opened,
+    so nothing is copied and a disconnected account shows nothing."""
+    __tablename__ = "acquisition_threads"
+    deal_id: Mapped[int] = mapped_column(ForeignKey("acquisitions.id", ondelete="CASCADE"), primary_key=True)
+    account_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    thread_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    thread_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    participant_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    name: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    __table_args__ = (Index("ix_acquisition_threads_thread", "account_key", "thread_sha256"),)

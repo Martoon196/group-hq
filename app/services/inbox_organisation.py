@@ -7,7 +7,8 @@ from ..models import AppSetting, utcnow
 from .inbox_providers import BRANDS
 from .audit import audit
 
-KINDS = {"unclassified": "Unclassified", "personal": "Friends & personal", "pitch": "Selling to me", "business": "Business for me"}
+KINDS = {"unclassified": "Unclassified", "personal": "Friends & personal", "pitch": "Selling to me",
+         "business": "Business for me", "property": "Property offered to me"}
 
 
 def key(user_id, account, thread_id):
@@ -42,4 +43,4 @@ def save(db, user, account, thread_id, kind, brands, sync_brands, note=""):
 
 
 def permits_projection(choices, brand):
-    return choices["kind"] == "business" and brand in choices["sync_brands"]
+    return choices["kind"] in ("business", "property") and brand in choices["sync_brands"]

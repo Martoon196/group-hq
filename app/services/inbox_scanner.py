@@ -15,9 +15,10 @@ from ..models import AppSetting, User, utcnow
 from . import inbox, inbox_claude, inbox_triage
 from .inbox_providers import client, InboxError
 
-LABELS = {"business": "Business for me", "pitch": "Selling to me", "personal": "Friends & personal", "unclassified": "Unclear"}
+LABELS = {"business": "Business for me", "property": "Property offered to me", "pitch": "Selling to me",
+          "personal": "Friends & personal", "unclassified": "Unclear"}
 FILTERS = {**LABELS, "handoff": "Needs me", "unscanned": "Awaiting scan"}
-SCAN_VERSION = "20261109-1"
+SCAN_VERSION = "20261109-2"      # -2: the property category; every conversation is looked at again
 LOG = logging.getLogger(__name__)
 
 

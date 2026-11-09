@@ -9,12 +9,14 @@ the solicitor's own list comes first.
 """
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import ACQUISITION_KINDS, ACQUISITION_PLANS, ACQUISITION_STAGES, SELLER_TYPES, Acquisition
+from ..models import (ACQUISITION_KINDS, ACQUISITION_PLANS, ACQUISITION_STAGES, SELLER_TYPES, Acquisition,
+                      AcquisitionThread)
 from . import laps
 
 PIPELINE = ACQUISITION_STAGES[:-1]              # in order; "lost" sits outside it
@@ -135,3 +137,39 @@ def completed_between(db: Session, start: datetime, end: datetime) -> dict:
     n, total = db.execute(select(func.count(), func.coalesce(func.sum(Acquisition.agreed_pence), 0)).where(
         Acquisition.completed_at >= start, Acquisition.completed_at < end)).one()
     return {"count": n, "pence": int(total)}
+
+
+# ---- Inbox conversations attached to a deal ------------------------------------------------------------
+
+def thread_sha(thread_id: str) -> str:
+    return hashlib.sha256(thread_id.encode()).hexdigest()
+
+
+def attach(db: Session, deal: Acquisition, account, bound: dict, user_id: int) -> bool:
+    """Attach the Inbox conversation a resolved ticket names (app.services.inbox.resolve) to deal. Returns False
+    when it was attached already. The caller commits."""
+    key = (deal.id, account.key, thread_sha(bound["thread"]))
+    if db.get(AcquisitionThread, key):
+        return False
+    db.add(AcquisitionThread(deal_id=deal.id, account_key=account.key, thread_sha256=key[2], user_id=user_id,
+                             thread_id=bound["thread"], participant_id=bound.get("participant"),
+                             name=str(bound.get("name") or "")[:500]))
+    return True
+
+
+def attached(db: Session, deal_id: int) -> list[AcquisitionThread]:
+    return list(db.scalars(select(AcquisitionThread).where(AcquisitionThread.deal_id == deal_id)
+                           .order_by(AcquisitionThread.created_at, AcquisitionThread.account_key)))
+
+
+def deals_for(db: Session, account, thread_id: str) -> list[Acquisition]:
+    """The deals an Inbox conversation is attached to, newest first."""
+    return list(db.scalars(select(Acquisition).join(AcquisitionThread, AcquisitionThread.deal_id == Acquisition.id)
+                           .where(AcquisitionThread.account_key == account.key,
+                                  AcquisitionThread.thread_sha256 == thread_sha(thread_id))
+                           .order_by(Acquisition.id.desc())))
+
+
+def open_deals(db: Session, limit: int = 100) -> list[Acquisition]:
+    return list(db.scalars(select(Acquisition).where(Acquisition.stage.in_(OPEN))
+                           .order_by(Acquisition.updated_at.desc(), Acquisition.id.desc()).limit(limit)))

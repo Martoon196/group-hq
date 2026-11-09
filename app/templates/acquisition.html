@@ -1,6 +1,7 @@
 {% extends "app_base.html" %}
 {% set title = deal.title ~ " | Property deals | Group HQ" %}
 {% block head %}<link rel="stylesheet" href="/assets/laps.css">{% endblock %}
+{% from "_channel_icons.html" import channel_icon %}
 {% block content %}
 {% set at_index = pipeline.index(furthest) %}
 <section class="hub-hero">
@@ -65,6 +66,20 @@
         <div class="field"><label for="why_lost">Lost or withdrawn? Say why</label><input id="why_lost" name="lost_reason" maxlength="200" placeholder="Seller chose another buyer"></div>
         <button class="btn btn-ghost btn-sm">Mark lost</button></form>{% endif %}
       <p class="small muted mt-1">Moving forward records today for that stage. Moving back clears the later stages.</p>
+    </section>
+    <section class="panel mt-1" id="messages">
+      <div class="panel-head"><h2>Messages</h2>{% if conversations %}<span class="small muted">read live from the Inbox</span>{% endif %}</div>
+      {% for c in conversations %}
+      <div class="acq-thread">
+        <div class="acq-thread-head"><strong>{% if c.account %}{{ channel_icon(c.account.channel, c.account.provider, 18) }} {% endif %}{{ c.link.name or "Conversation" }}</strong>
+          <span class="row-actions">{% if c.ticket %}<a class="btn btn-primary btn-sm" href="/inbox?account={{ c.account.key|urlencode }}&amp;thread={{ c.ticket|urlencode }}">Reply in the Inbox</a>{% endif %}
+          <form method="post" action="/acquisitions/deals/{{ deal.id }}/unlink"><input type="hidden" name="account_key" value="{{ c.link.account_key }}"><input type="hidden" name="thread_sha256" value="{{ c.link.thread_sha256 }}"><button class="btn btn-ghost btn-sm">Remove</button></form></span></div>
+        {% if c.account %}<p class="small muted">{{ c.account.label }}{% if c.account.channel in channels %} · {{ channels[c.account.channel] }}{% endif %}</p>{% endif %}
+        {% if c.error %}<p class="small bad-text">{{ c.error }}</p>{% endif %}
+        <div class="acq-messages">{% for m in c.messages %}<article class="acq-message {{ 'is-out' if m.direction == 'outgoing' else 'is-in' }}">
+          <strong>{{ 'You' if m.direction == 'outgoing' else m.name or c.link.name }}</strong><p>{{ m.body }}</p><small>{{ m.occurred_at }}</small></article>{% else %}{% if not c.error %}<p class="small muted">No messages loaded.</p>{% endif %}{% endfor %}</div>
+      </div>
+      {% else %}<p class="small muted">No conversation is attached yet. Open the seller's conversation in the <a href="/inbox">Inbox</a> and choose "Add conversation to this deal".</p>{% endfor %}
     </section>
     <section class="panel mt-1">
       <h2>Rough sums</h2>
