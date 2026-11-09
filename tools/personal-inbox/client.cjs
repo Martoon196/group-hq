@@ -8,9 +8,9 @@ const channel=account=>({facebook:'facebook',facebookgo:'facebook',meta:'faceboo
 
 class EngineClient {
   constructor(token,fetcher=fetch){this.token=token;this.fetcher=fetcher;}
-  async request(path,{method='GET',body}={}){
+  async request(path,{method='GET',body,timeoutMs=10000}={}){
     if(!path.startsWith('/v1/')||path.includes('://'))throw Error('invalid_path');
-    let response;try{response=await this.fetcher(ENGINE+path,{method,redirect:'error',signal:AbortSignal.timeout(10000),
+    let response;try{response=await this.fetcher(ENGINE+path,{method,redirect:'error',signal:AbortSignal.timeout(Math.min(60000,Math.max(1000,timeoutMs))),
       headers:{Authorization:'Bearer '+this.token,'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});}
     catch{throw Error(method==='GET'?'engine_unavailable':'send_outcome_unknown');}
     if(!response.ok)throw Error(method!=='GET'&&(response.status>=500||response.status===408)?'send_outcome_unknown':'engine_http_'+response.status);

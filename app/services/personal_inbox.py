@@ -6,7 +6,7 @@ import re
 import time
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
@@ -39,7 +39,7 @@ def problem(code, status=400):
     raise HTTPException(status, code)
 
 
-async def authenticated_body(request):
+async def authenticated_body(request: Request):
     secret = config.GHQ_PERSONAL_INBOX_SECRET
     if not 32 <= len(secret) <= 256 or not config.GHQ_PERSONAL_INBOX_OWNER_EMAIL:
         problem("Personal connector is not configured", 503)

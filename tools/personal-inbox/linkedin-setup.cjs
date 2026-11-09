@@ -15,8 +15,9 @@ function part(value) {
   if (typeof value !== 'string' || !value || value.length > 500 || value === '.' || value === '..') throw Error('invalid_step');
   return encodeURIComponent(value);
 }
-function html(body) {
+function html(body,refresh=false) {
   return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'+
+    (refresh?'<meta http-equiv="refresh" content="2;url=/linkedin">':'')+
     '<title>Connect personal LinkedIn - Growth HQ</title><style>body{font:18px/1.55 system-ui;color:#18251d;background:#f7f6f1;max-width:38rem;margin:7vh auto;padding:1.5rem}h1{line-height:1.2}label{display:block;margin:1rem 0}input{display:block;padding:.65rem;width:calc(100% - 2rem);font:inherit}button,a{font:inherit}button{background:#164a36;color:white;border:0;padding:.65rem 1rem;border-radius:.3rem;cursor:pointer}a{color:#164a36}</style>'+
     '<main><h1>Connect personal LinkedIn</h1>'+body+'</main></html>';
 }
@@ -33,6 +34,7 @@ async function readForm(req) {
 async function createSetup(engine, {port=PORT, discovered=async()=>{}}={}) {
   let origin, token=nonce(), session=null, busy=false, linked=false, registered=false;
   const path='/linkedin';
+  let checkOnly=false, note='', phase='ready';
   const linkedAccounts=async()=> (await engine.accounts()).filter(a=>a.bridge?.id===BRIDGE &&
     a.bridge?.provider==='local' && ['connected','backfilling'].includes(a.status));
   function update(result) {
@@ -45,8 +47,11 @@ async function createSetup(engine, {port=PORT, discovered=async()=>{}}={}) {
       '<input type="hidden" name="action" value="'+action+'">'+fields;
   }
   const button=label=>'<button>'+label+'</button></form>';
-  function view(note='') {
-    let body=note?'<p role="alert">'+esc(note)+'</p>':'';
+  function view(message=note) {
+    if (busy) return html('<p role="status">Checking the sign-in with Beeper. This page refreshes while LinkedIn responds.</p><a href="/linkedin">Check status now</a>',true);
+    let body=message?'<p role="alert">'+esc(message)+'</p>':'';
+    if (checkOnly && !linked) return html(body+'<p>Check the existing sign-in before choosing to start again.</p>'+
+      form('refresh')+button('Check existing sign-in')+form('restart')+button('Start a fresh sign-in'));
     if(linked) {
       body+='<p>LinkedIn is connected to Beeper on this computer.</p>';
       if(registered)body+='<p><a href="'+SETTINGS+'">Open Growth HQ and enable your LinkedIn inbox</a>. Choose the default business and save the account.</p>';
@@ -66,6 +71,11 @@ async function createSetup(engine, {port=PORT, discovered=async()=>{}}={}) {
         body+='<label>'+esc(label)+'<input name="f'+i+'" type="'+(sensitive?'password':'text')+'" autocomplete="off" maxlength="2000"'+(field.optional?'':' required')+'></label>';
       }
       body+=button('Continue with Beeper');
+    } else if(session.status==='waiting_for_display' && session.currentStep?.type==='display_and_wait') {
+      const display=session.currentStep.display;
+      body+='<p>'+esc(session.currentStep.instructions || 'Complete verification in LinkedIn, then continue here.')+'</p>';
+      if(display?.type==='code')body+='<p><strong>'+esc(display.data)+'</strong></p>';
+      body+=form('display')+button('I completed the LinkedIn verification');
     } else {
       body+='<p>'+esc(session.currentStep?.instructions || 'Complete the network verification, then check again.')+'</p>'+
         form('refresh')+button('Check connection');
@@ -81,6 +91,12 @@ async function createSetup(engine, {port=PORT, discovered=async()=>{}}={}) {
     }
   }
   async function act(action, fields) {
+    if(action==='restart') {
+      if(!checkOnly)throw Error('stale_step');
+      await reconcile();
+      if(linked)return;
+      session=null;checkOnly=false;action='start';
+    }
     if(action==='start'){
       if(session && !['failed','cancelled'].includes(session.status))throw Error('stale_step');
       await reconcile();
@@ -103,9 +119,16 @@ async function createSetup(engine, {port=PORT, discovered=async()=>{}}={}) {
         values[field.id]=value;
       }
       update(await engine.request(BASE+'/login-sessions/'+part(session.loginSessionID)+'/steps/'+part(step.stepID),
-        {method:'POST',body:{type:'user_input',source:'api',fields:values}}));
+        {method:'POST',timeoutMs:45000,body:{type:'user_input',source:'api',fields:values}}));
+    }else if(action==='display'){
+      const step=session?.currentStep;
+      if(session?.status!=='waiting_for_display'||step?.type!=='display_and_wait')throw Error('stale_step');
+      update(await engine.request(BASE+'/login-sessions/'+part(session.loginSessionID)+'/steps/'+part(step.stepID),
+        {method:'POST',timeoutMs:45000,body:{type:'display_and_wait',source:'api'}}));
     }else if(action==='refresh'){
+      const before=session?.currentStep?.stepID;
       if(session)update(await engine.request(BASE+'/login-sessions/'+part(session.loginSessionID)));
+      if(session?.currentStep?.stepID!==before || ['failed','cancelled','complete'].includes(session?.status))checkOnly=false;
       await reconcile();
       return;
     }else throw Error('invalid_form');
@@ -115,20 +138,39 @@ async function createSetup(engine, {port=PORT, discovered=async()=>{}}={}) {
     const reply=(status,body)=>{res.writeHead(status,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',
       'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
       'referrer-policy':'no-referrer','x-content-type-options':'nosniff'});res.end(body);};
-    if(!origin||req.headers.host!==new URL(origin).host||req.url!==path)return reply(404,html('<p>Page unavailable.</p>'));
+    if(!origin||req.headers.host!==new URL(origin).host)return reply(404,html('<p>Page unavailable.</p>'));
+    if(req.method==='GET' && req.url===path+'/status') {
+      res.writeHead(200,{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'});
+      return res.end(JSON.stringify({phase:busy?'checking':phase,connected:linked,registered,
+        session:session?.status||null,step:session?.currentStep?.type||null,manualCheck:checkOnly}));
+    }
+    if(req.url!==path)return reply(404,html('<p>Page unavailable.</p>'));
     if(req.method==='GET')return reply(200,view());
     if(req.method!=='POST'||req.headers.origin!==origin)return reply(403,html('<p>Use the local setup tab.</p>'));
     let fields;
     try{fields=await readForm(req);}catch{return reply(400,html('<p>Invalid setup form.</p>'));}
     if(busy||fields.get('token')!==token)return reply(409,view('The step changed. Use the current form.'));
-    busy=true;token=nonce();
-    try{
-      await act(fields.get('action'),fields);
-      res.writeHead(303,{location:path,'cache-control':'no-store'});res.end();
-    }catch {
-      // Neither a failed provider response nor submitted fields may enter logs or HTML.
-      return reply(409,view('Beeper could not complete this step. Check the connection and try again.'));
-    }finally{busy=false;}
+    const action=fields.get('action');
+    if(!['start','submit','refresh','display','restart'].includes(action) || (checkOnly && !['refresh','restart'].includes(action)))
+      return reply(409,view('Use the current sign-in step.'));
+    busy=true;token=nonce();note='';phase='checking';
+    // Respond before provider IO so the owner sees a bounded status page. Never replay a credentials POST.
+    void (async()=>{
+      try {
+        await act(action,fields);phase=linked?'connected':'ready';
+      } catch {
+        phase='needs_attention';
+        if (action==='submit'||action==='display') {
+          checkOnly=true;
+          try { await act('refresh',new URLSearchParams()); } catch { /* Use the explicit existing-session check. */ }
+          if(checkOnly && !linked)note='Beeper has not confirmed this step. Check the existing sign-in to see whether LinkedIn accepted it.';
+        } else {
+          if(action==='refresh' && session)checkOnly=true;
+          note='Beeper could not complete the check. You can check again.';
+        }
+      } finally {busy=false;}
+    })();
+    res.writeHead(303,{location:path,'cache-control':'no-store'});res.end();
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
   origin='http://127.0.0.1:'+server.address().port;
