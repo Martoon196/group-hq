@@ -1,4 +1,5 @@
 {% extends "app_base.html" %}
+{% from "_channel_icons.html" import channel_icon %}
 {% macro crm_business_select() %}
 <label>Business
   <select name="brand" required>
@@ -17,29 +18,50 @@
 {% endmacro %}
 {% block head %}<link rel="stylesheet" href="/assets/inbox.css">{% endblock %}
 {% block content %}
-<a class="btn btn-secondary" href="/inbox/history">Message history</a>
-<div class="page-head"><div><p class="eyebrow">Growth HQ</p><h1>Inbox</h1>
+<div class="page-head inbox-head"><div><p class="eyebrow">Growth HQ</p><h1>Inbox</h1>
 <p>Personal and business conversations in one place. Replies use the original account and channel.</p></div>
-<a class="btn btn-secondary" href="/inbox/automations">Reply rules &amp; handoff</a></div>
-<p><a href="/inbox/comments">Public LinkedIn comments</a> · <a href="/inbox/video-comments">Public YouTube &amp; TikTok comments</a> · <a href="/crm/channels/whatsapp/keywords">WhatsApp group keywords</a></p>
-<p><a class="btn btn-primary" href="/inbox/channels">Inbox connections</a> <a class="btn btn-secondary" href="/inbox/connect">Connect personal Messenger &amp; LinkedIn</a></p>
+<nav class="inbox-actions" aria-label="Inbox tools">
+  <a class="btn btn-primary" href="/inbox/channels">Inbox connections</a>
+  <a class="btn btn-secondary" href="/inbox/connect">Connect personal Messenger &amp; LinkedIn</a>
+  <a class="btn btn-ghost" href="/inbox/history">Message history</a>
+  <a class="btn btn-ghost" href="/inbox/automations">Reply rules &amp; handoff</a>
+</nav></div>
+<section class="inbox-surfaces" aria-label="Public comments and group keywords">
+  <a class="inbox-surface card" href="/inbox/video-comments"><span class="inbox-surface-icons">{{ channel_icon('youtube', size=26) }}{{ channel_icon('tiktok', size=26) }}</span>
+    <span><strong>YouTube &amp; TikTok</strong><small>Public comments on your videos</small></span></a>
+  <a class="inbox-surface card" href="/inbox/comments"><span class="inbox-surface-icons">{{ channel_icon('linkedin', size=26) }}</span>
+    <span><strong>LinkedIn company posts</strong><small>Public comments on your pages</small></span></a>
+  <a class="inbox-surface card" href="/crm/channels/whatsapp/keywords"><span class="inbox-surface-icons">{{ channel_icon('whatsapp', size=26) }}</span>
+    <span><strong>WhatsApp groups</strong><small>Keyword requests from groups</small></span></a>
+</section>
 {% if setup_error %}<div class="flash flash-err">{{ setup_error }}</div>{% endif %}
 {% if triage_owner %}<form method="post" action="/inbox/scan" class="card scan-control">
   <div><strong>Inbox triage</strong><p>{{ 'Scanning recent messages on connected accounts.' if triage_enabled else 'Scan connected conversations for enquiries, personal chats and sales pitches.' }} {{ 'Claude can suggest replies for your review.' if claude_configured else 'Using the local classifier.' }}</p></div>
   <input type="hidden" name="enabled" value="{{ 'false' if triage_enabled else 'true' }}"><button class="btn btn-secondary">{{ 'Pause scanning' if triage_enabled else 'Start scanning' }}</button>
 </form>{% endif %}
 <form class="inbox-filters card" method="get" action="/inbox">
+  <div class="inbox-filter-row">
   <label>Show <select name="triage"><option value="">All inbox labels</option>{% for key,name in triage_filters|default({})|items %}<option value="{{ key }}"{% if triage_filter == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
   <label>Conversation type <select name="kind"><option value="">All conversations</option>{% for key,name in kinds.items() %}<option value="{{ key }}"{% if kind_filter == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
   <label>Business <select name="brand"><option value="">All businesses</option>{% for key,name in brands.items() %}
     <option value="{{ key }}"{% if brand_filter == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
   <label>Channel <select name="channel"><option value="">All channels</option>{% for key,name in channels.items() %}
     <option value="{{ key }}"{% if channel_filter == key %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
-  <fieldset><legend>Accounts <small>Leave all unticked to see every connected account.</small></legend>
-    {% for a in accounts %}<label class="inbox-checkbox"><input type="checkbox" name="account" value="{{ a.key }}"{% if a.key in selected %} checked{% endif %}>
-    {{ a.label }} · {{ channels[a.channel] }}</label>{% endfor %}
-  </fieldset><button class="btn btn-primary" type="submit">Apply &amp; refresh</button>
-  <a class="btn btn-ghost" href="/inbox">Show all</a>
+  </div>
+  {% if accounts %}<fieldset class="inbox-accounts"><legend>Accounts <small>Leave all unticked to see every connected account.</small></legend>
+    {% set personal = accounts|selectattr('provider', 'equalto', 'local')|list %}
+    {% if personal %}<div class="inbox-account-group"><h3>Personal</h3><div class="inbox-chips">
+      {% for a in personal %}<label class="inbox-chip"><input type="checkbox" name="account" value="{{ a.key }}"{% if a.key in selected %} checked{% endif %}>
+      {{ channel_icon(a.channel, a.provider) }}<span>{{ a.label }}</span></label>{% endfor %}
+    </div></div>{% endif %}
+    {% for key, name in brands.items() %}{% set group = accounts|rejectattr('provider', 'equalto', 'local')|selectattr('brand', 'equalto', key)|list %}
+    {% if group %}<div class="inbox-account-group"><h3>{{ name }}</h3><div class="inbox-chips">
+      {% for a in group %}{% set prefix = name ~ ' · ' %}<label class="inbox-chip"><input type="checkbox" name="account" value="{{ a.key }}"{% if a.key in selected %} checked{% endif %}>
+      {{ channel_icon(a.channel, a.provider) }}<span>{{ a.label[prefix|length:] if a.label.startswith(prefix) else a.label }}</span></label>{% endfor %}
+    </div></div>{% endif %}{% endfor %}
+  </fieldset>{% endif %}
+  <div class="inbox-filter-actions"><button class="btn btn-primary" type="submit">Apply &amp; refresh</button>
+  <a class="btn btn-ghost" href="/inbox">Show all</a></div>
 </form>
 {% if not accounts %}<div class="card"><h2>Connect your inboxes</h2><p>No inbox account has been connected to this screen yet.</p>
 <p>Your existing email, SMS and WhatsApp workspaces continue to work. Personal Messenger and LinkedIn need their own account connection.</p>
@@ -52,7 +74,7 @@
     {% if older_page or newer_page %}<nav aria-label="Conversation pages">{% if newer_page %}<a href="{{ newer_page }}">Newer conversations</a>{% endif %} {% if older_page %}<a href="{{ older_page }}">Older conversations</a>{% endif %}</nav>{% endif %}
     {% for t in threads %}<a class="inbox-thread{% if thread_ticket is defined and thread_ticket == t.ticket %} is-active{% endif %}"
         href="/inbox?account={{ t.account.key|urlencode }}&amp;thread={{ t.ticket|urlencode }}">
-      <strong>{{ t.name }}</strong><span>{{ t.account.label }} · {{ channels[t.account.channel] }}</span>
+      <strong class="thread-title">{{ channel_icon(t.account.channel, t.account.provider, 18) }}{{ t.name }}</strong><span>{{ t.account.label }}</span>
       {% if t.category %}<span class="triage-label triage-{{ t.category }}">{{ triage_filters[t.category] }}</span>{% endif %}
       {% if t.triage.intent %}<small>{{ t.triage.intent }}{% for b in t.triage.brands %} · {{ brands[b] }}{% endfor %}</small>{% endif %}
       {% if t.needs_owner %}<small>Needs me</small>{% endif %}
@@ -61,7 +83,7 @@
   </section>
   <section class="inbox-conversation card" aria-label="Selected conversation">
   {% if account is defined %}
-    <h2>{{ conversation_name }}</h2><p class="inbox-channel">Private message · {{ channels[account.channel] }} · {{ account.label }}</p>
+    <h2 class="inbox-conversation-name">{{ channel_icon(account.channel, account.provider, 24) }}{{ conversation_name }}</h2><p class="inbox-channel">Private message · {{ channels[account.channel] }} · {{ account.label }}</p>
     {% if thread_error %}<div class="flash flash-err">{{ thread_error }}</div>{% endif %}
     {% if triage and triage.kind %}<aside class="card scan-detail"><strong>{{ triage.source }} · {{ triage_labels[triage.kind] }}</strong>
     <p>{{ triage.intent }}{% for b in triage.brands %} · {{ brands[b] }}{% endfor %}</p>
