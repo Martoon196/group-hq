@@ -35,7 +35,7 @@ from ..services.connectors.pp import AFFILIATE_KEPT
 from ..services.entitlements import (BLOCKED_ERROR, MAX_ATTEMPTS, RunSummary, display_state, hold_of, is_blocked,
                                      pause_grant, recompute_all, recompute_person, reset_for_retry, resume_grant,
                                      utc_today)
-from ..templating import go, render
+from ..templating import Refused, go, render
 
 router = APIRouter(prefix="/grants", dependencies=[Depends(check_origin)])
 
@@ -159,10 +159,17 @@ def _run_page(request: Request, user: User, summary: RunSummary, *, scope: str, 
     return render(request, "grants/run.html", ctx)
 
 
+def run_recompute_all(db: Session, user: User, dry_run: str, today: str) -> RunSummary:
+    """Run the nightly recompute now for everyone (the Grants screen's Run form, and the operator tool
+    grant_recompute_all). dry_run is the form's flag ("1" plans the calls only); today the as-of date, which a live run
+    can only have as today. Raises HTTPException(400) with the form's sentence for a bad date."""
+    return recompute_all(db, today=_parse_today(today, _dry(dry_run)), dry_run=bool(dry_run), actor=user)
+
+
 @router.post("/recompute", response_class=HTMLResponse)
 def run_now(request: Request, dry_run: str = Form(""), today: str = Form(""), db: Session = Depends(get_db),
             user: User = Depends(require_admin)):
-    summary = recompute_all(db, today=_parse_today(today, _dry(dry_run)), dry_run=bool(dry_run), actor=user)
+    summary = run_recompute_all(db, user, dry_run, today)
     return _run_page(request, user, summary, scope="everyone")
 
 
@@ -208,15 +215,33 @@ def grant_detail(request: Request, grant_id: int, db: Session = Depends(get_db),
     return render(request, "grants/detail.html", ctx)
 
 
+def run_recompute_one(db: Session, user: User, grant: EntitlementGrant, dry_run: str, today: str) -> RunSummary:
+    """Recompute the grant's person only (the grant page's Recompute, and the operator tool grant_recompute_person).
+    Same dry_run and today rules as run_recompute_all."""
+    day = _parse_today(today, _dry(dry_run))
+    decisions = recompute_person(db, grant.person, day, bool(dry_run), actor=user)
+    return RunSummary(today=day, dry_run=_dry(dry_run), people=1, decisions=decisions)
+
+
 @router.post("/{grant_id}/recompute", response_class=HTMLResponse)
 def recompute_one(request: Request, grant_id: int, dry_run: str = Form(""), today: str = Form(""),
                   db: Session = Depends(get_db), user: User = Depends(require_admin)):
     grant = _grant_or_404(db, grant_id)
-    person = grant.person
-    day = _parse_today(today, _dry(dry_run))
-    decisions = recompute_person(db, person, day, bool(dry_run), actor=user)
-    summary = RunSummary(today=day, dry_run=_dry(dry_run), people=1, decisions=decisions)
-    return _run_page(request, user, summary, scope=person.person_key, back=f"/grants/{grant.id}")
+    summary = run_recompute_one(db, user, grant, dry_run, today)
+    return _run_page(request, user, summary, scope=grant.person.person_key, back=f"/grants/{grant.id}")
+
+
+def run_retry(db: Session, user: User, grant: EntitlementGrant, dry_run: str) -> RunSummary:
+    """Clear a failed or blocked grant and recompute the person (the grant page's Retry, and the operator tool
+    grant_retry). With dry_run="1" the attempt counter is still reset but the calls are only planned. Raises Refused
+    for a grant that is neither failed nor blocked, nothing changed."""
+    if grant.state != "failed" and not grant.last_error:
+        raise Refused("Only a failed or blocked grant can be retried.")
+    reset_for_retry(db, grant, actor=user)
+    db.commit()
+    day = utc_today()
+    decisions = recompute_person(db, grant.person, day, bool(dry_run), actor=user)
+    return RunSummary(today=day, dry_run=_dry(dry_run), people=1, decisions=decisions)
 
 
 @router.post("/{grant_id}/retry", response_class=HTMLResponse)
@@ -225,15 +250,11 @@ def retry(request: Request, grant_id: int, dry_run: str = Form(""), db: Session 
     """Clear the failure and recompute the person. With dry_run=1 the attempt counter is still reset but the
     calls are only planned, so a blocked grant can be looked at before anything is sent."""
     grant = _grant_or_404(db, grant_id)
-    if grant.state != "failed" and not grant.last_error:
-        return go(f"/grants/{grant.id}", err="Only a failed or blocked grant can be retried.")
-    reset_for_retry(db, grant, actor=user)
-    db.commit()
-    person = grant.person
-    day = utc_today()
-    decisions = recompute_person(db, person, day, bool(dry_run), actor=user)
-    summary = RunSummary(today=day, dry_run=_dry(dry_run), people=1, decisions=decisions)
-    return _run_page(request, user, summary, scope=f"retry for {person.person_key}", back=f"/grants/{grant.id}")
+    try:
+        summary = run_retry(db, user, grant, dry_run)
+    except Refused as refusal:
+        return go(f"/grants/{grant.id}", err=str(refusal))
+    return _run_page(request, user, summary, scope=f"retry for {grant.person.person_key}", back=f"/grants/{grant.id}")
 
 
 # ---- holds: Pause and Resume -------------------------------------------------------------------------------
@@ -282,18 +303,26 @@ def pause(grant_id: int, reason: str = Form(""), next: str = Form(""), db: Sessi
     return go(back, ok=ok, err=err)
 
 
+def run_resume(db: Session, user: User, grant: EntitlementGrant) -> RunSummary:
+    """Clear the grant's hold and recompute the person at once (the grant page's Resume, and the operator tool
+    grant_resume). Raises Refused, nothing changed, when the grant is not paused on its own."""
+    if grant.held_at is None:
+        if grant.person.access_held_at is not None:
+            raise Refused("This grant is not paused on its own: all access for the person is paused. Resume that "
+                          "on their mentee page.")
+        raise Refused("That grant is not paused.")
+    day = utc_today()
+    decisions = resume_grant(db, grant, day, actor=user)
+    return RunSummary(today=day, dry_run=bool(config.CONNECTORS_DRY_RUN), people=1, decisions=decisions)
+
+
 @router.post("/{grant_id}/resume", response_class=HTMLResponse)
 def resume(request: Request, grant_id: int, next: str = Form(""), db: Session = Depends(get_db),
            user: User = Depends(require_admin)):
     grant = _grant_or_404(db, grant_id)
     back = _back(next, grant)
-    if grant.held_at is None:
-        if grant.person.access_held_at is not None:
-            return go(back, err="This grant is not paused on its own: all access for the person is paused. Resume that "
-                                "on their mentee page.")
-        return go(back, err="That grant is not paused.")
-    person = grant.person
-    day = utc_today()
-    decisions = resume_grant(db, grant, day, actor=user)
-    summary = RunSummary(today=day, dry_run=bool(config.CONNECTORS_DRY_RUN), people=1, decisions=decisions)
-    return _run_page(request, user, summary, scope=f"resume for {person.person_key}", back=back)
+    try:
+        summary = run_resume(db, user, grant)
+    except Refused as refusal:
+        return go(back, err=str(refusal))
+    return _run_page(request, user, summary, scope=f"resume for {grant.person.person_key}", back=back)

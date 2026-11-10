@@ -29,7 +29,7 @@ from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import GRANT_KINDS, PRODUCTS, Mentee, Programme, User
 from ..services.audit import audit, changes
-from ..templating import go, render
+from ..templating import Refused, go, render
 from .people import get_or_404
 
 router = APIRouter(dependencies=[Depends(check_origin)])
@@ -187,13 +187,15 @@ def programme_edit(programme_id: int, request: Request, db: Session = Depends(ge
     return _programme_form(request, user, programme, vals)
 
 
-@router.post("/programmes/{programme_id}", response_class=HTMLResponse)
-def programme_update(programme_id: int, request: Request, name: str = Form(""), description: str = Form(""), active: str = Form(""),
-                     grant_template: str = Form(""), price: str = Form(""), db: Session = Depends(get_db),
-                     user: User = Depends(require_admin)):
-    programme = get_or_404(db, Programme, programme_id)
-    vals = {"name": name.strip()[:120], "description": description.strip()[:20_000], "active": active == "1",
+def _programme_vals(name: str, description: str, active: str, grant_template: str, price: str) -> dict:
+    return {"name": name.strip()[:120], "description": description.strip()[:20_000], "active": active == "1",
             "grant_template": grant_template.strip()[:100_000], "price": price.strip()[:20]}
+
+
+def update_programme(db: Session, user: User, programme: Programme, vals: dict) -> str:
+    """Save a programme (its edit form, and the operator tool programme_update) from the form's values as
+    _programme_vals cleans them; the grant template is the form's JSON text. Audits and commits. Returns the screen's
+    flash; raises Refused with the form's error, nothing saved."""
     errors: list[str] = []
     if not vals["name"]:
         errors.append("A name is required.")
@@ -204,7 +206,7 @@ def programme_update(programme_id: int, request: Request, name: str = Form(""), 
     if price_problem:
         errors.append(price_problem)
     if errors:
-        return _programme_form(request, user, programme, vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     before = programme_snapshot(programme)
     programme.name = vals["name"]
     programme.description = vals["description"]
@@ -213,11 +215,24 @@ def programme_update(programme_id: int, request: Request, name: str = Form(""), 
     programme.price = price_value
     b, a = changes(before, programme_snapshot(programme))
     if not a:
-        return go(f"/programmes/{programme.id}", ok="No changes to save.")
+        return "No changes to save."
     db.add(programme)
     audit(db, user, "programme.update", f"programme:{programme.id}", before=b, after=a)
     db.commit()
     hint = " Existing mentees pick up the new template at their next recompute." if "grant_template" in a else ""
     if "price" in a:
         hint += " A mentee paying in full now needs cleared payments that reach the price before the term starts."
-    return go(f"/programmes/{programme.id}", ok=f"{programme.name} saved.{hint}")
+    return f"{programme.name} saved.{hint}"
+
+
+@router.post("/programmes/{programme_id}", response_class=HTMLResponse)
+def programme_update(programme_id: int, request: Request, name: str = Form(""), description: str = Form(""), active: str = Form(""),
+                     grant_template: str = Form(""), price: str = Form(""), db: Session = Depends(get_db),
+                     user: User = Depends(require_admin)):
+    programme = get_or_404(db, Programme, programme_id)
+    vals = _programme_vals(name, description, active, grant_template, price)
+    try:
+        message = update_programme(db, user, programme, vals)
+    except Refused as refusal:
+        return _programme_form(request, user, programme, vals, error=str(refusal), status=400)
+    return go(f"/programmes/{programme.id}", ok=message)

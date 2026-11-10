@@ -64,7 +64,7 @@ from ..services import followups, packs, settings
 from ..services import territory_rules as tr
 from ..services.audit import audit, changes
 from ..services.connectors import ConnectorError, HNHConnector, product_dry_run
-from ..templating import go, render
+from ..templating import Refused, go, render
 from .mentees import pounds_to_pence
 from .people import find_person_by_key, like_pattern, page_of, parse_date, parse_int, person_key_problem, qs
 
@@ -320,18 +320,11 @@ def new(request: Request, db: Session = Depends(get_db), user: User = Depends(re
     return _form(request, db, user, vals)
 
 
-@router.post("/new", response_class=HTMLResponse)
-async def create(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    form = await request.form()
-
-    def field(name: str, limit: int = 20_000) -> str:
-        value = form.get(name)
-        return (value if isinstance(value, str) else "").strip()[:limit]
-
-    vals = {"person_id": field("person_id", 12), "email": field("email", 254), "name": field("name", 120), "phone": field("phone", 40),
-            "districts": parse_districts([v for v in form.getlist("districts") if isinstance(v, str)]),
-            "seller_code": field("seller_code", 24), "source": field("source", 60), "fee_waived": field("fee_waived", 1),
-            "notes": field("notes")}
+def create_opportunity(db: Session, user: User, vals: dict) -> tuple[FranchiseOpportunity, str]:
+    """Create an opportunity (the New opportunity form, and the operator tool franchise_create) from the form's values:
+    person_id, or email/name/phone for a person found or added inline; districts (parse_districts); seller_code;
+    source; fee_waived ("1" or ""); notes. Audits and commits. Returns (opportunity, the screen's flash); raises
+    Refused with the form's error, nothing saved."""
     errors: list[str] = []
     notes_for_flash: list[str] = []
 
@@ -382,14 +375,14 @@ async def create(request: Request, db: Session = Depends(get_db), user: User = D
             errors.append("A seller cannot be attributed to their own purchase (docs/commission-rules.md).")
     if errors:
         db.rollback()
-        return _form(request, db, user, vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     assert person is not None
 
     try:
         db.flush()
     except IntegrityError:
         db.rollback()
-        return _form(request, db, user, vals, error="That email is already on the register.", status=400)
+        raise Refused("That email is already on the register.") from None
     if created_person:
         audit(db, user, "person.create", f"person:{person.id}", after={"person_key": person.person_key, "name": person.name,
                                                                        "phone": person.phone, "notes": ""})
@@ -412,7 +405,26 @@ async def create(request: Request, db: Session = Depends(get_db), user: User = D
     flash = (f"Opportunity #{opportunity.id} created for {person.person_key}: {label} band, "
              f"{'fees waived' if waived else packs.money(quote['upfront']) + ' upfront and ' + packs.money(quote['monthly']) + ' a month'} "
              f"[CONFIRM]. " + " ".join(notes_for_flash)).strip()
-    return go(f"/franchise/{opportunity.id}", ok=flash)
+    return opportunity, flash
+
+
+@router.post("/new", response_class=HTMLResponse)
+async def create(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    form = await request.form()
+
+    def field(name: str, limit: int = 20_000) -> str:
+        value = form.get(name)
+        return (value if isinstance(value, str) else "").strip()[:limit]
+
+    vals = {"person_id": field("person_id", 12), "email": field("email", 254), "name": field("name", 120), "phone": field("phone", 40),
+            "districts": parse_districts([v for v in form.getlist("districts") if isinstance(v, str)]),
+            "seller_code": field("seller_code", 24), "source": field("source", 60), "fee_waived": field("fee_waived", 1),
+            "notes": field("notes")}
+    try:
+        opportunity, message = create_opportunity(db, user, vals)
+    except Refused as refusal:
+        return _form(request, db, user, vals, error=str(refusal), status=400)
+    return go(f"/franchise/{opportunity.id}", ok=message)
 
 
 # ---- detail ---------------------------------------------------------------------------------------------------
@@ -619,59 +631,79 @@ def requote(opportunity_id: int, fee_waived: str = Form(""), db: Session = Depen
     return go(back, ok=f"Requoted: {packs.money(quote['upfront'])} upfront and {packs.money(quote['monthly'])} a month [CONFIRM].")
 
 
-@router.post("/{opportunity_id}/details", response_class=HTMLResponse)
-def update_details(opportunity_id: int, request: Request, notes: str = Form(""), source: str = Form(""), seller_code: str = Form(""),
-                   db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    opportunity = _load(db, opportunity_id)
-    vals = {"notes": notes.strip()[:20_000], "source": source.strip()[:60], "seller_code": seller_code.strip()[:24]}
+def update_opportunity(db: Session, user: User, opportunity: FranchiseOpportunity, vals: dict) -> str:
+    """Save notes, source and seller attribution (the opportunity page's Details form, and the operator tool
+    franchise_update_details) from {notes, source, seller_code}, cleaned as the route cleans them. Audits and commits.
+    Returns the screen's flash; raises Refused with the form's error, nothing saved."""
     seller: Seller | None = None
     if vals["seller_code"]:
         seller = find_seller(db, vals["seller_code"])
         if seller is None:
-            return _page(request, db, user, opportunity, detail_vals=vals, error=f"No seller has the code {vals['seller_code']}.", status=400)
+            raise Refused(f"No seller has the code {vals['seller_code']}.")
         if seller.person_id == opportunity.person_id:
-            return _page(request, db, user, opportunity, detail_vals=vals, error="A seller cannot be attributed to their own purchase.", status=400)
+            raise Refused("A seller cannot be attributed to their own purchase.")
         if not seller.active and seller.id != opportunity.seller_id:
-            return _page(request, db, user, opportunity, detail_vals=vals, error=f"Seller {seller.code} is not active.", status=400)
+            raise Refused(f"Seller {seller.code} is not active.")
     new_seller_id = seller.id if seller else None
     if new_seller_id != opportunity.seller_id:
         accrued = (db.query(CommissionEntry.id).filter(CommissionEntry.opportunity_id == opportunity.id,
                                                         CommissionEntry.clawback_of.is_(None)).first())
         if accrued is not None:
-            return _page(request, db, user, opportunity, detail_vals=vals, status=400,
-                         error="Commission has already accrued on this sale, so the seller cannot be changed here; claw the entries "
-                               "back on the seller page first.")
+            raise Refused("Commission has already accrued on this sale, so the seller cannot be changed here; claw the entries "
+                          "back on the seller page first.")
     before = snapshot(opportunity)
     opportunity.notes = vals["notes"]
     opportunity.source = vals["source"]
     opportunity.seller_id = seller.id if seller else None
     b, a = changes(before, snapshot(opportunity))
-    back = f"/franchise/{opportunity.id}"
     if not a:
-        return go(back, ok="No changes to save.")
+        return "No changes to save."
     db.add(opportunity)
     if "seller_id" in a:
         _note(db, opportunity, f"Seller attribution changed to {seller.code if seller else 'none'}.", user)
     audit(db, user, "franchise.update", f"opportunity:{opportunity.id}", before=b, after=a)
     db.commit()
-    return go(back, ok="Saved.")
+    return "Saved."
+
+
+@router.post("/{opportunity_id}/details", response_class=HTMLResponse)
+def update_details(opportunity_id: int, request: Request, notes: str = Form(""), source: str = Form(""), seller_code: str = Form(""),
+                   db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    opportunity = _load(db, opportunity_id)
+    vals = {"notes": notes.strip()[:20_000], "source": source.strip()[:60], "seller_code": seller_code.strip()[:24]}
+    try:
+        message = update_opportunity(db, user, opportunity, vals)
+    except Refused as refusal:
+        return _page(request, db, user, opportunity, detail_vals=vals, error=str(refusal), status=400)
+    return go(f"/franchise/{opportunity.id}", ok=message)
 
 
 # ---- activities and tasks -----------------------------------------------------------------------------------
+def add_activity_note(db: Session, user: User, opportunity: FranchiseOpportunity, vals: dict) -> tuple[Activity, str]:
+    """Write a note, call or email on the timeline (the opportunity page's form, and the operator tool
+    franchise_add_activity) from {kind, body}. It records what happened; nothing is sent. Audits and commits.
+    Returns (the activity, the screen's flash); raises Refused with the form's error, nothing saved."""
+    if vals["kind"] not in dict(ACTIVITY_CHOICES):
+        raise Refused("Choose what happened: a note, a call or an email.")
+    if not vals["body"]:
+        raise Refused("Write what happened.")
+    row = _note(db, opportunity, vals["body"], user, kind=vals["kind"])
+    db.flush()
+    audit(db, user, "franchise.activity", f"opportunity:{opportunity.id}", after={"activity_id": row.id, "kind": row.kind})
+    db.commit()
+    return row, "Added to the timeline."
+
+
 @router.post("/{opportunity_id}/activities", response_class=HTMLResponse)
 def add_activity(opportunity_id: int, request: Request, kind: str = Form("note"), body: str = Form(""), db: Session = Depends(get_db),
                  user: User = Depends(require_admin)):
     opportunity = _load(db, opportunity_id)
     vals = {"kind": kind.strip(), "body": body.strip()[:20_000]}
-    if vals["kind"] not in dict(ACTIVITY_CHOICES):
-        return _page(request, db, user, opportunity, activity_vals=vals, error="Choose what happened: a note, a call or an email.", status=400)
-    if not vals["body"]:
-        return _page(request, db, user, opportunity, activity_vals=vals, error="Write what happened.", status=400)
-    row = _note(db, opportunity, vals["body"], user, kind=vals["kind"])
-    db.flush()
-    audit(db, user, "franchise.activity", f"opportunity:{opportunity.id}", after={"activity_id": row.id, "kind": row.kind})
-    db.commit()
-    return go(f"/franchise/{opportunity.id}", ok="Added to the timeline.")
+    try:
+        _, message = add_activity_note(db, user, opportunity, vals)
+    except Refused as refusal:
+        return _page(request, db, user, opportunity, activity_vals=vals, error=str(refusal), status=400)
+    return go(f"/franchise/{opportunity.id}", ok=message)
 
 
 def _task(db: Session, opportunity: FranchiseOpportunity, task_id: int) -> Task:
@@ -812,13 +844,11 @@ def _at_midnight(d: date | None) -> datetime | None:
     return datetime.combine(d, time.min) if d else None
 
 
-@router.post("/{opportunity_id}/payments", response_class=HTMLResponse)
-def payment_add(opportunity_id: int, request: Request, basis: str = Form("upfront"), trail_month: str = Form(""), amount: str = Form(""),
-                paid_at: str = Form(""), cleared_at: str = Form(""), method: str = Form("manual"), reference: str = Form(""),
-                notes: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    opportunity = _load(db, opportunity_id)
-    vals = {"basis": basis.strip(), "trail_month": trail_month.strip(), "amount": amount.strip(), "paid_at": paid_at.strip(),
-            "cleared_at": cleared_at.strip(), "method": method.strip(), "reference": reference.strip()[:120], "notes": notes.strip()[:20_000]}
+def record_franchise_payment(db: Session, user: User, opportunity: FranchiseOpportunity, vals: dict) -> tuple[FranchisePayment, str]:
+    """Record a fee received (the opportunity page's Payments form, and the operator tool franchise_record_payment) from
+    the form's values, cleaned as the route cleans them. Nothing is charged: this is the register of money already
+    paid. A payment recorded as cleared runs the commission hook. Audits and commits. Returns (payment, the screen's
+    flash); raises Refused with the form's error, nothing saved."""
     errors: list[str] = []
     pence = 0
     try:
@@ -850,7 +880,7 @@ def payment_add(opportunity_id: int, request: Request, basis: str = Form("upfron
     if vals["method"] not in PAYMENT_METHODS:
         errors.append("Choose how the payment arrived.")
     if errors:
-        return _page(request, db, user, opportunity, payment_vals=vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     payment = FranchisePayment(opportunity_id=opportunity.id, basis=vals["basis"], trail_month=month if vals["basis"] == "monthly" else None,
                                amount_pence=pence, paid_at=_at_midnight(dates["paid_at"]), cleared_at=_at_midnight(dates["cleared_at"]),
                                method=vals["method"], reference=vals["reference"], notes=vals["notes"])
@@ -860,8 +890,7 @@ def payment_add(opportunity_id: int, request: Request, basis: str = Form("upfron
     except IntegrityError:
         db.rollback()
         which = "upfront fee" if vals["basis"] == "upfront" else f"month {month}"
-        return _page(request, db, user, opportunity, payment_vals=vals, status=400,
-                     error=f"The {which} is already on record for this opportunity. Refund it first if it was paid again.")
+        raise Refused(f"The {which} is already on record for this opportunity. Refund it first if it was paid again.") from None
     audit(db, user, "franchise.payment.create", f"franchise_payment:{payment.id}",
           after={"opportunity_id": opportunity.id, "basis": payment.basis, "trail_month": payment.trail_month, "amount_pence": pence,
                  "paid_at": payment.paid_at, "cleared_at": payment.cleared_at, "method": payment.method, "reference": payment.reference})
@@ -871,7 +900,21 @@ def payment_add(opportunity_id: int, request: Request, basis: str = Form("upfron
         tail = " " + commission_hook(db, opportunity, payment, user)
     else:
         tail = " Mark it cleared once the money has arrived."
-    return go(f"/franchise/{opportunity.id}", ok=f"Payment of {packs.pounds(pence)} recorded.{tail}")
+    return payment, f"Payment of {packs.pounds(pence)} recorded.{tail}"
+
+
+@router.post("/{opportunity_id}/payments", response_class=HTMLResponse)
+def payment_add(opportunity_id: int, request: Request, basis: str = Form("upfront"), trail_month: str = Form(""), amount: str = Form(""),
+                paid_at: str = Form(""), cleared_at: str = Form(""), method: str = Form("manual"), reference: str = Form(""),
+                notes: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    opportunity = _load(db, opportunity_id)
+    vals = {"basis": basis.strip(), "trail_month": trail_month.strip(), "amount": amount.strip(), "paid_at": paid_at.strip(),
+            "cleared_at": cleared_at.strip(), "method": method.strip(), "reference": reference.strip()[:120], "notes": notes.strip()[:20_000]}
+    try:
+        _, message = record_franchise_payment(db, user, opportunity, vals)
+    except Refused as refusal:
+        return _page(request, db, user, opportunity, payment_vals=vals, error=str(refusal), status=400)
+    return go(f"/franchise/{opportunity.id}", ok=message)
 
 
 @router.post("/{opportunity_id}/payments/{payment_id}/clear", response_class=HTMLResponse)
@@ -968,31 +1011,27 @@ def payment_refund(opportunity_id: int, payment_id: int, refunded_at: str = Form
 
 
 # ---- the Hello New Home hand-off -------------------------------------------------------------------------------
-@router.post("/{opportunity_id}/hnh", response_class=HTMLResponse)
-def hnh_handoff(opportunity_id: int, request: Request, dry_run: str = Form(""), db: Session = Depends(get_db),
-                user: User = Depends(require_admin)):
-    """Create the Local Partner in Hello New Home through the HNH connector: the person, tier area, the
-    opportunity's districts as the new area's postcodes and fee_waived from the quote. Idempotent on
-    connector_calls (franchise:<id>:hnh_partner): a succeeded call is never sent twice; a dry run records the
-    plan on the same row and the next live press sends it. The temporary portal password HNH returns is shown
-    once on the result page and stored nowhere (ConnectorResult.once)."""
-    opportunity = _load(db, opportunity_id)
+def create_hnh_partner(db: Session, user: User, opportunity: FranchiseOpportunity, dry_run: str) -> dict:
+    """Create the Local Partner in Hello New Home through the HNH connector (the opportunity page's button, and the
+    operator tool franchise_create_hnh_partner). dry_run="1", or Hello New Home in Dry run, records the plan without
+    sending. Audits and commits. Returns what the result page shows: call, result (with the one-time password in
+    result.once, never stored), error, links, fee_waived and postcodes. Raises Refused, nothing sent, when the
+    hand-off is not allowed yet."""
     person = opportunity.person
-    back = f"/franchise/{opportunity.id}"
     existing = _hnh_call(db, opportunity)
     if existing is not None and existing.status == "succeeded":
-        return go(back, err=f"Already created in Hello New Home (connector call #{existing.id}). Nothing was sent again.")
+        raise Refused(f"Already created in Hello New Home (connector call #{existing.id}). Nothing was sent again.")
     if person.hnh_partner_id:
-        return go(back, err=HNH_ALREADY.format(pid=person.hnh_partner_id))
+        raise Refused(HNH_ALREADY.format(pid=person.hnh_partner_id))
     if not opportunity.districts:
-        return go(back, err="The opportunity has no districts, so there is no area to create.")
+        raise Refused("The opportunity has no districts, so there is no area to create.")
     fee_waived = is_fee_waived(opportunity)
     if opportunity.stage not in MONEY_STAGES:
-        return go(back, err="Move the opportunity to Paid or Onboarding first; a partner is created in Hello New Home only once the "
-                            "territory is sold.")
+        raise Refused("Move the opportunity to Paid or Onboarding first; a partner is created in Hello New Home only once the "
+                      "territory is sold.")
     if not fee_waived and _cleared_upfront(db, opportunity) is None:
-        return go(back, err="The upfront fee has not cleared (or was refunded), so the partner cannot be created yet. Mark the "
-                            "payment cleared first.")
+        raise Refused("The upfront fee has not cleared (or was refunded), so the partner cannot be created yet. Mark the "
+                      "payment cleared first.")
     dry = bool(dry_run) or product_dry_run("hnh", switches=settings.product_switches(db))
     stand_in = SimpleNamespace(id=opportunity.id, kind="partner_seat", value="area", remote_ref=None)
     payload = {"email": normalise_email(person.person_key), "tier": "area", "postcodes": [str(c) for c in opportunity.districts],
@@ -1039,6 +1078,24 @@ def hnh_handoff(opportunity_id: int, request: Request, dry_run: str = Form(""), 
     db.add(call)
     db.flush()
     db.commit()
-    ctx = {**_common(user, db), "o": opportunity, "person": person, "call": call, "result": result, "error": error,
-           "once": result.once if result is not None else "", "links": links, "fee_waived": fee_waived, "postcodes": payload["postcodes"]}
+    return {"call": call, "result": result, "error": error, "links": links, "fee_waived": fee_waived, "postcodes": payload["postcodes"]}
+
+
+@router.post("/{opportunity_id}/hnh", response_class=HTMLResponse)
+def hnh_handoff(opportunity_id: int, request: Request, dry_run: str = Form(""), db: Session = Depends(get_db),
+                user: User = Depends(require_admin)):
+    """Create the Local Partner in Hello New Home through the HNH connector: the person, tier area, the
+    opportunity's districts as the new area's postcodes and fee_waived from the quote. Idempotent on
+    connector_calls (franchise:<id>:hnh_partner): a succeeded call is never sent twice; a dry run records the
+    plan on the same row and the next live press sends it. The temporary portal password HNH returns is shown
+    once on the result page and stored nowhere (ConnectorResult.once)."""
+    opportunity = _load(db, opportunity_id)
+    try:
+        done = create_hnh_partner(db, user, opportunity, dry_run)
+    except Refused as refusal:
+        return go(f"/franchise/{opportunity.id}", err=str(refusal))
+    result = done["result"]
+    ctx = {**_common(user, db), "o": opportunity, "person": opportunity.person, "call": done["call"], "result": result,
+           "error": done["error"], "once": result.once if result is not None else "", "links": done["links"],
+           "fee_waived": done["fee_waived"], "postcodes": done["postcodes"]}
     return render(request, "franchise/hnh_result.html", ctx)

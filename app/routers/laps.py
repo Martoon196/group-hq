@@ -19,7 +19,7 @@ from ..db import get_db
 from ..models import CampaignLead, FranchiseOpportunity, LapsDeal, Mentee, User, utcnow
 from ..services import laps, laps_sync
 from ..services.audit import audit, changes
-from ..templating import go, render
+from ..templating import Refused, go, render
 from .people import get_or_404
 
 router = APIRouter(dependencies=[Depends(check_origin)])
@@ -187,14 +187,13 @@ def _board(request: Request, db: Session, user: User, brand: str = "", prefill: 
     })
 
 
-@router.post("/laps/deals")
-def add_deal(name: str = Form(""), contact: str = Form(""), brand: list[str] = Form([]), offer: str = Form(""),
-             source: str = Form(""), value: str = Form(""), next_step: str = Form(""), next_step_on: str = Form(""),
-             notes: str = Form(""), arrived: str = Form(""), stage: str = Form("lead"), view: str = Form(""),
-             db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    """One card per business ticked. Cards made together share a party, so each shows the others."""
+def create_deals(db: Session, user: User, *, name: str, contact: str, brands: list[str], offer: str, source: str, value: str,
+                 next_step: str, next_step_on: str, notes: str, arrived: str, stage: str) -> tuple[list[LapsDeal], str]:
+    """Add a lead (the board's Add form, and the operator tool laps_create_deals): one card per business chosen, and
+    cards made together share a party, so each shows the others. Audits and commits. Returns (the new deals, the
+    screen's flash); raises Refused with the form's error, nothing saved."""
     now = utcnow()
-    chosen = list(dict.fromkeys(brand))
+    chosen = list(dict.fromkeys(brands))
     try:
         if not chosen:
             raise ValueError("Choose which business this lead is for.")
@@ -203,7 +202,7 @@ def add_deal(name: str = Form(""), contact: str = Form(""), brand: list[str] = F
         if stage not in laps.PIPELINE:
             raise ValueError("Choose a stage for the new lead.")
     except ValueError as error:
-        return go(_board_url(view) + "#add", err=str(error))
+        raise Refused(str(error)) from None
     party = str(uuid.uuid4()) if len(each) > 1 else None
     deals = []
     for fields in each:
@@ -217,8 +216,46 @@ def add_deal(name: str = Form(""), contact: str = Form(""), brand: list[str] = F
     db.commit()
     where = laps.LABELS[deals[0].stage].lower()
     if len(deals) > 1:
-        return go(_board_url(view), ok=f"{deals[0].name} added to {where} for {len(deals)} businesses.")
-    return go(_board_url(view), ok=f"{deals[0].name} added to {where}.")
+        return deals, f"{deals[0].name} added to {where} for {len(deals)} businesses."
+    return deals, f"{deals[0].name} added to {where}."
+
+
+@router.post("/laps/deals")
+def add_deal(name: str = Form(""), contact: str = Form(""), brand: list[str] = Form([]), offer: str = Form(""),
+             source: str = Form(""), value: str = Form(""), next_step: str = Form(""), next_step_on: str = Form(""),
+             notes: str = Form(""), arrived: str = Form(""), stage: str = Form("lead"), view: str = Form(""),
+             db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """One card per business ticked. Cards made together share a party, so each shows the others."""
+    try:
+        _, message = create_deals(db, user, name=name, contact=contact, brands=brand, offer=offer, source=source, value=value,
+                                  next_step=next_step, next_step_on=next_step_on, notes=notes, arrived=arrived, stage=stage)
+    except Refused as refusal:
+        return go(_board_url(view) + "#add", err=str(refusal))
+    return go(_board_url(view), ok=message)
+
+
+def add_businesses(db: Session, user: User, deal: LapsDeal, brands: list[str]) -> tuple[list[LapsDeal], str]:
+    """The same person wants something from another business (the deal page's Also form, and the operator tool
+    laps_add_business): a new lead card there, linked to this one. Audits and commits. Returns (the new cards, the
+    screen's flash); raises Refused, nothing saved, when no new business is chosen."""
+    taken = {deal.brand} | {d.brand for d in siblings(db, [deal]).get(deal.id, [])}
+    chosen = [b for b in dict.fromkeys(brands) if b in laps.BRANDS and b not in taken]
+    if not chosen:
+        raise Refused("Choose a business this person is not already under.")
+    if not deal.party:
+        deal.party = str(uuid.uuid4())
+    now = utcnow()
+    twins = []
+    for b in chosen:
+        twin = LapsDeal(name=deal.name, contact=deal.contact, brand=b, source=deal.source, stage="lead", lead_at=now,
+                        party=deal.party)
+        db.add(twin)
+        db.flush()
+        audit(db, user, "laps.deal.add", f"laps_deal:{twin.id}", after=_snapshot(twin) | {"with": deal.id})
+        twins.append(twin)
+    db.commit()
+    names = ", ".join(laps.BRANDS[b] for b in chosen)
+    return twins, f"{deal.name} added as a lead for {names}."
 
 
 @router.post("/laps/deals/{deal_id}/also")
@@ -226,22 +263,11 @@ def also(deal_id: int, brand: list[str] = Form([]), db: Session = Depends(get_db
          user: User = Depends(require_admin)):
     """The same person wants something from another business: a new lead card there, linked to this one."""
     deal = get_or_404(db, LapsDeal, deal_id)
-    taken = {deal.brand} | {d.brand for d in siblings(db, [deal]).get(deal.id, [])}
-    chosen = [b for b in dict.fromkeys(brand) if b in laps.BRANDS and b not in taken]
-    if not chosen:
-        return go(f"/laps/deals/{deal.id}", err="Choose a business this person is not already under.")
-    if not deal.party:
-        deal.party = str(uuid.uuid4())
-    now = utcnow()
-    for b in chosen:
-        twin = LapsDeal(name=deal.name, contact=deal.contact, brand=b, source=deal.source, stage="lead", lead_at=now,
-                        party=deal.party)
-        db.add(twin)
-        db.flush()
-        audit(db, user, "laps.deal.add", f"laps_deal:{twin.id}", after=_snapshot(twin) | {"with": deal.id})
-    db.commit()
-    names = ", ".join(laps.BRANDS[b] for b in chosen)
-    return go(f"/laps/deals/{deal.id}", ok=f"{deal.name} added as a lead for {names}.")
+    try:
+        _, message = add_businesses(db, user, deal, brand)
+    except Refused as refusal:
+        return go(f"/laps/deals/{deal.id}", err=str(refusal))
+    return go(f"/laps/deals/{deal.id}", ok=message)
 
 
 @router.get("/laps/source/{lead_id}")

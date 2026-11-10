@@ -1,20 +1,18 @@
 """The tools the operator API offers over MCP (docs/operator-api.md), each bounded and run as one admin user.
 
 A read tool answers from the same queries the screens use and returns compact JSON: ids, names, states and ISO
-timestamps, never a password hash, authenticator secret, token or product credential. A write tool goes through
-app.services.campaigns exactly as app.routers.crm does, so the same rules, audit rows and refusals apply; the
-caller commits. Write tools are offered only while GHQ_OPERATOR_WRITES is "enabled".
+timestamps, never a password hash, authenticator secret, token or product credential. A CRM write tool goes
+through app.services.campaigns exactly as app.routers.crm does, so the same rules, audit rows and refusals apply; the
+caller commits. Every other screen's write tools are in app.services.operator_writes and run that screen's own code.
+Write tools are offered only while GHQ_OPERATOR_WRITES is "enabled".
 
 A ToolError is a sentence for the model ("Campaign lead 12 was not found"); anything else that goes wrong is
 reported as a generic failure by the router, never as a traceback.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -25,6 +23,8 @@ from ..models import (Acquisition, AuditLog, CampaignAction, CampaignLead, Campa
 from . import campaigns, settings
 from . import acquisitions as acquisitions_service
 from . import laps as laps_service
+from .operator_base import Tool, ToolError, _int, _schema, _text
+from .operator_writes import WRITE_TOOLS as SCREEN_WRITE_TOOLS
 from .relaunch72_crm import CrmUnavailable, fetch_leads
 from .relaunch72_sso import BRANDS as WEBINAR_BRANDS
 from .relaunch72_webinars import WebinarsUnavailable, fetch_webinars
@@ -36,22 +36,6 @@ SECRET_WORDS = ("token", "secret", "key", "password", "credential")
 WRITES_DISABLED = "writes are disabled on this deployment (GHQ_OPERATOR_WRITES is not \"enabled\")"
 
 
-class ToolError(Exception):
-    """A plain-English reason the tool could not do what was asked."""
-
-
-@dataclass(frozen=True)
-class Tool:
-    name: str
-    description: str
-    input_schema: dict
-    run: Callable[[Session, User, dict], Any]
-    write: bool = False
-
-    def listing(self) -> dict:
-        return {"name": self.name, "description": self.description, "inputSchema": self.input_schema}
-
-
 # ---- argument helpers -------------------------------------------------------------------------------------------
 def _limit(args: dict, default: int = DEFAULT_LIMIT, cap: int = MAX_LIMIT) -> int:
     raw = args.get("limit", default)
@@ -60,36 +44,8 @@ def _limit(args: dict, default: int = DEFAULT_LIMIT, cap: int = MAX_LIMIT) -> in
     return min(raw, cap)
 
 
-def _int(args: dict, name: str) -> int:
-    raw = args.get(name)
-    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1 or raw > 2_000_000_000:
-        raise ToolError(f"{name} must be a positive whole number")
-    return raw
-
-
-def _text(args: dict, name: str, limit: int, *, required: bool = False) -> str:
-    raw = args.get(name, "")
-    if raw is None:
-        raw = ""
-    if not isinstance(raw, str):
-        raise ToolError(f"{name} must be text")
-    text = raw.strip()
-    if required and not text:
-        raise ToolError(f"{name} is required")
-    if len(text) > limit:
-        raise ToolError(f"{name} is longer than {limit} characters")
-    return text
-
-
 def _like(term: str) -> str:
     return "%" + term.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-
-
-def _schema(properties: dict | None = None, required: list[str] | None = None) -> dict:
-    schema: dict = {"type": "object", "properties": properties or {}, "additionalProperties": False}
-    if required:
-        schema["required"] = required
-    return schema
 
 
 LIMIT_PROP = {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": f"How many rows, at most {MAX_LIMIT}; default {DEFAULT_LIMIT}."}
@@ -444,7 +400,7 @@ READ_TOOLS: tuple[Tool, ...] = (
          _schema(), settings_get),
 )
 
-WRITE_TOOLS: tuple[Tool, ...] = (
+CRM_WRITE_TOOLS: tuple[Tool, ...] = (
     Tool("crm_start_plan", "Start the Property Predator first-conversation follow-up plan for a lead. Plans only; nothing is sent.",
          _schema({"lead_id": {"type": "integer", "minimum": 1}}, ["lead_id"]), crm_start_plan, write=True),
     Tool("crm_hold_plan", "Hold an active follow-up plan with a reason.",
@@ -459,6 +415,10 @@ WRITE_TOOLS: tuple[Tool, ...] = (
          _schema({"cursor": {"type": "string", "maxLength": 200, "description": "The next_cursor of the previous page."}}),
          crm_sync_property_predator, write=True),
 )
+
+# The CRM's write tools, then every admin screen's (app.services.operator_writes).
+WRITE_TOOLS: tuple[Tool, ...] = CRM_WRITE_TOOLS + SCREEN_WRITE_TOOLS
+assert len({t.name for t in READ_TOOLS + WRITE_TOOLS}) == len(READ_TOOLS + WRITE_TOOLS), "tool names are unique"
 
 ALL_TOOLS: dict[str, Tool] = {tool.name: tool for tool in READ_TOOLS + WRITE_TOOLS}
 
