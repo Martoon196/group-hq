@@ -46,10 +46,10 @@ A request with no acceptable bearer gets `401 {"error": "unauthorised"}` with
 | `GHQ_OPERATOR_USER_EMAIL` | The admin a static-token call acts as. Must be an existing, active admin (matched case-insensitively), or every static-token call is refused. |
 | `GHQ_OPERATOR_OAUTH_SECRET` | Signs the OAuth client ids, codes, access and refresh tokens. Valid only at 32-256 characters. Shared with nothing else. |
 | `GHQ_OPERATOR_WRITES` | `enabled` offers the write tools. Anything else (the default) is read only. |
-| `GHQ_OPERATOR_MESSAGING` | `enabled`, together with writes enabled, offers the two messaging tools. Anything else (the default, `disabled` in `render.yaml`) hides them, and a call answers "sending messages is switched off on this deployment (GHQ_OPERATOR_MESSAGING)". On its own, without writes, it does nothing. |
-| `GHQ_OPERATOR_RELAUNCH72` | `enabled` also carries Relaunch72's operator tools on this connector (see "Relaunch72 tools"). Needs a valid `R72_SSO_SECRET` here and `R72_OPERATOR_GROUP_HQ=enabled` on Relaunch72. Anything else (the default, `disabled` in `render.yaml`) never contacts Relaunch72. |
+| `GHQ_OPERATOR_MESSAGING` | `enabled`, together with writes enabled, offers the two messaging tools. Anything else (the default) hides them, and a call answers "sending messages is switched off on this deployment (GHQ_OPERATOR_MESSAGING)". On its own, without writes, it does nothing. |
+| `GHQ_OPERATOR_RELAUNCH72` | `enabled` also carries Relaunch72's operator tools on this connector (see "Relaunch72 tools"). Needs a valid `R72_SSO_SECRET` here and `R72_OPERATOR_GROUP_HQ=enabled` on Relaunch72. Anything else (the default) never contacts Relaunch72. |
 
-`render.yaml` lists the six on the web service only; none is copied to a cron. Generate each secret with
+`render.yaml` lists the six on the web service only, each `sync: false`, so their values live in the Render dashboard; none is copied to a cron. The three switches must never be given a `value:` there: every Blueprint sync re-applies a written value and would switch a live deployment back off on the next merge. Generate each secret with
 something like `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 
 ## Tools

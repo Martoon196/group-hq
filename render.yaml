@@ -51,14 +51,17 @@ services:
         sync: false
       - key: GHQ_OPERATOR_USER_EMAIL
         sync: false
+      # The three switches below are set in the Render dashboard, never here (sync: false): a value written in this
+      # file is re-applied by every Blueprint sync and would switch a deployment back off on the next merge. Unset or
+      # anything but "enabled" is off.
       - key: GHQ_OPERATOR_WRITES
-        value: "disabled"
+        sync: false
       - key: GHQ_OPERATOR_MESSAGING
-        value: "disabled"
+        sync: false
       # "enabled" also carries Relaunch72's operator tools (webinars, brand CRMs, follow-up drafts) on this connector,
       # relayed with a bearer derived from R72_SSO_SECRET. Relaunch72 needs R72_OPERATOR_GROUP_HQ enabled as well.
       - key: GHQ_OPERATOR_RELAUNCH72
-        value: "disabled"
+        sync: false
       - key: ORDRIS_BASE_URL
         value: https://ordris.io
       - key: ORDRIS_PARTNER_TOKEN
