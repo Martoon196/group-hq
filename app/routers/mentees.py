@@ -32,7 +32,7 @@ from ..models import (MENTEE_STATUSES, PAYMENT_METHODS, PAYMENT_MODES, Entitleme
                       Programme, User, utcnow)
 from ..services import earnings, settings
 from ..services.audit import audit, changes
-from ..templating import go, render
+from ..templating import Refused, go, render
 from .people import like_pattern, page_of, parse_date, parse_int, qs
 
 try:
@@ -251,12 +251,15 @@ def mentee_new(request: Request, db: Session = Depends(get_db), user: User = Dep
     return _mentee_form(request, db, user, vals)
 
 
-@router.post("/mentees/new", response_class=HTMLResponse)
-def mentee_create(request: Request, person_id: str = Form(""), programme_id: str = Form(""), payment_mode: str = Form(""),
-                  start_date: str = Form(""), cohort: str = Form(""), notes: str = Form(""),
-                  db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    vals = {"person_id": person_id.strip(), "programme_id": programme_id.strip(), "payment_mode": payment_mode.strip(),
+def _mentee_vals(person_id: str, programme_id: str, payment_mode: str, start_date: str, cohort: str, notes: str) -> dict:
+    return {"person_id": person_id.strip(), "programme_id": programme_id.strip(), "payment_mode": payment_mode.strip(),
             "start_date": start_date.strip(), "cohort": cohort.strip()[:60], "notes": notes.strip()[:20_000]}
+
+
+def create_mentee(db: Session, user: User, vals: dict) -> tuple[Mentee, str]:
+    """Enrol a person on a programme (the New mentee form, and the operator tool mentee_create), from the form's
+    values as _mentee_vals cleans them. Audits and commits. Returns (mentee, the screen's flash); raises Refused with
+    the form's error, nothing saved."""
     errors: list[str] = []
     person = db.get(Person, parse_int(vals["person_id"], -1))
     if person is None:
@@ -281,7 +284,7 @@ def mentee_create(request: Request, person_id: str = Form(""), programme_id: str
         if live is not None:
             errors.append(f"{person.person_key} is already active on {programme.name} (mentee #{live.id}). End that row before enrolling them again.")
     if errors:
-        return _mentee_form(request, db, user, vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     assert person is not None and programme is not None and start is not None
     mentee = Mentee(person_id=person.id, programme_id=programme.id, payment_mode=vals["payment_mode"], start_date=start,
                     status="active", cohort=vals["cohort"], notes=vals["notes"])
@@ -289,7 +292,19 @@ def mentee_create(request: Request, person_id: str = Form(""), programme_id: str
     db.flush()
     audit(db, user, "mentee.create", f"mentee:{mentee.id}", after=mentee_snapshot(mentee))
     db.commit()
-    return go(f"/mentees/{mentee.id}", ok=f"{person.person_key} enrolled on {programme.name}. Record their first payment below.")
+    return mentee, f"{person.person_key} enrolled on {programme.name}. Record their first payment below."
+
+
+@router.post("/mentees/new", response_class=HTMLResponse)
+def mentee_create(request: Request, person_id: str = Form(""), programme_id: str = Form(""), payment_mode: str = Form(""),
+                  start_date: str = Form(""), cohort: str = Form(""), notes: str = Form(""),
+                  db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    vals = _mentee_vals(person_id, programme_id, payment_mode, start_date, cohort, notes)
+    try:
+        mentee, message = create_mentee(db, user, vals)
+    except Refused as refusal:
+        return _mentee_form(request, db, user, vals, error=str(refusal), status=400)
+    return go(f"/mentees/{mentee.id}", ok=message)
 
 
 # ---- detail with tabs ------------------------------------------------------------------------
@@ -362,14 +377,17 @@ def period_problems(mentee: Mentee, start: date | None, end: date | None, today:
     return problems
 
 
-@router.post("/mentees/{mentee_id}/payments", response_class=HTMLResponse)
-def payment_add(mentee_id: int, request: Request, amount: str = Form(""), paid_at: str = Form(""), cleared_at: str = Form(""),
-                method: str = Form("manual"), period_start: str = Form(""), period_end: str = Form(""), reference: str = Form(""),
-                notes: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    mentee = _load_mentee(db, mentee_id)
-    vals = {"amount": amount.strip(), "paid_at": paid_at.strip(), "cleared_at": cleared_at.strip(), "method": method.strip(),
+def _payment_vals(amount: str, paid_at: str, cleared_at: str, method: str, period_start: str, period_end: str, reference: str,
+                  notes: str) -> dict:
+    return {"amount": amount.strip(), "paid_at": paid_at.strip(), "cleared_at": cleared_at.strip(), "method": method.strip(),
             "period_start": period_start.strip(), "period_end": period_end.strip(), "reference": reference.strip()[:120],
             "notes": notes.strip()[:20_000]}
+
+
+def record_payment(db: Session, user: User, mentee: Mentee, vals: dict) -> tuple[Payment, str]:
+    """Record a payment received (the Payments tab's form, and the operator tool mentee_record_payment), from the
+    form's values as _payment_vals cleans them. Nothing is charged: this is the register of money already paid.
+    Audits and commits. Returns (payment, the screen's flash); raises Refused with the form's error, nothing saved."""
     errors: list[str] = []
     pence = 0
     try:
@@ -393,7 +411,7 @@ def payment_add(mentee_id: int, request: Request, amount: str = Form(""), paid_a
     if mentee.payment_mode == "monthly" and dates.get("period_end") is None and not errors:
         errors.append("A monthly payment needs a period end: that date plus the grace period is when access stops.")
     if errors:
-        return _mentee_page(request, db, user, mentee, "payments", payment_vals=vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     payment = Payment(mentee_id=mentee.id, amount=pence_to_amount(pence), paid_at=_at_midnight(dates["paid_at"]),
                       cleared_at=_at_midnight(dates["cleared_at"]), method=vals["method"], period_start=dates["period_start"],
                       period_end=dates["period_end"], reference=vals["reference"], notes=vals["notes"])
@@ -402,7 +420,20 @@ def payment_add(mentee_id: int, request: Request, amount: str = Form(""), paid_a
     audit(db, user, "payment.create", f"payment:{payment.id}", after={**payment_snapshot(payment), "pence": pence})
     db.commit()
     note = " It is cleared, so it counts towards access." if payment.cleared_at else " Mark it cleared once the money has arrived."
-    return go(f"/mentees/{mentee.id}?tab=payments", ok=f"Payment of {money(payment.amount)} recorded.{note}")
+    return payment, f"Payment of {money(payment.amount)} recorded.{note}"
+
+
+@router.post("/mentees/{mentee_id}/payments", response_class=HTMLResponse)
+def payment_add(mentee_id: int, request: Request, amount: str = Form(""), paid_at: str = Form(""), cleared_at: str = Form(""),
+                method: str = Form("manual"), period_start: str = Form(""), period_end: str = Form(""), reference: str = Form(""),
+                notes: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    mentee = _load_mentee(db, mentee_id)
+    vals = _payment_vals(amount, paid_at, cleared_at, method, period_start, period_end, reference, notes)
+    try:
+        _, message = record_payment(db, user, mentee, vals)
+    except Refused as refusal:
+        return _mentee_page(request, db, user, mentee, "payments", payment_vals=vals, error=str(refusal), status=400)
+    return go(f"/mentees/{mentee.id}?tab=payments", ok=message)
 
 
 @router.post("/mentees/{mentee_id}/payments/{payment_id}/clear", response_class=HTMLResponse)
@@ -566,25 +597,37 @@ def mentee_pause(mentee_id: int, reason: str = Form(""), db: Session = Depends(g
                        f"resume it.{_describe(result)}")
 
 
-@router.post("/mentees/{mentee_id}/resume", response_class=HTMLResponse)
-def mentee_resume(mentee_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    """Resume all access and recompute at once. Renders the run page, as a recompute from the Grants screen does,
-    because a re-grant to Hello New Home may carry a temporary password that is shown once."""
-    mentee = _load_mentee(db, mentee_id)
+def resume_mentee(db: Session, user: User, mentee: Mentee) -> list:
+    """Resume all access for the mentee's person and recompute at once (the Grants tab's Resume, and the operator tool
+    mentee_resume_all). Returns the engine's decisions. Raises HTTPException(503) when the engine is missing, and
+    Refused when access is not paused (nothing changed) or when the engine failed, after rolling back and committing a
+    mentee.resume_failed audit row."""
     if not holds_available():
         raise HTTPException(status_code=503, detail=ENGINE_MISSING)
-    back = f"/mentees/{mentee.id}?tab=grants"
     if mentee.person.access_held_at is None:
-        return go(back, err=f"Access for {mentee.person.person_key} is not paused.")
+        raise Refused(f"Access for {mentee.person.person_key} is not paused.")
     try:
         decisions = _call_engine(resume_person, db, mentee.person, user)
     except Exception as e:  # noqa: BLE001
         db.rollback()
         audit(db, user, "mentee.resume_failed", f"mentee:{mentee.id}", after={"error": str(e)[:500]})
         db.commit()
-        return go(back, err=f"Resume failed: {str(e)[:300]}")
+        raise Refused(f"Resume failed: {str(e)[:300]}") from None
     audit(db, user, "mentee.resume_all", f"mentee:{mentee.id}", after={"person_id": mentee.person_id, **_summarise(decisions)})
     db.commit()
+    return list(decisions)
+
+
+@router.post("/mentees/{mentee_id}/resume", response_class=HTMLResponse)
+def mentee_resume(mentee_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """Resume all access and recompute at once. Renders the run page, as a recompute from the Grants screen does,
+    because a re-grant to Hello New Home may carry a temporary password that is shown once."""
+    mentee = _load_mentee(db, mentee_id)
+    back = f"/mentees/{mentee.id}?tab=grants"
+    try:
+        decisions = resume_mentee(db, user, mentee)
+    except Refused as refusal:
+        return go(back, err=str(refusal))
     summary = RunSummary(today=utcnow().date(), dry_run=bool(config.CONNECTORS_DRY_RUN), people=1, decisions=list(decisions))
     ctx = {"user": user, "section": "mentees", "summary": summary, "decisions": summary.decisions,
            "scope": f"resume for {mentee.person.person_key}", "back": back}
@@ -592,12 +635,15 @@ def mentee_resume(mentee_id: int, request: Request, db: Session = Depends(get_db
 
 
 # ---- notes tab ---------------------------------------------------------------------------------
-@router.post("/mentees/{mentee_id}/details", response_class=HTMLResponse)
-def mentee_update(mentee_id: int, request: Request, status: str = Form(""), cohort: str = Form(""), payment_mode: str = Form(""),
-                  start_date: str = Form(""), notes: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    mentee = _load_mentee(db, mentee_id)
-    vals = {"status": status.strip(), "cohort": cohort.strip()[:60], "payment_mode": payment_mode.strip(),
+def _detail_vals(status: str, cohort: str, payment_mode: str, start_date: str, notes: str) -> dict:
+    return {"status": status.strip(), "cohort": cohort.strip()[:60], "payment_mode": payment_mode.strip(),
             "start_date": start_date.strip(), "notes": notes.strip()[:20_000]}
+
+
+def update_mentee(db: Session, user: User, mentee: Mentee, vals: dict) -> str:
+    """Save status, cohort, payment mode, start date and notes (the Notes tab, and the operator tool mentee_update),
+    from the form's values as _detail_vals cleans them. Audits and commits. Returns the screen's flash; raises
+    Refused with the form's error, nothing saved. Lapsed cannot be set by hand."""
     errors: list[str] = []
     if vals["status"] not in MENTEE_STATUSES:
         errors.append("Choose a status.")
@@ -613,7 +659,7 @@ def mentee_update(mentee_id: int, request: Request, status: str = Form(""), coho
     except ValueError as e:
         errors.append(str(e))
     if errors:
-        return _mentee_page(request, db, user, mentee, "notes", detail_vals=vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     assert start is not None
     before = mentee_snapshot(mentee)
     mentee.status = vals["status"]
@@ -622,11 +668,22 @@ def mentee_update(mentee_id: int, request: Request, status: str = Form(""), coho
     mentee.start_date = start
     mentee.notes = vals["notes"]
     b, a = changes(before, mentee_snapshot(mentee))
-    back = f"/mentees/{mentee.id}?tab=notes"
     if not a:
-        return go(back, ok="No changes to save.")
+        return "No changes to save."
     db.add(mentee)
     audit(db, user, "mentee.update", f"mentee:{mentee.id}", before=b, after=a)
     db.commit()
     hint = " Run Recompute now on the Grants tab so the products follow." if {"status", "payment_mode", "start_date"} & set(a) else ""
-    return go(back, ok=f"Mentee saved.{hint}")
+    return f"Mentee saved.{hint}"
+
+
+@router.post("/mentees/{mentee_id}/details", response_class=HTMLResponse)
+def mentee_update(mentee_id: int, request: Request, status: str = Form(""), cohort: str = Form(""), payment_mode: str = Form(""),
+                  start_date: str = Form(""), notes: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    mentee = _load_mentee(db, mentee_id)
+    vals = _detail_vals(status, cohort, payment_mode, start_date, notes)
+    try:
+        message = update_mentee(db, user, mentee, vals)
+    except Refused as refusal:
+        return _mentee_page(request, db, user, mentee, "notes", detail_vals=vals, error=str(refusal), status=400)
+    return go(f"/mentees/{mentee.id}?tab=notes", ok=message)

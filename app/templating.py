@@ -62,6 +62,12 @@ def render(request: Request, template: str, ctx: dict | None = None, status_code
     return templates.TemplateResponse(request, template, base, status_code=status_code)
 
 
+class Refused(Exception):
+    """The plain sentence a screen shows when it will not do what was asked. Raised by an action that a route and an
+    operator tool (app.services.operator_writes) both run: the route shows it as its flash or form error, the tool
+    returns it as an error. Raised before anything is changed, unless the action's docstring says otherwise."""
+
+
 def go(path: str, *, ok: str = "", err: str = "") -> RedirectResponse:
     if ok or err:
         path, hash_, fragment = path.partition("#")       # the flash goes in the query, before any #fragment

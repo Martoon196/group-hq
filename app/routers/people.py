@@ -36,7 +36,7 @@ from ..services import earnings, settings
 from ..services.audit import audit, changes
 from ..services.connectors.base import account_ref
 from ..services.entitlements import hold_of
-from ..templating import go, render
+from ..templating import Refused, go, render
 
 router = APIRouter(dependencies=[Depends(check_origin)])
 
@@ -194,28 +194,37 @@ def person_new(request: Request, user: User = Depends(require_admin)):
     return _person_form(request, user, {"email": request.query_params.get("email", "").strip(), "name": "", "phone": "", "notes": ""})
 
 
-@router.post("/people/new", response_class=HTMLResponse)
-def person_create(request: Request, email: str = Form(""), name: str = Form(""), phone: str = Form(""), notes: str = Form(""),
-                  db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    vals = {"email": email.strip(), "name": name.strip()[:120], "phone": phone.strip()[:40], "notes": notes.strip()[:20_000]}
+def create_person(db: Session, user: User, email: str, name: str, phone: str, notes: str) -> tuple[Person, str]:
+    """Add a person to the register (the New person form, and the operator tool people_create). Audits and commits.
+    Returns (person, the screen's flash); raises Refused with the form's error, nothing saved."""
     key = normalise_email(email)
     problem = person_key_problem(key)
     if problem:
-        return _person_form(request, user, vals, error=problem, status=400)
+        raise Refused(problem)
     existing = find_person_by_key(db, key)
     if existing is not None:
-        return _person_form(request, user, vals, status=400,
-                            error=f"{key} is already on the register as person #{existing.id}. Open that record rather than adding a second one.")
-    person = Person(person_key=key, name=vals["name"], phone=vals["phone"], notes=vals["notes"])
+        raise Refused(f"{key} is already on the register as person #{existing.id}. Open that record rather than adding a second one.")
+    person = Person(person_key=key, name=name.strip()[:120], phone=phone.strip()[:40], notes=notes.strip()[:20_000])
     db.add(person)
     try:
         db.flush()
     except IntegrityError:
         db.rollback()
-        return _person_form(request, user, vals, error=f"{key} is already on the register.", status=400)
+        raise Refused(f"{key} is already on the register.") from None
     audit(db, user, "person.create", f"person:{person.id}", after=person_snapshot(person))
     db.commit()
-    return go(f"/people/{person.id}", ok=f"{key} added to the register.")
+    return person, f"{key} added to the register."
+
+
+@router.post("/people/new", response_class=HTMLResponse)
+def person_create(request: Request, email: str = Form(""), name: str = Form(""), phone: str = Form(""), notes: str = Form(""),
+                  db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    vals = {"email": email.strip(), "name": name.strip()[:120], "phone": phone.strip()[:40], "notes": notes.strip()[:20_000]}
+    try:
+        person, message = create_person(db, user, email, name, phone, notes)
+    except Refused as refusal:
+        return _person_form(request, user, vals, error=str(refusal), status=400)
+    return go(f"/people/{person.id}", ok=message)
 
 
 # ---- detail -----------------------------------------------------------------------------
@@ -258,45 +267,52 @@ def person_earnings(person_id: int, request: Request, mentee: str = "", fragment
     return response
 
 
-@router.post("/people/{person_id}", response_class=HTMLResponse)
-def person_update(person_id: int, request: Request, email: str = Form(""), name: str = Form(""), phone: str = Form(""),
-                  notes: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    person = get_or_404(db, Person, person_id)
-    vals = {"email": email.strip(), "name": name.strip()[:120], "phone": phone.strip()[:40], "notes": notes.strip()[:20_000]}
+def update_person(db: Session, user: User, person: Person, email: str, name: str, phone: str, notes: str) -> str:
+    """Save the person's details (the person page's form, and the operator tool people_update). Audits and commits.
+    Returns the screen's flash; raises Refused with the form's error, nothing saved."""
     key = normalise_email(email)
     problem = person_key_problem(key)
     if problem:
-        return _person_page(request, db, user, person, vals=vals, error=problem, status=400)
+        raise Refused(problem)
     other = find_person_by_key(db, key, exclude_id=person.id)
     if other is not None:
-        return _person_page(request, db, user, person, vals=vals, status=400,
-                            error=f"{key} already belongs to person #{other.id}. Two records cannot share an email.")
+        raise Refused(f"{key} already belongs to person #{other.id}. Two records cannot share an email.")
     if key != person.person_key and holds_live_grants(db, person):
-        return _person_page(request, db, user, person, vals=vals, status=400, error=RENAME_REFUSED)
+        raise Refused(RENAME_REFUSED)
     before = person_snapshot(person)
     person.person_key = key
-    person.name = vals["name"]
-    person.phone = vals["phone"]
-    person.notes = vals["notes"]
+    person.name = name.strip()[:120]
+    person.phone = phone.strip()[:40]
+    person.notes = notes.strip()[:20_000]
     b, a = changes(before, person_snapshot(person))
     if not a:
-        return go(f"/people/{person.id}", ok="No changes to save.")
+        return "No changes to save."
     db.add(person)
     audit(db, user, "person.update", f"person:{person.id}", before=b, after=a)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        return _person_page(request, db, user, person, vals=vals, error=f"{key} is already on the register.", status=400)
-    return go(f"/people/{person.id}", ok="Person saved.")
+        raise Refused(f"{key} is already on the register.") from None
+    return "Person saved."
 
 
-@router.post("/people/{person_id}/links", response_class=HTMLResponse)
-async def person_links(person_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    """Set the product ids by hand. Blank clears an id; a PP account id held by another person is refused."""
+@router.post("/people/{person_id}", response_class=HTMLResponse)
+def person_update(person_id: int, request: Request, email: str = Form(""), name: str = Form(""), phone: str = Form(""),
+                  notes: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
     person = get_or_404(db, Person, person_id)
-    form = await request.form()
-    submitted = {col: (form.get(col) if isinstance(form.get(col), str) else "").strip()[:64] for col in LINK_COLUMNS}
+    vals = {"email": email.strip(), "name": name.strip()[:120], "phone": phone.strip()[:40], "notes": notes.strip()[:20_000]}
+    try:
+        message = update_person(db, user, person, email, name, phone, notes)
+    except Refused as refusal:
+        return _person_page(request, db, user, person, vals=vals, error=str(refusal), status=400)
+    return go(f"/people/{person.id}", ok=message)
+
+
+def save_links(db: Session, user: User, person: Person, submitted: dict[str, str]) -> str:
+    """Set the product ids by hand (the person page's Linked ids form, and the operator tool people_set_links).
+    submitted maps every LINK_COLUMNS name to its text; blank clears an id. Audits and commits. Returns the screen's
+    flash; raises Refused with the form's error (a PP account id held by another person is refused), nothing saved."""
     new: dict[str, int | str | None] = {}
     errors: list[str] = []
     for col, product, label, kind in LINK_FIELDS:
@@ -318,19 +334,31 @@ async def person_links(person_id: int, request: Request, db: Session = Depends(g
         if holder is not None:
             errors.append(f"Property Predator account {new['pp_account_id']} is already linked to {holder.person_key} (person #{holder.id}).")
     if errors:
-        return _person_page(request, db, user, person, link_vals=submitted, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     before = links_snapshot(person)
     for col, value in new.items():
         setattr(person, col, value)
     b, a = changes(before, links_snapshot(person))
     if not a:
-        return go(f"/people/{person.id}", ok="The linked ids are unchanged.")
+        return "The linked ids are unchanged."
     db.add(person)
     audit(db, user, "person.links", f"person:{person.id}", before=b, after=a)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        return _person_page(request, db, user, person, link_vals=submitted, status=400,
-                            error="That Property Predator account id is already linked to another person.")
-    return go(f"/people/{person.id}", ok="Linked ids saved.")
+        raise Refused("That Property Predator account id is already linked to another person.") from None
+    return "Linked ids saved."
+
+
+@router.post("/people/{person_id}/links", response_class=HTMLResponse)
+async def person_links(person_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """Set the product ids by hand. Blank clears an id; a PP account id held by another person is refused."""
+    person = get_or_404(db, Person, person_id)
+    form = await request.form()
+    submitted = {col: (form.get(col) if isinstance(form.get(col), str) else "").strip()[:64] for col in LINK_COLUMNS}
+    try:
+        message = save_links(db, user, person, submitted)
+    except Refused as refusal:
+        return _person_page(request, db, user, person, link_vals=submitted, error=str(refusal), status=400)
+    return go(f"/people/{person.id}", ok=message)

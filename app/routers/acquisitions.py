@@ -21,7 +21,7 @@ from ..services import inbox as inbox_service
 from ..services import inbox_crm, inbox_organisation, laps
 from ..services.inbox_providers import InboxError
 from ..services.audit import audit, changes
-from ..templating import go, render
+from ..templating import Refused, go, render
 from .laps import _arrived, gbp, percent
 from .people import get_or_404
 
@@ -163,9 +163,11 @@ def start(request: Request, seller_name: str = Form(""), source: str = Form(""),
                                       "thread_ticket": thread_ticket})
 
 
-@router.post("/acquisitions/deals")
-async def add_deal(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    form = {k: v for k, v in (await request.form()).items() if isinstance(v, str)}
+def create_deal(db: Session, user: User, form: dict[str, str]) -> tuple[Acquisition, str]:
+    """Add a property deal (the board's Add form, and the operator tool acquisition_create) from the form's fields by
+    name. A thread_ticket from an Inbox conversation attaches the deal to it and files the conversation under
+    Property. Audits and commits. Returns (the deal, the screen's flash); raises Refused with the form's error, or
+    HTTPException(409) for a stale or foreign ticket, nothing saved."""
     now = utcnow()
     try:
         fields = _clean(form)
@@ -174,7 +176,7 @@ async def add_deal(request: Request, db: Session = Depends(get_db), user: User =
         if stage not in service.PIPELINE:
             raise ValueError("Choose a stage for the new deal.")
     except ValueError as error:
-        return go("/acquisitions#add", err=str(error))
+        raise Refused(str(error)) from None
     ticket = form.get("thread_ticket", "")
     account, bound = inbox_service.resolve(ticket, user.id, user.email, db) if ticket else (None, None)
     deal = Acquisition(**fields, stage="lead", lead_at=lead_at, checks={})
@@ -188,7 +190,17 @@ async def add_deal(request: Request, db: Session = Depends(get_db), user: User =
     db.commit()
     if account is not None:
         _mark_property(db, user, account, bound)
-    return go(f"/acquisitions/deals/{deal.id}", ok=f"{deal.title} added to {service.LABELS[deal.stage].lower()}.")
+    return deal, f"{deal.title} added to {service.LABELS[deal.stage].lower()}."
+
+
+@router.post("/acquisitions/deals")
+async def add_deal(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    form = {k: v for k, v in (await request.form()).items() if isinstance(v, str)}
+    try:
+        deal, message = create_deal(db, user, form)
+    except Refused as refusal:
+        return go("/acquisitions#add", err=str(refusal))
+    return go(f"/acquisitions/deals/{deal.id}", ok=message)
 
 
 @router.get("/acquisitions/deals/{deal_id}", response_class=HTMLResponse)
@@ -209,15 +221,14 @@ def deal_page(deal_id: int, request: Request, db: Session = Depends(get_db), use
     return response
 
 
-@router.post("/acquisitions/deals/{deal_id}")
-async def save_deal(deal_id: int, request: Request, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
-    deal = get_or_404(db, Acquisition, deal_id)
-    form = {k: v for k, v in (await request.form()).items() if isinstance(v, str)}
+def edit_deal(db: Session, user: User, deal: Acquisition, form: dict[str, str]) -> str:
+    """Save the deal's details (the deal page's form, and the operator tool acquisition_edit) from the form's fields by
+    name; a field the form does not carry is saved blank, as on the screen. Audits and commits when something
+    changed. Returns the screen's flash; raises Refused with the form's error, nothing saved."""
     try:
         fields = _clean(form)
     except ValueError as error:
-        return go(f"/acquisitions/deals/{deal.id}", err=str(error))
+        raise Refused(str(error)) from None
     before = _snapshot(deal)
     for key, item in fields.items():
         setattr(deal, key, item)
@@ -225,7 +236,19 @@ async def save_deal(deal_id: int, request: Request, db: Session = Depends(get_db
     if now_is:
         audit(db, user, "acquisition.edit", f"acquisition:{deal.id}", before=was, after=now_is)
         db.commit()
-    return go(f"/acquisitions/deals/{deal.id}", ok="Saved.")
+    return "Saved."
+
+
+@router.post("/acquisitions/deals/{deal_id}")
+async def save_deal(deal_id: int, request: Request, db: Session = Depends(get_db),
+                    user: User = Depends(require_admin)):
+    deal = get_or_404(db, Acquisition, deal_id)
+    form = {k: v for k, v in (await request.form()).items() if isinstance(v, str)}
+    try:
+        message = edit_deal(db, user, deal, form)
+    except Refused as refusal:
+        return go(f"/acquisitions/deals/{deal.id}", err=str(refusal))
+    return go(f"/acquisitions/deals/{deal.id}", ok=message)
 
 
 @router.post("/acquisitions/deals/{deal_id}/stage")

@@ -46,7 +46,7 @@ from ..db import get_db
 from ..models import BANDS, DISTRICT_STATES, NATIONS, AuditLog, ModelRun, Person, PostcodeDistrict, User, utcnow
 from ..services import territory_rules as tr
 from ..services.audit import audit, changes
-from ..templating import go, render
+from ..templating import Refused, go, render
 from .mentees import add_months
 from .people import like_pattern, page_of, parse_date, parse_int, qs
 
@@ -359,17 +359,16 @@ def _vals(partner_id: str, person_id: str, reserved_until: str) -> dict:
     return {"partner_id": partner_id.strip(), "person_id": person_id.strip(), "reserved_until": reserved_until.strip()}
 
 
-@router.post("/territories/{district}/reserve", response_class=HTMLResponse)
-def territory_reserve(district: str, request: Request, partner_id: str = Form(""), person_id: str = Form(""), reserved_until: str = Form(""),
-                      db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    d = _load(db, district)
-    vals = _vals(partner_id, person_id, reserved_until)
+def reserve_district(db: Session, user: User, d: PostcodeDistrict, vals: dict) -> str:
+    """Reserve a district for a partner (first refusal; the district page's Reserve form, and the operator tool
+    territory_reserve), from _vals. A blank date reserves for RESERVE_MONTHS. Audits and commits. Returns the
+    screen's flash; raises Refused with the form's error, nothing saved."""
     errors: list[str] = []
     if d.state == "hq":
         errors.append(f"{d.district} is kept for head office and is never offered. Release it first if that has changed.")
     elif d.state == "core":
         errors.append(f"{d.district} is a core district held by partner {d.partner_id}. Release it first.")
-    pid, problems = _partner_from_form(db, partner_id, person_id)
+    pid, problems = _partner_from_form(db, vals["partner_id"], vals["person_id"])
     errors.extend(problems)
     if pid is None and not problems:
         errors.append("Reserve it for whom? Give a Hello New Home partner id, or choose a person who has one.")
@@ -387,26 +386,37 @@ def territory_reserve(district: str, request: Request, partner_id: str = Form(""
         elif until > add_months(today, MAX_RESERVE_MONTHS):
             errors.append(f"A reservation longer than {MAX_RESERVE_MONTHS} months is almost certainly a typo; first refusal runs {RESERVE_MONTHS} months.")
     if errors:
-        return _detail(request, db, user, d, vals=vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     assert pid is not None and until is not None
     before = holding_snapshot(d)
     d.state, d.partner_id, d.reserved_until = "reserved", pid, until
     b, after = changes(before, holding_snapshot(d))
     if not after:
-        return go(f"/territories/{d.district}", ok="Nothing changed: it was already reserved for that partner until that date.")
+        return "Nothing changed: it was already reserved for that partner until that date."
     db.add(d)
     audit(db, user, "territory.reserve", f"district:{d.district}", before=b, after=after)
     db.commit()
-    return go(f"/territories/{d.district}", ok=f"{d.district} reserved for partner {pid} until {until:%d %b %Y}. Hello New Home is not told from here yet.")
+    return f"{d.district} reserved for partner {pid} until {until:%d %b %Y}. Hello New Home is not told from here yet."
 
 
-@router.post("/territories/{district}/assign", response_class=HTMLResponse)
-def territory_assign(district: str, request: Request, partner_id: str = Form(""), person_id: str = Form(""),
-                     db: Session = Depends(get_db), user: User = Depends(require_admin)):
+@router.post("/territories/{district}/reserve", response_class=HTMLResponse)
+def territory_reserve(district: str, request: Request, partner_id: str = Form(""), person_id: str = Form(""), reserved_until: str = Form(""),
+                      db: Session = Depends(get_db), user: User = Depends(require_admin)):
     d = _load(db, district)
-    vals = _vals(partner_id, person_id, "")
+    vals = _vals(partner_id, person_id, reserved_until)
+    try:
+        message = reserve_district(db, user, d, vals)
+    except Refused as refusal:
+        return _detail(request, db, user, d, vals=vals, error=str(refusal), status=400)
+    return go(f"/territories/{d.district}", ok=message)
+
+
+def assign_district(db: Session, user: User, d: PostcodeDistrict, vals: dict) -> str:
+    """Make a district a partner's core district (the district page's Assign form, and the operator tool
+    territory_assign), from _vals. Audits and commits. Returns the screen's flash; raises Refused with the form's
+    error, nothing saved."""
     errors: list[str] = []
-    pid, problems = _partner_from_form(db, partner_id, person_id)
+    pid, problems = _partner_from_form(db, vals["partner_id"], vals["person_id"])
     errors.extend(problems)
     if pid is None and not problems:
         errors.append("Assign it to whom? Give a Hello New Home partner id, or choose a person who has one.")
@@ -415,17 +425,29 @@ def territory_assign(district: str, request: Request, partner_id: str = Form("")
     elif d.state == "core" and pid is not None and d.partner_id != pid:
         errors.append(f"{d.district} is already a core district held by partner {d.partner_id}. Release it first.")
     if errors:
-        return _detail(request, db, user, d, vals=vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     assert pid is not None
     before = holding_snapshot(d)
     d.state, d.partner_id, d.reserved_until = "core", pid, None
     b, after = changes(before, holding_snapshot(d))
     if not after:
-        return go(f"/territories/{d.district}", ok=f"Nothing changed: {d.district} was already core for partner {pid}.")
+        return f"Nothing changed: {d.district} was already core for partner {pid}."
     db.add(d)
     audit(db, user, "territory.assign", f"district:{d.district}", before=b, after=after)
     db.commit()
-    return go(f"/territories/{d.district}", ok=f"{d.district} is now a core district for partner {pid}. Hello New Home is not told from here yet.")
+    return f"{d.district} is now a core district for partner {pid}. Hello New Home is not told from here yet."
+
+
+@router.post("/territories/{district}/assign", response_class=HTMLResponse)
+def territory_assign(district: str, request: Request, partner_id: str = Form(""), person_id: str = Form(""),
+                     db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    d = _load(db, district)
+    vals = _vals(partner_id, person_id, "")
+    try:
+        message = assign_district(db, user, d, vals)
+    except Refused as refusal:
+        return _detail(request, db, user, d, vals=vals, error=str(refusal), status=400)
+    return go(f"/territories/{d.district}", ok=message)
 
 
 @router.post("/territories/{district}/release", response_class=HTMLResponse)

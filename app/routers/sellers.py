@@ -39,7 +39,7 @@ from ..services import commission
 from ..services.audit import audit, changes
 from ..services.commission import CommissionError, KIND_LABELS, percent, pounds
 from ..services.earnings import TRACKED_LINK
-from ..templating import go, render
+from ..templating import Refused, go, render
 from .people import find_person_by_key, like_pattern, page_of, parse_date, person_key_problem, qs
 
 router = APIRouter(prefix="/sellers", dependencies=[Depends(check_origin)])
@@ -163,13 +163,18 @@ def new(request: Request, db: Session = Depends(get_db), user: User = Depends(re
     return _form(request, db, user, vals)
 
 
-@router.post("/new", response_class=HTMLResponse)
-def create(request: Request, person_id: str = Form(""), email: str = Form(""), name: str = Form(""), phone: str = Form(""),
-           kind: str = Form(""), code: str = Form(""), bank_reference: str = Form(""), self_billing: str = Form(""),
-           self_billing_date: str = Form(""), active: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    vals = {"person_id": person_id.strip()[:12], "email": email.strip()[:254], "name": name.strip()[:120], "phone": phone.strip()[:40],
+def _seller_vals(person_id: str, email: str, name: str, phone: str, kind: str, code: str, bank_reference: str, self_billing: str,
+                 self_billing_date: str, active: str) -> dict:
+    return {"person_id": person_id.strip()[:12], "email": email.strip()[:254], "name": name.strip()[:120], "phone": phone.strip()[:40],
             "kind": kind.strip(), "code": code.strip()[:24], "bank_reference": bank_reference.strip()[:120], "self_billing": self_billing.strip()[:1],
             "self_billing_date": self_billing_date.strip()[:10], "active": active.strip()[:1]}
+
+
+def create_seller(db: Session, user: User, vals: dict) -> tuple[Seller, str]:
+    """Create a seller (the New seller form, and the operator tool seller_create) from the form's values as
+    _seller_vals cleans them: person_id, or email/name/phone for a person found or added inline. The code is generated
+    when blank. Audits and commits. Returns (seller, the screen's flash); raises Refused with the form's error,
+    nothing saved."""
     errors: list[str] = []
     notes: list[str] = []
 
@@ -220,13 +225,13 @@ def create(request: Request, person_id: str = Form(""), email: str = Form(""), n
         agreed = _at_midnight(when)
     if errors:
         db.rollback()
-        return _form(request, db, user, vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     assert person is not None
     try:
         db.flush()
     except IntegrityError:
         db.rollback()
-        return _form(request, db, user, vals, error="That email is already on the register.", status=400)
+        raise Refused("That email is already on the register.") from None
     if created_person:
         audit(db, user, "person.create", f"person:{person.id}", after={"person_key": person.person_key, "name": person.name,
                                                                        "phone": person.phone, "notes": ""})
@@ -237,12 +242,24 @@ def create(request: Request, person_id: str = Form(""), email: str = Form(""), n
         db.flush()
     except IntegrityError:
         db.rollback()
-        return _form(request, db, user, vals, error="That person is already a seller, or the code is taken.", status=400)
+        raise Refused("That person is already a seller, or the code is taken.") from None
     audit(db, user, "seller.create", f"seller:{seller.id}", after=seller_snapshot(seller))
     db.commit()
     flash = (f"Seller {seller.code} created for {person.person_key} ({KIND_LABELS[seller.kind]}). Their tracked link is "
              f"{TRACKED_LINK.format(code=seller.code)}. " + " ".join(notes)).strip()
-    return go(f"/sellers/{seller.id}", ok=flash)
+    return seller, flash
+
+
+@router.post("/new", response_class=HTMLResponse)
+def create(request: Request, person_id: str = Form(""), email: str = Form(""), name: str = Form(""), phone: str = Form(""),
+           kind: str = Form(""), code: str = Form(""), bank_reference: str = Form(""), self_billing: str = Form(""),
+           self_billing_date: str = Form(""), active: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    vals = _seller_vals(person_id, email, name, phone, kind, code, bank_reference, self_billing, self_billing_date, active)
+    try:
+        seller, message = create_seller(db, user, vals)
+    except Refused as refusal:
+        return _form(request, db, user, vals, error=str(refusal), status=400)
+    return go(f"/sellers/{seller.id}", ok=message)
 
 
 # ---- statements (declared before /{seller_id} so the literal path wins) --------------------------------------------
@@ -382,12 +399,15 @@ def detail(seller_id: int, request: Request, db: Session = Depends(get_db), user
     return _page(request, db, user, _load(db, seller_id))
 
 
-@router.post("/{seller_id}", response_class=HTMLResponse)
-def update(seller_id: int, request: Request, kind: str = Form(""), code: str = Form(""), bank_reference: str = Form(""), self_billing: str = Form(""),
-           self_billing_date: str = Form(""), active: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    seller = _load(db, seller_id)
-    vals = {"kind": kind.strip(), "code": code.strip()[:24], "bank_reference": bank_reference.strip()[:120], "self_billing": self_billing.strip()[:1],
+def _update_vals(kind: str, code: str, bank_reference: str, self_billing: str, self_billing_date: str, active: str) -> dict:
+    return {"kind": kind.strip(), "code": code.strip()[:24], "bank_reference": bank_reference.strip()[:120], "self_billing": self_billing.strip()[:1],
             "self_billing_date": self_billing_date.strip()[:10], "active": active.strip()[:1]}
+
+
+def update_seller(db: Session, user: User, seller: Seller, vals: dict) -> str:
+    """Save kind, code, bank reference, self-billing agreement and active (the seller page's form, and the operator tool
+    seller_update) from the form's values as _update_vals cleans them. Audits and commits. Returns the screen's
+    flash; raises Refused with the form's error, nothing saved."""
     errors: list[str] = []
     if vals["kind"] not in SELLER_KINDS:
         errors.append("Choose a kind.")
@@ -409,7 +429,7 @@ def update(seller_id: int, request: Request, kind: str = Form(""), code: str = F
             errors.append("The self-billing agreement cannot be signed in the future.")
         agreed = _at_midnight(when)
     if errors:
-        return _page(request, db, user, seller, vals=vals, error=" ".join(errors), status=400)
+        raise Refused(" ".join(errors))
     before = seller_snapshot(seller)
     seller.kind = vals["kind"]
     seller.code = vals["code"]
@@ -417,16 +437,15 @@ def update(seller_id: int, request: Request, kind: str = Form(""), code: str = F
     seller.self_billing_agreed_at = agreed
     seller.active = bool(vals["active"])
     b, a = changes(before, seller_snapshot(seller))
-    back = f"/sellers/{seller.id}"
     if not a:
-        return go(back, ok="No changes to save.")
+        return "No changes to save."
     db.add(seller)
     audit(db, user, "seller.update", f"seller:{seller.id}", before=b, after=a)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        return _page(request, db, user, seller, vals=vals, error="That code is already in use.", status=400)
+        raise Refused("That code is already in use.") from None
     hints: list[str] = []
     if "code" in a:
         hints.append(f"The tracked link is now {TRACKED_LINK.format(code=seller.code)}; anything printed with the old code stops attributing.")
@@ -434,7 +453,19 @@ def update(seller_id: int, request: Request, kind: str = Form(""), code: str = F
         hints.append("Entries already earned keep the rule they were earned under; the new kind applies to the next sale.")
     if "self_billing_agreed_at" in a and seller.self_billing_agreed_at is None:
         hints.append("Without a self-billing agreement their entries are held back from statements.")
-    return go(back, ok=("Seller saved. " + " ".join(hints)).strip())
+    return ("Seller saved. " + " ".join(hints)).strip()
+
+
+@router.post("/{seller_id}", response_class=HTMLResponse)
+def update(seller_id: int, request: Request, kind: str = Form(""), code: str = Form(""), bank_reference: str = Form(""), self_billing: str = Form(""),
+           self_billing_date: str = Form(""), active: str = Form(""), db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    seller = _load(db, seller_id)
+    vals = _update_vals(kind, code, bank_reference, self_billing, self_billing_date, active)
+    try:
+        message = update_seller(db, user, seller, vals)
+    except Refused as refusal:
+        return _page(request, db, user, seller, vals=vals, error=str(refusal), status=400)
+    return go(f"/sellers/{seller.id}", ok=message)
 
 
 @router.post("/{seller_id}/entries/{entry_id}/clawback", response_class=HTMLResponse)
