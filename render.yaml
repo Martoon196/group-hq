@@ -55,6 +55,10 @@ services:
         value: "disabled"
       - key: GHQ_OPERATOR_MESSAGING
         value: "disabled"
+      # "enabled" also carries Relaunch72's operator tools (webinars, brand CRMs, follow-up drafts) on this connector,
+      # relayed with a bearer derived from R72_SSO_SECRET. Relaunch72 needs R72_OPERATOR_GROUP_HQ enabled as well.
+      - key: GHQ_OPERATOR_RELAUNCH72
+        value: "disabled"
       - key: ORDRIS_BASE_URL
         value: https://ordris.io
       - key: ORDRIS_PARTNER_TOKEN

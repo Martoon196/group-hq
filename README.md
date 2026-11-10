@@ -104,7 +104,8 @@ Allow), Claude Desktop or Claude Code (a static bearer, `GHQ_OPERATOR_TOKEN`) ca
 mentees, grants, LAPS, property deals, webinars, the Inbox (conversations and messages), the WhatsApp keyword rules and
 non-secret settings, and, only when `GHQ_OPERATOR_WRITES=enabled`, make the admin screens' changes as a named admin.
 Sending a message to a real person (an Inbox reply, switching a WhatsApp keyword rule on) needs
-`GHQ_OPERATOR_MESSAGING=enabled` as well. Mounted only when a credential is set; rotating
+`GHQ_OPERATOR_MESSAGING=enabled` as well. With `GHQ_OPERATOR_RELAUNCH72=enabled` the same connector carries
+Relaunch72's webinar, brand CRM and follow-up draft tools, relayed for the owner. Mounted only when a credential is set; rotating
 `GHQ_OPERATOR_OAUTH_SECRET` signs every connector out. Setup, the tool list and the limits: `docs/operator-api.md`.
 
 ## Guards worth knowing about

@@ -164,6 +164,19 @@ class OperatorMcpTests(unittest.TestCase):
                 self.assertNotIn("annotations", listed["crm_start_plan"])
         self.assertFalse(any(t.messaging for t in tools.READ_TOOLS + tools.WRITE_TOOLS))
 
+    def test_the_relaunch72_relay_is_off_by_default_and_its_bearer_matches_relaunch72s(self):
+        from app.services import relaunch72_operator as relay
+        self.assertFalse(relay.enabled())
+        self.assertEqual(relay.offered("founder@example.test"), (), "off: nothing offered and Relaunch72 never contacted")
+        # Pinned in Relaunch72 as well (orchestrator/test/operator.test.ts): both servers derive this from the same secret.
+        self.assertEqual(relay.bearer("group-hq-shared-secret-synthetic-0123456789abcdef"),
+                         "vSvqRI-KLf62_AAErvHo3X0_isVsT-aXT9jMwmRUNxs")
+        with patch.object(config, "GHQ_OPERATOR_RELAUNCH72", "enabled"):
+            self.assertFalse(relay.enabled(), "the switch alone, without the handoff secret, enables nothing")
+            with patch.object(config, "R72_SSO_SECRET", "s" * 40):
+                self.assertTrue(relay.enabled())
+        self.assertTrue(all(name not in relay.READ_ONLY for name in ("webinar_create", "crm_create_lead", "owner_email_save_draft")))
+
     def test_read_tool_over_fixed_rows_with_the_static_token(self):
         response = self.rpc("tools/call", {"name": "crm_leads", "arguments": {"limit": 10}})
         self.assertEqual(response.status_code, 200, response.text)

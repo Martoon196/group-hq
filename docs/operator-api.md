@@ -47,8 +47,9 @@ A request with no acceptable bearer gets `401 {"error": "unauthorised"}` with
 | `GHQ_OPERATOR_OAUTH_SECRET` | Signs the OAuth client ids, codes, access and refresh tokens. Valid only at 32-256 characters. Shared with nothing else. |
 | `GHQ_OPERATOR_WRITES` | `enabled` offers the write tools. Anything else (the default) is read only. |
 | `GHQ_OPERATOR_MESSAGING` | `enabled`, together with writes enabled, offers the two messaging tools. Anything else (the default, `disabled` in `render.yaml`) hides them, and a call answers "sending messages is switched off on this deployment (GHQ_OPERATOR_MESSAGING)". On its own, without writes, it does nothing. |
+| `GHQ_OPERATOR_RELAUNCH72` | `enabled` also carries Relaunch72's operator tools on this connector (see "Relaunch72 tools"). Needs a valid `R72_SSO_SECRET` here and `R72_OPERATOR_GROUP_HQ=enabled` on Relaunch72. Anything else (the default, `disabled` in `render.yaml`) never contacts Relaunch72. |
 
-`render.yaml` lists the five on the web service only; none is copied to a cron. Generate each secret with
+`render.yaml` lists the six on the web service only; none is copied to a cron. Generate each secret with
 something like `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 
 ## Tools
@@ -250,6 +251,36 @@ name, the acting admin and ok / error, never the arguments or the result, so no 
 `inbox_messages` only reads: unlike opening the conversation on the screen, it does not start the background copy of
 an officially linked conversation's messages into its CRM.
 
+## Relaunch72 tools: webinars, the brand CRMs and follow-up drafts
+
+Webinars, the Property Predator and Martin Howard Property CRMs and the follow-up drafts live in Relaunch72. So that
+they are run from this connector, Group HQ relays (`app.services.relaunch72_operator`): `tools/list` adds the tools
+Relaunch72's own operator endpoint offers, and a `tools/call` for one is passed through, server to server. Relaunch72
+stays the single owner of their schemas, checks and refusals; its `docs/operator-api.md` describes each tool. Their
+descriptions here begin "Relaunch72 brand workspace" and they take a `brand` (`pp` or `mhp`).
+
+- **Who.** Every relayed request names the signed-in admin (`X-Group-HQ-Admin`). Relaunch72 accepts it only for a
+  login that its handoff map (`R72_GROUP_HQ_SSO_USERS`) ties to its operator account, so a second Group HQ admin is
+  offered none of these tools. The decision is Relaunch72's; Group HQ holds no list.
+- **Bearer.** `base64url(HMAC-SHA256(R72_SSO_SECRET, "group-hq-operator-bearer/v1\0"))`, no padding: derived from the
+  secret the two servers already share for the sign-in handoff, so there is no new secret. A test on each side pins the
+  same vector.
+- **Writes.** A relayed tool is a read only if `relaunch72_operator.READ_ONLY` names it; anything else, including a
+  tool Relaunch72 adds later, needs `GHQ_OPERATOR_WRITES=enabled` here as well as Relaunch72's own
+  `R72_OPERATOR_WRITES`. A relayed write leaves an `operator.tool` audit row here (`tool:relaunch72/<name>`) whenever
+  it reached Relaunch72.
+- **What they cannot do.** They save records and drafts. Publishing or approving a sequence or an email, enrolling
+  people, scheduling and sending stay with the owner in Relaunch72. They are not messaging tools.
+- **One shared name.** Both servers have `webinars_list`. For an admin the relay serves, Relaunch72's replaces Group
+  HQ's (it returns what `webinar_get` and `webinar_update` need); anyone else keeps Group HQ's. Any other clash keeps
+  Group HQ's tool.
+- **Failures are said truthfully.** Nothing is retried. If no connection could be made: "nothing was sent to it and
+  nothing changed". If the request left and no readable answer came back (a timeout, an error status, an answer that
+  is not MCP): "it is not known whether this call took effect", so read the record again first. Relaunch72's own
+  refusals come back as its sentence.
+- **The tool list** is remembered per admin for five minutes (a failure for thirty seconds), so a tool Relaunch72
+  adds appears within five minutes, and an outage there never slows or breaks Group HQ's own tools.
+
 ## How the OAuth server works
 
 Registration is unauthenticated, so a **client id** is not stored: it is a signed description (HMAC-SHA256 with
@@ -283,6 +314,8 @@ the app's origin check and a form token bound to the session cookie.
 - **Clear `GHQ_OPERATOR_TOKEN`** (or set a new one): static access stops.
 - **Set `GHQ_OPERATOR_WRITES`** to anything but `enabled`: the write tools disappear on the next call, and the
   messaging tools with them.
+- **Set `GHQ_OPERATOR_RELAUNCH72`** to anything but `enabled` (or `R72_OPERATOR_GROUP_HQ` on Relaunch72): the
+  Relaunch72 tools disappear on the next call.
 - **Set `GHQ_OPERATOR_MESSAGING`** to anything but `enabled`: the two messaging tools disappear on the next call. A
   keyword rule already enabled keeps answering until it is paused (`whatsapp_keyword_rule_save_paused`, or the editor).
 
@@ -292,7 +325,8 @@ consent page is the only place a human is asked; after Allow, anything the conne
 admin until the connection is revoked or its refresh token expires. That includes reading that admin's Inbox, personal
 conversations among them, and, while messaging is enabled, sending as them; the consent page says which of these the
 deployment allows. A connection allowed before the Inbox tools existed gains them without being asked again, so revoke
-any connection that should not read the Inbox.
+any connection that should not read the Inbox. The same holds for the Relaunch72 tools: a connection the owner
+already allowed gains them when the relay is switched on.
 
 Rolling back: a build without `0017_operator_oauth` refuses to boot on a database that has it. Roll back to
 `main` plus only that migration file (the prepared recovery build), never to an older commit.

@@ -161,6 +161,7 @@ def group_hq_overview(db: Session, user: User, args: dict) -> dict:
     recent = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(12).all()
     return {"as_of": _iso(utcnow()), "acting_as": user.email, "writes_enabled": config.operator_writes_enabled(),
             "messaging_enabled": config.operator_messaging_enabled(),
+            "relaunch72_tools_enabled": config.operator_relaunch72_enabled(),
             "stats": stats, "recent_changes": [_audit_row(r) for r in recent]}
 
 

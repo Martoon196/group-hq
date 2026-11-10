@@ -100,6 +100,10 @@ GHQ_OPERATOR_OAUTH_SECRET = os.environ.get("GHQ_OPERATOR_OAUTH_SECRET", "")
 GHQ_OPERATOR_USER_EMAIL = os.environ.get("GHQ_OPERATOR_USER_EMAIL", "").strip().lower()
 GHQ_OPERATOR_WRITES = (os.environ.get("GHQ_OPERATOR_WRITES") or "").strip().lower()
 GHQ_OPERATOR_MESSAGING = (os.environ.get("GHQ_OPERATOR_MESSAGING") or "").strip().lower()
+# GHQ_OPERATOR_RELAUNCH72="enabled" also carries Relaunch72's operator tools (webinars, the brand CRMs, follow-up drafts)
+# on this connector, relayed server to server with a bearer derived from R72_SSO_SECRET (app.services.relaunch72_operator).
+# Relaunch72 must have R72_OPERATOR_GROUP_HQ enabled and serves only the admin its handoff map ties to its operator.
+GHQ_OPERATOR_RELAUNCH72 = (os.environ.get("GHQ_OPERATOR_RELAUNCH72") or "").strip().lower()
 
 
 def _valid_secret(value: str) -> bool:
@@ -125,6 +129,12 @@ def operator_writes_enabled() -> bool:
 def operator_messaging_enabled() -> bool:
     """Sending needs both switches: a deployment that is read only never sends, whatever this one says."""
     return GHQ_OPERATOR_MESSAGING == "enabled" and operator_writes_enabled()
+
+
+def operator_relaunch72_enabled() -> bool:
+    """Carry Relaunch72's operator tools (webinars, brand CRM, follow-up drafts) on this connector: the switch, and the
+    handoff secret the relay's bearer is derived from."""
+    return GHQ_OPERATOR_RELAUNCH72 == "enabled" and _valid_secret(R72_SSO_SECRET)
 
 
 def _int(name: str, default: int) -> int:
