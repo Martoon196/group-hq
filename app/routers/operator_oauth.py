@@ -232,6 +232,7 @@ def _consent_page(request: Request, user: User, params: dict, status_code: int =
                    "scope": params["scope"]},
         "csrf": csrf_token(request), "writes_enabled": config.operator_writes_enabled(),
         "messaging_enabled": config.operator_messaging_enabled(),
+        "relaunch72_enabled": config.operator_relaunch72_enabled(),
     }, status_code)
     response.headers["Cache-Control"] = "no-store"
     return response
