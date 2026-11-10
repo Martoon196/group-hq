@@ -1,0 +1,33 @@
+{% extends "app_base.html" %}
+{% set title = "Webinars | Group HQ" %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">Webinars</span><h1>Every webinar, one sign-in.</h1></div>
+<p class="help">Webinars run on each brand's own host (video, registration, reminders, replays and the CRM handoff live there). Open any page from here and you arrive signed in; the brand host never asks for a second password.</p>
+<nav class="wa-brands" aria-label="Choose brand">
+  {% for key, name in brands.items() %}<a href="/webinars?brand={{ key }}" class="btn{% if key == brand %} btn-primary{% endif %}"{% if key == brand %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}
+</nav>
+{% if not handoff_ready %}<p class="flash err mt-2">Sign-in handoff is not configured on Group HQ (<code>R72_SSO_SECRET</code>). Links below open the brand host, which will ask you to sign in.</p>{% endif %}
+<p class="mt-2">
+  <a class="btn btn-primary" href="/webinars/open?brand={{ brand }}&amp;path=/portal/webinars/new">Create a webinar</a>
+  <a class="btn" href="/webinars/open?brand={{ brand }}&amp;path=/portal/webinars">All webinars on {{ host }}</a>
+  <a class="btn" href="/webinars/open?brand={{ brand }}&amp;path=/portal/webinars">Email, video and CRM setup</a>
+</p>
+<section class="panel mt-2" aria-labelledby="webinars-heading">
+  <div class="panel-head"><h2 id="webinars-heading">{{ brands[brand] }}{% if listing and listing.workspace_name %} · {{ listing.workspace_name }}{% endif %}</h2><span class="help">Read from Relaunch72 · opens signed in</span></div>
+  {% if unavailable %}<p class="muted">The webinar connection is unavailable right now. Refresh to check again, or open the brand host directly.</p>
+  {% elif listing.availability == 'not_connected' %}<p class="muted">This brand's workspace is not mapped on Relaunch72 yet (<code>R72_GROUP_HQ_CRM_MHP_WORKSPACE_ID</code> and <code>_ORGANIZATION_ID</code>).</p>
+  {% elif listing.availability == 'not_available' %}<p class="muted">Relaunch72 refused the listing: the configured owner cannot manage this brand's workspace.</p>
+  {% elif not listing.webinars %}<p class="muted">No webinars yet. Create the first one above; registration pages, reminders and the CRM handoff are set up on the brand host.</p>
+  {% else %}<div class="table-scroll"><table class="data"><thead><tr><th>Webinar</th><th>When</th><th>Status</th><th>Registered</th><th>In CRM</th><th>Open</th></tr></thead><tbody>
+  {% for w in listing.webinars %}<tr>
+    <td><strong>{{ w.title }}</strong><br><small class="muted">{{ w.kind_label }}{% if w.public_url %} · <a href="{{ w.public_url }}" target="_blank" rel="noopener noreferrer">registration page ↗</a>{% endif %}</small></td>
+    <td>{% if w.starts_at %}{{ w.starts_at[:16].replace('T', ' ') }} UTC{% if w.duration_minutes %} · {{ w.duration_minutes }} min{% endif %}{% else %}On demand{% endif %}</td>
+    <td>{{ w.status_label }}{% if w.session_state == 'live' %} · <strong>live now</strong>{% elif w.session_state == 'ended' %} · ended{% endif %}</td>
+    <td>{{ w.registered }}</td>
+    <td>{{ w.crm_linked }}</td>
+    <td><a class="btn btn-primary" href="/webinars/open?brand={{ brand }}&amp;path={{ w.host_path }}">Host</a> <a class="btn" href="/webinars/open?brand={{ brand }}&amp;path={{ w.studio_path }}">Studio</a> <a class="btn" href="/webinars/open?brand={{ brand }}&amp;path={{ w.people_path }}">People</a> <a class="btn" href="/webinars/open?brand={{ brand }}&amp;path={{ w.manage_path }}">Edit</a></td>
+  </tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+</section>
+<p class="help mt-2">Leads: every registrant becomes a CRM lead on the brand's workspace automatically (a per-webinar switch on the brand host turns this off). Property Predator leads appear on <a href="/crm">CRM &amp; follow-up</a>; MHP leads live in the MHP marketing workspace.</p>
+{% endblock %}

@@ -31,6 +31,14 @@ services:
         value: https://propertypredator.com
       - key: PP_SERVICE_TOKEN
         sync: false
+      # Sign-in handoff into the Relaunch72 brand hosts (docs/relaunch72-webinars.md). Same value as
+      # R72_GROUP_HQ_SSO_SECRET on the Relaunch72 web service; web service only, never copied to a cron.
+      - key: R72_SSO_SECRET
+        sync: false
+      - key: R72_PP_HOST
+        value: hq.propertypredator.com
+      - key: R72_MHP_HOST
+        value: app.martinhowardproperty.co.uk
       - key: ORDRIS_BASE_URL
         value: https://ordris.io
       - key: ORDRIS_PARTNER_TOKEN

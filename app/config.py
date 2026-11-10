@@ -74,6 +74,12 @@ PP_BASE_URL = os.environ.get("PP_BASE_URL", "https://propertypredator.com").rstr
 PP_SERVICE_TOKEN = os.environ.get("PP_SERVICE_TOKEN", "")
 # Founder CRM read bridge into Relaunch72. Distinct from the PP partner token.
 R72_CRM_TOKEN = os.environ.get("R72_CRM_TOKEN", "")
+# Group HQ -> Relaunch72 sign-in handoff (docs/relaunch72-webinars.md): the same value as R72_GROUP_HQ_SSO_SECRET on
+# the Relaunch72 web service, 32-256 characters, shared with nothing else. Never reuse R72_CRM_TOKEN or PP_SERVICE_TOKEN.
+R72_SSO_SECRET = os.environ.get("R72_SSO_SECRET", "")
+# The two Relaunch72 brand hosts the handoff may sign a token for; a token is bound to exactly one of them.
+R72_PP_HOST = (os.environ.get("R72_PP_HOST") or "hq.propertypredator.com").strip().lower()
+R72_MHP_HOST = (os.environ.get("R72_MHP_HOST") or "app.martinhowardproperty.co.uk").strip().lower()
 ORDRIS_BASE_URL = os.environ.get("ORDRIS_BASE_URL", "").rstrip("/")
 ORDRIS_PARTNER_TOKEN = os.environ.get("ORDRIS_PARTNER_TOKEN", "")
 KP_BASE_URL = os.environ.get("KP_BASE_URL", "https://portal.keypropertiesuk.co.uk").rstrip("/")

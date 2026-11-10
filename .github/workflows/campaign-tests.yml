@@ -2,7 +2,7 @@ name: Group HQ tests
 
 on:
   push:
-    branches: [codex/ghq-wa-pairing-20261106, codex/ghq-unified-inbox-20261106, codex/ghq-personal-inbox-release-20261106]
+    branches: [codex/ghq-webinars-release-20261110, codex/ghq-wa-pairing-20261106, codex/ghq-unified-inbox-20261106, codex/ghq-personal-inbox-release-20261106]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -55,5 +55,11 @@ jobs:
         run: |
           python -m unittest discover -s unit_checks -p inbox_keyword_policy.py -v
           python -m unittest discover -s unit_checks -p linkedin_comments.py -v
+      - name: Webinar front door and corrected CRM route smoke
+        run: |
+          python -m unittest discover -s unit_checks -p relaunch72_sso.py -v
+          python -m unittest discover -s unit_checks -p relaunch72_webinars.py -v
+          python -m unittest discover -s unit_checks -p webinars_route.py -v
+          python -m unittest discover -s unit_checks -p crm_route.py -v
       - name: Run exact source suite
         run: pytest -q

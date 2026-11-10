@@ -2,7 +2,7 @@
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://unused:unused@127.0.0.1/unused")
 os.environ.setdefault("SECRET_KEY", "unit-test-only")
@@ -14,6 +14,14 @@ from app.services.relaunch72_crm import CrmUnavailable, Lead, LeadPage  # noqa: 
 
 class CrmRouteTests(unittest.TestCase):
     @staticmethod
+    def database():
+        db = MagicMock()
+        q = db.query.return_value
+        for method in ("filter_by", "filter", "order_by", "limit", "join"):
+            getattr(q, method).return_value = q
+        q.all.return_value = []
+        return db
+    @staticmethod
     def request():
         return Request({"type": "http", "method": "GET", "path": "/crm", "root_path": "",
                         "scheme": "http", "server": ("testserver", 80), "headers": [], "query_string": b""})
@@ -23,12 +31,12 @@ class CrmRouteTests(unittest.TestCase):
         lead = Lead("59e2f6cf-c35e-4a23-991f-012d29fbecba", "Test Lead", "form", "lead", "New", None,
                     None, "https://hq.propertypredator.com/portal/crm/contacts/59e2f6cf-c35e-4a23-991f-012d29fbecba")
         with patch("app.routers.crm.fetch_leads", return_value=LeadPage((lead,), None)):
-            response = crm(self.request(), founder)
+            response = crm(self.request(), db=self.database(), user=founder)
         self.assertEqual(response.status_code, 200)
         self.assertIn("Test Lead", response.body.decode())
         self.assertEqual(response.headers["cache-control"], "no-store")
         with patch("app.routers.crm.fetch_leads", side_effect=CrmUnavailable()):
-            response = crm(self.request(), founder)
+            response = crm(self.request(), db=self.database(), user=founder)
         self.assertEqual(response.status_code, 200)
         self.assertIn("connection is unavailable", response.body.decode())
 
