@@ -16,7 +16,7 @@ from app import config  # noqa: E402
 from app.models import CampaignLead, CampaignPlan, User  # noqa: E402
 from app.routers import operator_mcp as mcp  # noqa: E402
 from app.routers import operator_oauth as oauth  # noqa: E402
-from app.services import operator_tokens as tokens  # noqa: E402
+from app.services import operator_oauth_store as oauth_store  # noqa: E402
 from app.services import operator_tools as tools  # noqa: E402
 
 STATIC = "static-operator-token-synthetic-0123456789abcdef"
@@ -157,7 +157,10 @@ class OperatorMcpTests(unittest.TestCase):
         self.assertEqual(missing["content"][0]["text"], "Campaign lead 99 was not found")
 
     def test_an_oauth_access_token_acts_as_its_subject_and_a_batch_is_answered_in_order(self):
-        access = tokens.sign(tokens.ACCESS, {"sub": "founder@example.test", "scope": "operator", "iat": 1, "exp": 10**10, "jti": "j"}, secret=SECRET)
+        access, expired = "a" * 43, "e" * 43
+        live = patch.object(oauth_store, "resolve", lambda db, token: FOUNDER if token == access else None)
+        live.start()
+        self.addCleanup(live.stop)
         batch = [{"jsonrpc": "2.0", "id": "a", "method": "ping"}, {"jsonrpc": "2.0", "method": "notifications/initialized"},
                  {"jsonrpc": "2.0", "id": "b", "method": "tools/call", "params": {"name": "crm_lead", "arguments": {"lead_id": 7}}}]
         response = self.client.post("/mcp", json=batch, headers={"Authorization": f"Bearer {access}"})
@@ -167,7 +170,6 @@ class OperatorMcpTests(unittest.TestCase):
         detail = json.loads(replies[1]["result"]["content"][0]["text"])
         self.assertEqual(detail["name"], "Test Lead")
         self.assertEqual(detail["plan"]["id"], 3)
-        expired = tokens.sign(tokens.ACCESS, {"sub": "founder@example.test", "scope": "operator", "iat": 1, "exp": 2, "jti": "j"}, secret=SECRET)
         self.assertEqual(self.rpc("ping", bearer=expired).status_code, 401)
 
 

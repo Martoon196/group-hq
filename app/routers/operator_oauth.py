@@ -2,13 +2,15 @@
 
 claude.ai authenticates a remote MCP server only through OAuth: it registers itself as a client (RFC 7591), sends
 the admin here to sign in and press Allow, and exchanges the code it gets back for tokens with PKCE (S256).
-Everything issued is a signed, stateless blob from app.services.operator_tokens: the client id carries its own
-redirect URIs, the code carries the client, the redirect URI, the PKCE challenge and the admin's email, and the
-access and refresh tokens carry the admin's email. No table is written.
+The client id is a signed description of its redirect URIs (app.services.operator_tokens), because registration is
+unauthenticated and must not grow a table. Codes, access tokens and refresh tokens are opaque values whose hashes live
+in Postgres (app.services.operator_oauth_store): a code is redeemable once across every instance, refresh tokens are
+bound to their client and rotated on use, reuse ends the connection, and the admin can revoke any connection at
+/oauth/connections.
 
 Only /oauth/authorize needs the admin's session (it is the consent page); the discovery documents, registration
 and the token endpoint are public, speak JSON only and never redirect to a URI the client did not register.
-acting_user() is the bearer check /mcp uses: the static GHQ_OPERATOR_TOKEN, or a signed access token.
+acting_user() is the bearer check /mcp uses: the static GHQ_OPERATOR_TOKEN, or a live stored access token.
 """
 from __future__ import annotations
 
@@ -24,8 +26,10 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from .. import config
-from ..auth import check_origin, current_user, find_user_by_email
+from ..auth import check_origin, current_user, find_user_by_email, require_admin
+from ..db import get_db
 from ..models import User
+from ..services import operator_oauth_store as store
 from ..services import operator_tokens as tokens
 from ..templating import render
 
@@ -37,8 +41,9 @@ MAX_REDIRECT_URIS = 5
 MAX_URI_LENGTH = 2000
 MAX_CLIENT_NAME = 100
 MAX_STATE = 512
-CHALLENGE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
-VERIFIER = CHALLENGE
+CHALLENGE = re.compile(r"^[A-Za-z0-9_-]{43}$")          # an S256 challenge is one base64url SHA-256 digest
+VERIFIER = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
+OPAQUE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
 
@@ -65,7 +70,8 @@ def resource_metadata() -> dict:
 def server_metadata() -> dict:
     base = config.BASE_URL
     return {"issuer": base, "authorization_endpoint": base + "/oauth/authorize", "token_endpoint": base + "/oauth/token",
-            "registration_endpoint": base + "/oauth/register", "response_types_supported": ["code"],
+            "registration_endpoint": base + "/oauth/register", "revocation_endpoint": base + "/oauth/revoke",
+            "response_types_supported": ["code"], "revocation_endpoint_auth_methods_supported": ["none"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "code_challenge_methods_supported": ["S256"], "token_endpoint_auth_methods_supported": ["none"],
             "scopes_supported": [SCOPE]}
@@ -241,7 +247,7 @@ def authorize(request: Request, user: User = Depends(consent_user)):
 
 
 @router.post("/oauth/authorize", include_in_schema=False, dependencies=[Depends(check_origin)])
-async def decide(request: Request, user: User = Depends(consent_user)):
+async def decide(request: Request, user: User = Depends(consent_user), db: Session = Depends(get_db)):
     if not tokens.configured():
         return _bad_request(request, "The operator API's OAuth server is not configured on this deployment.")
     body = await _read_body(request)
@@ -260,10 +266,10 @@ async def decide(request: Request, user: User = Depends(consent_user)):
         if params["state"]:
             query["state"] = params["state"]
         return _redirect(params["redirect_uri"] + separator + urlencode(query))
-    issued = int(time.time())
-    code = tokens.sign(tokens.CODE, {"cid": params["client_id"], "uri": params["redirect_uri"], "cc": params["code_challenge"],
-                                     "sub": user.email.strip().lower(), "scope": SCOPE, "iat": issued,
-                                     "exp": issued + tokens.CODE_LIFETIME, "n": tokens.nonce()})
+    code = store.issue_code(db, user=user, client_id=params["client_id"], client_name=params["client"]["name"] or "MCP client",
+                            redirect_uri=params["redirect_uri"], code_challenge=params["code_challenge"])
+    if code is None:
+        return _bad_request(request, "This admin account is not active, so nothing was approved.")
     query = {"code": code}
     if params["state"]:
         query["state"] = params["state"]
@@ -278,109 +284,127 @@ def _redirect(location: str) -> RedirectResponse:
 
 
 # ---- token endpoint -------------------------------------------------------------------------------------------
-def _pkce_matches(verifier: str, challenge: str) -> bool:
-    digest = hashlib.sha256(verifier.encode("ascii")).digest()
-    expected = tokens._b64url(digest)
-    return hmac.compare_digest(expected, challenge)
+def _challenge_of(verifier: str) -> str:
+    return tokens._b64url(hashlib.sha256(verifier.encode("ascii")).digest())
 
 
-def _issue(sub: str, *, refresh: str | None = None) -> JSONResponse:
-    issued = int(time.time())
-    access = tokens.sign(tokens.ACCESS, {"sub": sub, "scope": SCOPE, "iat": issued, "exp": issued + tokens.ACCESS_LIFETIME,
-                                         "jti": tokens.nonce()})
-    if refresh is None:
-        refresh = tokens.sign(tokens.REFRESH, {"sub": sub, "scope": SCOPE, "iat": issued,
-                                               "exp": issued + tokens.REFRESH_LIFETIME, "jti": tokens.nonce()})
-    return _json({"access_token": access, "token_type": "Bearer", "expires_in": tokens.ACCESS_LIFETIME,
-                  "refresh_token": refresh, "scope": SCOPE})
+def _issued(pair: store.Tokens) -> JSONResponse:
+    return _json({"access_token": pair.access, "token_type": "Bearer", "expires_in": int(store.ACCESS_LIFETIME.total_seconds()),
+                  "refresh_token": pair.refresh, "scope": SCOPE})
 
 
-@router.post("/oauth/token", include_in_schema=False)
-async def token(request: Request):
-    if not tokens.configured():
-        return _error("invalid_request", 503, "the authorization server is not configured")
+async def _form(request: Request) -> dict[str, str] | JSONResponse:
     body = await _read_body(request)
     if body is None:
         return _error("invalid_request", 413, "request too large")
-    pairs = parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True)
     form: dict[str, str] = {}
-    for key, value in pairs:
+    for key, value in parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True):
         if key in form:
             return _error("invalid_request", 400, f"{key} was sent more than once")
         form[key] = value
+    return form
+
+
+@router.post("/oauth/token", include_in_schema=False)
+async def token(request: Request, db: Session = Depends(get_db)):
+    if not tokens.configured():
+        return _error("invalid_request", 503, "the authorization server is not configured")
+    form = await _form(request)
+    if isinstance(form, JSONResponse):
+        return form
     grant = form.get("grant_type", "")
     if grant == "authorization_code":
-        return _exchange_code(form)
+        return _exchange_code(db, form)
     if grant == "refresh_token":
-        return _refresh(form)
+        return _refresh(db, form)
     return _error("unsupported_grant_type")
 
 
-def _exchange_code(form: dict[str, str]) -> JSONResponse:
+def _exchange_code(db: Session, form: dict[str, str]) -> JSONResponse:
     code, redirect_uri, client_id, verifier = (form.get(k, "") for k in ("code", "redirect_uri", "client_id", "code_verifier"))
     if not code or not redirect_uri or not client_id or not verifier:
         return _error("invalid_request", 400, "code, redirect_uri, client_id and code_verifier are required")
-    if not VERIFIER.fullmatch(verifier):
+    if not OPAQUE.fullmatch(code) or not VERIFIER.fullmatch(verifier):
         return _error("invalid_grant")
-    try:
-        claims = tokens.verify(tokens.CODE, code)
-    except (tokens.TokenError, ValueError):
-        return _error("invalid_grant")
-    cid, uri, challenge, sub, code_nonce, exp = (claims.get(k) for k in ("cid", "uri", "cc", "sub", "n", "exp"))
-    if not all(isinstance(v, str) and v for v in (cid, uri, challenge, sub, code_nonce)):
-        return _error("invalid_grant")
-    if not hmac.compare_digest(cid.encode(), client_id.encode()) or not hmac.compare_digest(uri.encode(), redirect_uri.encode()):
-        return _error("invalid_grant")
-    if not _pkce_matches(verifier, challenge):
-        return _error("invalid_grant")
-    if not tokens.consume_code(code_nonce, int(exp)):
-        return _error("invalid_grant", 400, "the code was already used")
-    return _issue(sub)
-
-
-def _refresh(form: dict[str, str]) -> JSONResponse:
-    refresh, client_id = form.get("refresh_token", ""), form.get("client_id", "")
-    if not refresh or not client_id:
-        return _error("invalid_request", 400, "refresh_token and client_id are required")
     if _client(client_id) is None:
+        return _error("invalid_client", 401)
+    outcome, pair = store.redeem_code(db, code=code, client_id=client_id, redirect_uri=redirect_uri, verifier_challenge=_challenge_of(verifier))
+    if outcome != "issued" or pair is None:
         return _error("invalid_grant")
-    try:
-        claims = tokens.verify(tokens.REFRESH, refresh)
-    except (tokens.TokenError, ValueError):
+    return _issued(pair)
+
+
+def _refresh(db: Session, form: dict[str, str]) -> JSONResponse:
+    presented, client_id = form.get("refresh_token", ""), form.get("client_id", "")
+    if not presented or not client_id:
+        return _error("invalid_request", 400, "refresh_token and client_id are required")
+    if not OPAQUE.fullmatch(presented):
         return _error("invalid_grant")
-    sub = claims.get("sub")
-    if not isinstance(sub, str) or not sub:
+    if _client(client_id) is None:
+        return _error("invalid_client", 401)
+    outcome, pair = store.refresh(db, refresh_token=presented, client_id=client_id)
+    if outcome != "issued" or pair is None:
         return _error("invalid_grant")
-    return _issue(sub, refresh=refresh)
+    return _issued(pair)
+
+
+@router.post("/oauth/revoke", include_in_schema=False)
+async def revoke(request: Request, db: Session = Depends(get_db)):
+    """RFC 7009: always 200 for a well-formed request; a matching token of this client ends its connection."""
+    if not tokens.configured():
+        return _error("invalid_request", 503, "the authorization server is not configured")
+    form = await _form(request)
+    if isinstance(form, JSONResponse):
+        return form
+    client_id = form.get("client_id", "")
+    if _client(client_id) is None:
+        return _error("invalid_client", 401)
+    presented = form.get("token", "")
+    if OPAQUE.fullmatch(presented):
+        store.revoke_token(db, token=presented, client_id=client_id)
+    return _json({})
+
+
+# ---- the admin's connected apps ------------------------------------------------------------------------------
+REVOKED = {"owner": "revoked by you", "client": "disconnected by the app", "code_replay": "stopped: a sign-in code was reused",
+           "refresh_reuse": "stopped: an old renewal token was reused", "client_mismatch": "stopped: presented by a different app"}
+
+
+@router.get("/oauth/connections", include_in_schema=False)
+def connections(request: Request, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    response = render(request, "operator_connections.html", {
+        "user": user, "section": "", "grants": store.list_grants(db, user), "reasons": REVOKED,
+        "csrf": csrf_token(request), "configured": tokens.configured()})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.post("/oauth/connections/{grant_id}/revoke", include_in_schema=False, dependencies=[Depends(check_origin)])
+async def revoke_connection(grant_id: int, request: Request, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    body = await _read_body(request)
+    form = dict(parse_qsl((body or b"").decode("utf-8", "replace"), keep_blank_values=True))
+    if not hmac.compare_digest(form.get("csrf", ""), csrf_token(request)):
+        return _bad_request(request, "The form has expired. Reload Connected apps and try again.")
+    revoked = store.revoke_grant(db, user, grant_id)
+    return _redirect("/oauth/connections?" + urlencode({"ok": "Revoked. That app must be connected again." if revoked else "That connection was already ended."}))
 
 
 # ---- the bearer check /mcp uses ------------------------------------------------------------------------------
 def acting_user(db: Session, authorization: str | None) -> User | None:
-    """The admin a bearer acts as: GHQ_OPERATOR_USER_EMAIL for the static token, the token's subject for a signed
-    access token; in both cases an existing, active admin. None when the bearer is not acceptable."""
+    """The admin a bearer acts as: GHQ_OPERATOR_USER_EMAIL for the static token, the subject of a live stored access
+    token otherwise; in both cases an existing, active admin. None when the bearer is not acceptable."""
     header = (authorization or "").strip()
     if not header[:7].lower() == "bearer ":
         return None
     presented = header[7:].strip()
     if not presented or len(presented) > tokens.MAX_TOKEN_LENGTH or not presented.isascii():
         return None
-    email = None
     if config.operator_static_token_configured() and hmac.compare_digest(presented.encode(), config.GHQ_OPERATOR_TOKEN.encode()):
-        email = config.GHQ_OPERATOR_USER_EMAIL
-    elif tokens.configured():
-        try:
-            claims = tokens.verify(tokens.ACCESS, presented)
-        except (tokens.TokenError, ValueError):
-            return None
-        if claims.get("scope") != SCOPE or not isinstance(claims.get("sub"), str):
-            return None
-        email = claims["sub"]
-    if not email:
-        return None
-    user = find_user_by_email(db, email)
-    if user is None or not user.is_active:
-        return None
-    return user
+        user = find_user_by_email(db, config.GHQ_OPERATOR_USER_EMAIL)
+        return user if user is not None and user.is_active else None
+    if tokens.configured() and OPAQUE.fullmatch(presented):
+        return store.resolve(db, presented)
+    return None
 
 
 def method_not_allowed() -> Response:

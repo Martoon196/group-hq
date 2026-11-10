@@ -76,33 +76,45 @@ acting admin and ok / error, never the arguments or the result.
 
 ## How the OAuth server works
 
-Everything it issues is stateless and signed with `GHQ_OPERATOR_OAUTH_SECRET` (HMAC-SHA256, the same byte
-format as the Relaunch72 sign-in handoff), and nothing is stored:
+Registration is unauthenticated, so a **client id** is not stored: it is a signed description (HMAC-SHA256 with
+`GHQ_OPERATOR_OAUTH_SECRET`, the byte format of the Relaunch72 sign-in handoff) of the redirect URIs the client
+registered (`https://` anywhere, or `http://` on `127.0.0.1` / `localhost` for a local MCP client) and its name.
 
-- the **client id** carries the redirect URIs the client registered (`https://` anywhere, or `http://` on
-  `127.0.0.1` / `localhost` for a local MCP client) and its name;
-- the **code** carries the client, the exact redirect URI, the PKCE S256 challenge and the admin's email, lives
-  two minutes and is single use (a small in-memory set of used codes);
-- the **access token** lives one hour; the **refresh token** 30 days and is returned unchanged on refresh.
+Codes and tokens are opaque random values; only their SHA-256 hashes live in Postgres
+(`alembic/versions/0017_operator_oauth.py`, `app/services/operator_oauth_store.py`):
 
-Only `/oauth/authorize` needs the admin's session. An unregistered redirect URI, a forged client id or a bad
-PKCE challenge gets a 400 page and never a redirect. The consent POST is guarded by the app's origin check and
-a form token bound to the session cookie.
+- a **code** remembers the client, the exact redirect URI, the PKCE S256 challenge and the admin, lives two
+  minutes and is redeemed once **across every instance**: redemption locks its row, and a second presentation
+  revokes the connection the first one created;
+- each redemption creates a **connection** (grant) with a one-hour **access token** and a 30-day **refresh
+  token**, both bound to that client;
+- a refresh **rotates**: the presented refresh token is spent and a new pair is issued. Presenting a spent
+  refresh token again, or presenting one with another client's id, revokes the whole connection;
+- `/mcp` checks the access token against the table on every call, so a revoked connection or a deactivated
+  admin stops at once.
+
+Only `/oauth/authorize` and `/oauth/connections` need the admin's session. An unregistered redirect URI, a forged
+client id or a bad PKCE challenge gets a 400 page and never a redirect. The consent and revoke POSTs are guarded by
+the app's origin check and a form token bound to the session cookie.
 
 ## Revoking access, and the honest limits
 
-- **Rotate `GHQ_OPERATOR_OAUTH_SECRET`** (set a new value and redeploy): every client id, code, access and
-  refresh token ever issued stops working at once, and each connector must be allowed again.
+- **Connected apps** (`/oauth/connections`, linked from the consent page) lists each connection with Revoke.
+- **RFC 7009**: a client can end its own connection at `POST /oauth/revoke`.
+- **Deactivate the admin**: every token naming them stops on its next call.
+- **Rotate `GHQ_OPERATOR_OAUTH_SECRET`**: every registered client id stops verifying, so every connector must
+  register and be allowed again.
 - **Clear `GHQ_OPERATOR_TOKEN`** (or set a new one): static access stops.
-- **Deactivate the admin** a token names: the bearer check refuses a user who is not active.
 - **Set `GHQ_OPERATOR_WRITES`** to anything but `enabled`: the write tools disappear on the next call.
 
-Because tokens are stateless, they cannot be revoked one at a time: rotating the secret signs every connector
-out together. An access token stays valid for its hour even after the admin's session ends or their password
-changes; a refresh token for its 30 days until the secret rotates. The used-code set lives in one process, so
-on more than one instance a code could in theory be exchanged once per instance within its two minutes, each
-time for the same admin. The consent page is the only place a human is asked; after Allow, anything the
-connector's Claude does runs as that admin until the token expires.
+A network retry of a refresh whose answer was lost presents the spent token again and ends the connection; the
+connector then asks for consent once more. That is deliberate: it is indistinguishable from a stolen token. The
+consent page is the only place a human is asked; after Allow, anything the connector's Claude does runs as that
+admin until the connection is revoked or its refresh token expires.
 
-Checks without a database: `python -m unittest discover -s unit_checks -p '*.py' -v` (the `operator_*`
-modules cover the tokens, the OAuth flow and the MCP handshake and gate).
+Rolling back: a build without `0017_operator_oauth` refuses to boot on a database that has it. Roll back to
+`main` plus only that migration file (the prepared recovery build), never to an older commit.
+
+Checks without a database: `python -m unittest discover -s unit_checks -p '*.py' -v` (the `operator_*` modules cover
+client ids, the OAuth parameters and the MCP handshake and gate). The exchange, rotation, replay and revocation run
+against Postgres in `tests/test_operator_oauth.py`, including two sessions racing one code.

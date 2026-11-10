@@ -1,0 +1,19 @@
+{% extends "app_base.html" %}
+{% set title = "Connected apps | Group HQ" %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">Operator API</span><h1>Connected apps</h1></div>
+<p class="help">Apps you allowed to use Group HQ through the operator API, such as a claude.ai connector. Revoking ends their access immediately; the app must ask you again to reconnect.</p>
+{% if not configured %}<p class="muted">The OAuth server is not configured on this deployment (GHQ_OPERATOR_OAUTH_SECRET), so no app can connect.</p>{% endif %}
+<section class="panel mt-2" aria-labelledby="apps-heading">
+  <div class="panel-head"><h2 id="apps-heading">Your connections</h2></div>
+  {% if grants %}<div class="table-scroll"><table class="data"><thead><tr><th>App</th><th>Connected</th><th>Last renewed</th><th></th></tr></thead><tbody>
+  {% for g in grants %}<tr>
+    <td><strong>{{ g.client_name }}</strong></td>
+    <td>{{ g.created_at|uk }}</td>
+    <td>{{ g.last_used_at|uk if g.last_used_at else "—" }}</td>
+    <td>{% if g.revoked_at %}<span class="muted">{{ reasons.get(g.revoked_reason, "ended") }} · {{ g.revoked_at|uk }}</span>
+      {% else %}<form method="post" action="/oauth/connections/{{ g.id }}/revoke"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">Revoke</button></form>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="muted">No apps are connected.</p>{% endif %}
+</section>
+{% endblock %}

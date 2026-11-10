@@ -1,4 +1,5 @@
-"""The OAuth server for claude.ai connectors, without a database: discovery, registration, consent, PKCE exchange, refresh."""
+"""The OAuth server for claude.ai connectors without a database: discovery, registration, consent and parameter checks.
+The code exchange, refresh rotation, replay and revocation run against Postgres in tests/test_operator_oauth.py."""
 import base64
 import hashlib
 import os
@@ -17,6 +18,8 @@ from app import config  # noqa: E402
 from app.auth import current_user  # noqa: E402
 from app.main import http_error  # noqa: E402
 from app.routers import operator_oauth as oauth  # noqa: E402
+from app.services import operator_oauth_store as store  # noqa: E402
+from app.db import get_db  # noqa: E402
 from app.services import operator_tokens as tokens  # noqa: E402
 from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
@@ -33,12 +36,12 @@ def make_app(user=FOUNDER):
     app.add_exception_handler(StarletteHTTPException, http_error)
     if user is not None:
         app.dependency_overrides[current_user] = lambda: user
+    app.dependency_overrides[get_db] = lambda: object()          # any database call in these checks is patched
     return app
 
 
 class OperatorOAuthTests(unittest.TestCase):
     def setUp(self):
-        tokens.reset_consumed_for_tests()
         self.patches = [patch.object(config, "GHQ_OPERATOR_OAUTH_SECRET", SECRET), patch.object(config, "BASE_URL", "https://hq.example.test")]
         for p in self.patches:
             p.start()
@@ -73,6 +76,7 @@ class OperatorOAuthTests(unittest.TestCase):
         self.assertEqual(server["authorization_endpoint"], "https://hq.example.test/oauth/authorize")
         self.assertEqual(server["token_endpoint"], "https://hq.example.test/oauth/token")
         self.assertEqual(server["registration_endpoint"], "https://hq.example.test/oauth/register")
+        self.assertEqual(server["revocation_endpoint"], "https://hq.example.test/oauth/revoke")
         self.assertEqual(server["code_challenge_methods_supported"], ["S256"])
         self.assertEqual(server["grant_types_supported"], ["authorization_code", "refresh_token"])
         self.assertEqual(server["token_endpoint_auth_methods_supported"], ["none"])
@@ -94,52 +98,50 @@ class OperatorOAuthTests(unittest.TestCase):
         self.assertEqual(self.register(name="n" * 101).status_code, 400)
         self.assertEqual(self.client.post("/oauth/register", content=b"{not json").status_code, 400)
 
-    def test_consent_then_pkce_exchange_then_refresh(self):
+    def test_consent_stores_a_code_and_returns_to_the_registered_uri_only(self):
         client_id = self.register().json()["client_id"]
         page = self.client.get("/oauth/authorize", params=self.authorize_query(client_id))
         self.assertEqual(page.status_code, 200)
         self.assertIn("Claude", page.text)
         self.assertIn("claude.ai", page.text)
+        self.assertIn("/oauth/connections", page.text)
         self.assertEqual(page.headers["cache-control"], "no-store")
-        redirect = self.consent(client_id)
+        seen = {}
+
+        def issue(db, **kwargs):
+            seen.update(kwargs)
+            return "c" * 43
+        with patch.object(store, "issue_code", issue):
+            redirect = self.consent(client_id)
         self.assertEqual(redirect.status_code, 303)
         parts = urlsplit(redirect.headers["location"])
         self.assertEqual((parts.scheme, parts.netloc, parts.path), ("https", "claude.ai", "/api/mcp/auth_callback"))
-        query = parse_qs(parts.query)
-        self.assertEqual(query["state"], ["st-1"])
-        code = query["code"][0]
-        claims = tokens.verify(tokens.CODE, code, secret=SECRET)
-        self.assertEqual((claims["sub"], claims["cid"], claims["uri"], claims["cc"]), ("founder@example.test", client_id, CALLBACK, CHALLENGE))
-        self.assertLessEqual(claims["exp"] - claims["iat"], 120)
+        self.assertEqual(parse_qs(parts.query), {"code": ["c" * 43], "state": ["st-1"]})
+        self.assertEqual((seen["client_id"], seen["redirect_uri"], seen["code_challenge"], seen["user"]), (client_id, CALLBACK, CHALLENGE, FOUNDER))
+        with patch.object(store, "issue_code", lambda db, **kw: None):
+            refused = self.consent(client_id)
+        self.assertEqual(refused.status_code, 400)
+        self.assertNotIn("location", refused.headers)
 
-        wrong = self.client.post("/oauth/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK,
-                                                      "client_id": client_id, "code_verifier": "w" * 43})
-        self.assertEqual((wrong.status_code, wrong.json()["error"]), (400, "invalid_grant"))
-        wrong_uri = self.client.post("/oauth/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK + "x",
-                                                          "client_id": client_id, "code_verifier": VERIFIER})
-        self.assertEqual((wrong_uri.status_code, wrong_uri.json()["error"]), (400, "invalid_grant"))
-        good = self.client.post("/oauth/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK,
-                                                     "client_id": client_id, "code_verifier": VERIFIER})
-        self.assertEqual(good.status_code, 200, good.text)
-        self.assertEqual(good.headers["cache-control"], "no-store")
-        grant = good.json()
-        self.assertEqual((grant["token_type"], grant["expires_in"], grant["scope"]), ("Bearer", 3600, "operator"))
-        access = tokens.verify(tokens.ACCESS, grant["access_token"], secret=SECRET)
-        self.assertEqual(access["sub"], "founder@example.test")
-        self.assertEqual(tokens.verify(tokens.REFRESH, grant["refresh_token"], secret=SECRET)["sub"], "founder@example.test")
-        again = self.client.post("/oauth/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK,
-                                                      "client_id": client_id, "code_verifier": VERIFIER})
-        self.assertEqual((again.status_code, again.json()["error"]), (400, "invalid_grant"))
+    def test_token_and_revoke_endpoints_refuse_bad_input_before_the_database(self):
+        client_id = self.register().json()["client_id"]
 
-        refreshed = self.client.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": grant["refresh_token"],
-                                                          "client_id": client_id})
-        self.assertEqual(refreshed.status_code, 200, refreshed.text)
-        self.assertEqual(refreshed.json()["refresh_token"], grant["refresh_token"])
-        self.assertEqual(tokens.verify(tokens.ACCESS, refreshed.json()["access_token"], secret=SECRET)["sub"], "founder@example.test")
-        with self.assertRaises(tokens.TokenError):
-            tokens.verify(tokens.ACCESS, grant["refresh_token"], secret=SECRET)
-        self.assertEqual(self.client.post("/oauth/token", data={"grant_type": "password"}).json()["error"], "unsupported_grant_type")
-        self.assertEqual(self.client.post("/oauth/token", data={"grant_type": "refresh_token"}).json()["error"], "invalid_request")
+        def untouched(*a, **k):
+            raise AssertionError("the store must not be reached")
+        with patch.object(store, "redeem_code", untouched), patch.object(store, "refresh", untouched), patch.object(store, "revoke_token", untouched):
+            post = lambda data: self.client.post("/oauth/token", data=data)  # noqa: E731
+            self.assertEqual(post({"grant_type": "password"}).json()["error"], "unsupported_grant_type")
+            self.assertEqual(post({"grant_type": "refresh_token"}).json()["error"], "invalid_request")
+            self.assertEqual(post({"grant_type": "authorization_code", "code": "x", "redirect_uri": CALLBACK, "client_id": client_id,
+                                   "code_verifier": VERIFIER}).json()["error"], "invalid_grant")
+            forged = post({"grant_type": "authorization_code", "code": "c" * 43, "redirect_uri": CALLBACK, "client_id": "forged", "code_verifier": VERIFIER})
+            self.assertEqual((forged.status_code, forged.json()["error"]), (401, "invalid_client"))
+            self.assertEqual(post({"grant_type": "refresh_token", "refresh_token": "r" * 43, "client_id": "forged"}).status_code, 401)
+            twice = self.client.post("/oauth/token", content=b"grant_type=refresh_token&grant_type=authorization_code",
+                                     headers={"content-type": "application/x-www-form-urlencoded"})
+            self.assertEqual(twice.json()["error"], "invalid_request")
+            self.assertEqual(self.client.post("/oauth/revoke", data={"token": "t" * 43, "client_id": "forged"}).status_code, 401)
+            self.assertEqual(self.client.post("/oauth/revoke", data={"token": "short", "client_id": client_id}).status_code, 200)
 
     def test_deny_and_bad_parameters(self):
         client_id = self.register().json()["client_id"]
@@ -187,11 +189,13 @@ class OperatorOAuthTests(unittest.TestCase):
             self.assertIsNone(oauth.acting_user(Db(None), "Bearer static-operator-token-synthetic-0123456789"))
             self.assertIsNone(oauth.acting_user(Db(FOUNDER), "Basic abc"))
             self.assertIsNone(oauth.acting_user(Db(FOUNDER), None))
-        access = tokens.sign(tokens.ACCESS, {"sub": "founder@example.test", "scope": "operator", "iat": 1, "exp": 10**10, "jti": "j"}, secret=SECRET)
-        self.assertIs(oauth.acting_user(Db(FOUNDER), "Bearer " + access), FOUNDER)
-        inactive = SimpleNamespace(**{**vars(FOUNDER), "is_active": False})
-        self.assertIsNone(oauth.acting_user(Db(inactive), "Bearer " + access))
-        self.assertIsNone(oauth.acting_user(Db(FOUNDER), "Bearer " + access[:-3] + "abc"))
+            inactive = SimpleNamespace(**{**vars(FOUNDER), "is_active": False})
+            self.assertIsNone(oauth.acting_user(Db(inactive), "Bearer static-operator-token-synthetic-0123456789"))
+        access = "a" * 43
+        with patch.object(store, "resolve", lambda db, token: FOUNDER if token == access else None):
+            self.assertIs(oauth.acting_user(Db(None), "Bearer " + access), FOUNDER)
+            self.assertIsNone(oauth.acting_user(Db(None), "Bearer " + "b" * 43))
+            self.assertIsNone(oauth.acting_user(Db(None), "Bearer not-an-opaque-token"))
 
 
 if __name__ == "__main__":
