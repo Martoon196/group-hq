@@ -110,6 +110,7 @@ def save_rule(db: Session, user: User, form: dict):
     put_setting(db, RULES_KEY, updated, user.email)
     audit(db, user, "whatsapp.keyword.save", "whatsapp-keyword:" + rule_id, before=existing, after=item)
     db.commit()
+    return item
 
 
 async def authenticated_body(request: Request) -> bytes:

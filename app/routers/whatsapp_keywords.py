@@ -13,16 +13,33 @@ from ..templating import go, render
 
 router = APIRouter()
 PAGE = "/crm/channels/whatsapp/keywords"
+SAVED = "Rule saved. The listener will use it for new requests; existing deliveries are not repeated."
+
+
+def editor_context(db: Session) -> dict:
+    """What the editor shows, for the page and for the operator's whatsapp_keyword_rules tool: the saved rules and their
+    revision, the groups the listener reported, whether its adapter secret is set, and the latest 50 enquiries."""
+    return {"saved": service.rules(db), "brands": service.BRANDS, "inventory": service.setting(db, service.GROUPS_KEY, {}),
+            "connected": 32 <= len(config.WHATSAPP_KEYWORD_ADAPTER_SECRET) <= 256,
+            "deliveries": db.scalars(select(KeywordDelivery).order_by(KeywordDelivery.created_at.desc()).limit(50)).all()}
+
+
+def save_rule(db: Session, user: User, *, revision: int, name: str, brand: str, keywords: str, message: str,
+              match_mode: str = "exact", group_ids=(), enabled: bool = False, requested_reply: bool = False,
+              rule_id: str = "") -> tuple[dict, str]:
+    """Save the editor's form (the Save button and the operator's keyword tools). The rule as saved and the flash; a
+    refusal is the service's HTTPException with the screen's sentence, and nothing is saved."""
+    item = service.save_rule(db, user, {"revision": revision, "id": rule_id, "name": name, "brand": brand,
+        "keywords": keywords, "message": message, "matchMode": match_mode, "groups": list(group_ids),
+        "enabled": enabled, "requestedReply": requested_reply})
+    return item, SAVED
 
 
 @router.get(PAGE, response_class=HTMLResponse)
 def editor(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    saved = service.rules(db)
-    edit = next((r for r in saved["rules"] if r["id"] == request.query_params.get("edit")), None)
-    response = render(request, "whatsapp_keywords.html", {"user": user, "section": "whatsapp", "saved": saved,
-        "edit": edit, "brands": service.BRANDS, "inventory": service.setting(db, service.GROUPS_KEY, {}),
-        "connected": 32 <= len(config.WHATSAPP_KEYWORD_ADAPTER_SECRET) <= 256,
-        "deliveries": db.scalars(select(KeywordDelivery).order_by(KeywordDelivery.created_at.desc()).limit(50)).all()})
+    ctx = editor_context(db)
+    edit = next((r for r in ctx["saved"]["rules"] if r["id"] == request.query_params.get("edit")), None)
+    response = render(request, "whatsapp_keywords.html", {"user": user, "section": "whatsapp", "edit": edit, **ctx})
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -32,10 +49,10 @@ def save(revision: int = Form(...), name: str = Form(...), brand: str = Form(...
          message: str = Form(...), match_mode: str = Form("exact"), group_ids: list[str] = Form([]),
          enabled: bool = Form(False), requested_reply: bool = Form(False), rule_id: str = Form(""),
          db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    service.save_rule(db, user, {"revision": revision, "id": rule_id, "name": name, "brand": brand,
-        "keywords": keywords, "message": message, "matchMode": match_mode, "groups": group_ids,
-        "enabled": enabled, "requestedReply": requested_reply})
-    return go(PAGE, ok="Rule saved. The listener will use it for new requests; existing deliveries are not repeated.")
+    _, message_saved = save_rule(db, user, revision=revision, name=name, brand=brand, keywords=keywords, message=message,
+                                 match_mode=match_mode, group_ids=group_ids, enabled=enabled,
+                                 requested_reply=requested_reply, rule_id=rule_id)
+    return go(PAGE, ok=message_saved)
 
 
 @router.api_route(service.BASE + "/{action:path}", methods=["GET", "POST"])

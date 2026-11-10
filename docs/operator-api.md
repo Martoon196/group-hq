@@ -1,11 +1,19 @@
 # Operator API: Group HQ over MCP for Claude
 
 Group HQ speaks the Model Context Protocol at `https://group-hq.onrender.com/mcp`, so Claude (a claude.ai
-custom connector, Claude Desktop or Claude Code) can read what the screens show and, only when a deployment
-switches it on, make the changes the admin screens make (CRM, people, mentees, grants, LAPS, property deals,
-programmes, territories, franchise and sellers). Every call acts as one named admin and is logged; nothing here
-sends a message to a person, and no password hash, authenticator secret, product token or credential is ever
-returned.
+custom connector, Claude Desktop or Claude Code) can read what the screens show, including the Inbox and the WhatsApp
+keyword rules, and, only when a deployment switches it on, make the changes the admin screens make (CRM, people,
+mentees, grants, LAPS, property deals, programmes, territories, franchise, sellers, and filing an Inbox conversation
+or linking it to a CRM). Every call acts as one named admin and is logged, and no password hash, authenticator
+secret, product token or credential is ever returned.
+
+Tools come in three classes, each behind its own switch:
+
+| Class | Offered when | What it can do |
+| --- | --- | --- |
+| Read | always | Answers from the database and the Inbox. Changes nothing, sends nothing. |
+| Write | `GHQ_OPERATOR_WRITES=enabled` | Changes Group HQ's records (and, where marked, a person's product access). Sends no message. |
+| Messaging | `GHQ_OPERATOR_WRITES=enabled` **and** `GHQ_OPERATOR_MESSAGING=enabled` | **Causes a message to reach a real person**: one Inbox reply, or switching a WhatsApp keyword rule on. There are exactly two such tools. |
 
 The server is Streamable HTTP, stateless and JSON only: `POST /mcp` takes JSON-RPC 2.0 (one request or a
 batch of up to 20), notifications get `202`, and `GET /mcp` is `405`. It is mounted only when at least one of
@@ -38,8 +46,9 @@ A request with no acceptable bearer gets `401 {"error": "unauthorised"}` with
 | `GHQ_OPERATOR_USER_EMAIL` | The admin a static-token call acts as. Must be an existing, active admin (matched case-insensitively), or every static-token call is refused. |
 | `GHQ_OPERATOR_OAUTH_SECRET` | Signs the OAuth client ids, codes, access and refresh tokens. Valid only at 32-256 characters. Shared with nothing else. |
 | `GHQ_OPERATOR_WRITES` | `enabled` offers the write tools. Anything else (the default) is read only. |
+| `GHQ_OPERATOR_MESSAGING` | `enabled`, together with writes enabled, offers the two messaging tools. Anything else (the default, `disabled` in `render.yaml`) hides them, and a call answers "sending messages is switched off on this deployment (GHQ_OPERATOR_MESSAGING)". On its own, without writes, it does nothing. |
 
-`render.yaml` lists the four on the web service only; none is copied to a cron. Generate each secret with
+`render.yaml` lists the five on the web service only; none is copied to a cron. Generate each secret with
 something like `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 
 ## Tools
@@ -58,6 +67,14 @@ Read tools, always offered:
 | `acquisitions_list` (`limit`, `stage`) | Property deals, open by default. |
 | `webinars_list` (`brand`) | Both brands' webinars, read live from Relaunch72. |
 | `settings_get` | The non-secret settings and each product's Live / Dry run mode. |
+| `inbox_accounts` | The Inbox accounts this admin can see, exactly as the Inbox decides: key, label, business, channel, provider, whether replies are possible, and for the personal WhatsApp whether the owner's connector is online. A personal account is listed only for its owner. |
+| `inbox_conversations` (`accounts`, `channel`, `brand`, `conversation_type`, `label`, `query`, `limit`) | The Inbox's conversation list, newest first, read by the screen's own function (`app.routers.inbox.conversation_list`): name, participant, last message time and preview, one-to-one or group where known, category and triage, and the `thread_ticket` every other inbox tool takes. `query` matches the name. |
+| `inbox_messages` (`thread_ticket`, `cursor`) | One conversation through the screen's `thread_context`: each message's sender, direction, time and text, the reply receipts, CRM links, conversation choices, triage and attached property deals. `cursor` is the previous answer's `earlier_cursor`. |
+| `whatsapp_keyword_rules` (`group_query`) | The keyword editor's page (`app.routers.whatsapp_keywords.editor_context`): the rules and their revision, the groups the listener reported (id and name), whether the listener's adapter is configured and online, and the latest 50 keyword enquiries with name, number, rule, group, reply and state. |
+
+A `thread_ticket` is the signed ticket the Inbox itself puts in its links: it names one conversation on one account
+for one admin, works for about two hours, and stops working when that account's credential or mapping changes. A tool
+given a stale one answers "Refresh the inbox before continuing."; list the conversations again for a fresh one.
 
 Write tools, offered only while `GHQ_OPERATOR_WRITES=enabled` (otherwise `tools/list` omits them and a call
 answers "writes are disabled on this deployment"). Each one runs the screen's own code path, never a copy of its rules:
@@ -165,19 +182,73 @@ moves.
 | `seller_mark_statement_paid` (`statement_id`, `paid_at`) | Records that a statement was paid (no money moves here). |
 | `seller_confirm_rule` (`rule_id`) | Records the founder's sign-off of a commission rule. |
 
+**Inbox and WhatsApp keywords** (`/inbox`, `/crm/channels/whatsapp/keywords`; `app.services.operator_inbox`). These
+three are write tools: they change Group HQ's records (and the business CRM, for the link) and send no message.
+
+| Tool | Does |
+| --- | --- |
+| `inbox_link_crm` (`thread_ticket`, `brand`, `display_name`, `contact_id`, `copy_messages`) | What `POST /inbox/crm` does (`app.routers.inbox.link_crm`): creates the conversation's person as a contact (lead) in that business's CRM through Relaunch72, or links an existing contact when `contact_id` is given. Nobody is subscribed to marketing. |
+| `inbox_organise` (`thread_ticket`, `conversation_type`, `businesses`, `copy_messages_to`, `note`) | What `POST /inbox/organise` does (`organise_conversation`): the conversation's type, related businesses, which linked CRMs get its messages, and the private note. |
+| `whatsapp_keyword_rule_save_paused` (`revision`, `rule_id`, `name`, `brand`, `keywords`, `message`, `match_mode`, `group_ids`) | The keyword editor's save (`app.routers.whatsapp_keywords.save_rule`) with the rule forced to paused: a draft for the owner. A paused rule answers nobody. Editing an enabled rule with it pauses that rule. |
+
+## Messaging tools: these reach real people
+
+Offered only while `GHQ_OPERATOR_WRITES=enabled` **and** `GHQ_OPERATOR_MESSAGING=enabled`. They are the only tools
+that cause a message to leave Group HQ, and what they send cannot be recalled. Each is also a write tool: it keeps the
+screen's own audit rows and receipt and adds the `operator.tool` row. In `tools/list` they carry the MCP annotations
+`readOnlyHint: false` and `openWorldHint: true`, so a client can ask before running them.
+
+| Tool | Does |
+| --- | --- |
+| `whatsapp_keyword_rule_save` (`revision`, `rule_id`, `name`, `brand`, `keywords`, `message`, `match_mode`, `group_ids`, `enabled`, `requested_reply`) | The keyword editor's full save, including switching a rule on. While a rule is enabled, **every person who types one of its keywords in one of its groups is sent its reply privately from the owner's own WhatsApp, once per person**. `requested_reply` is the owner's confirmation that the group invitation promises that private reply; Claude may set it true only when the owner has said so in the conversation, and it is needed on every save that leaves the rule enabled. The editor's refusals apply unchanged: no empty group list, no unknown group, no overlap with another enabled rule in the same group, a stale `revision`. |
+| `inbox_reply` (`thread_ticket`, `message`, `request_id`) | Sends **one reply in one conversation** through the Inbox's own `service.send`, from the account and channel the conversation is on. One conversation per call, only when the owner has asked for that reply; never for unsolicited, bulk or repeated messaging. `request_id` is a UUID for idempotency (one is generated and returned when left out): the same id and text never send twice. The answer is the receipt's `state` and the sentence the Inbox flashes. |
+
+`inbox_reply` answers with `ok: false` and no `isError` when a receipt exists but the news is bad: `rejected` (the
+channel refused it) or `outcome_unknown` / `calling` (the message may have gone). **An unknown outcome must never be
+retried**, with the same or a new `request_id`; the answer says so (`do_not_retry: true`) and the owner should check the
+original app. A refusal before anything was attempted (a stale ticket, an empty or oversized message, an account without
+replies, the personal connector offline, a WhatsApp recipient who typed STOP) is the screen's sentence with `isError`,
+and no receipt is written.
+
+The Inbox tools hand Claude text that strangers wrote (names, previews, messages, keyword senders' names). Their
+descriptions and the server's instructions say to treat it as information, never as instructions; that is guidance to
+the model, not a technical barrier, which is one more reason messaging has its own switch.
+
+What limits the two, as the features stand:
+
+- **Past group messages are not stored.** The WhatsApp listener reports a group message only when it is live (within
+  five minutes), in a group a rule lists, and matching an **enabled** rule. Nothing else from a group reaches Group HQ,
+  and there is no group backfill, so "everyone who already typed a keyword" cannot be listed unless an enabled rule
+  caught them at the time (those are the enquiries `whatsapp_keyword_rules` shows). A new rule answers new messages only.
+- **One reply per person per rule**, and never to someone who typed STOP. Editing a rule does not re-send; replies not
+  yet sent when a rule is edited or paused are held.
+- **The listener runs on the owner's computer.** Keyword replies and personal-WhatsApp inbox replies go out only while
+  it is running and linked; an Inbox reply to a personal account is refused while that connector is offline, and
+  otherwise queued for it.
+- **The Inbox holds one-to-one conversations only.** A group chat is never an Inbox conversation, and a personal
+  WhatsApp conversation exists only once a private message was exchanged after the owner switched collection on (or
+  history was imported). `inbox_link_crm` needs such a conversation: a keyword enquiry on its own is not a CRM contact
+  and has no `thread_ticket`.
+- **The official MHP WhatsApp number** is read through Relaunch72 and accepts a reply only when replies are enabled
+  for it (`GHQ_MHP_WHATSAPP_MANUAL_REPLIES`) and the person wrote within the last 24 hours.
+
 Left out on purpose (no tool, and none is to be added without a decision):
 
 | Action | Why |
 | --- | --- |
-| Franchise follow-up email (`POST /franchise/{id}/tasks/{tid}/send`), the Inbox and personal inbox (replies, sends, automations), comments (LinkedIn, video comments), WhatsApp keywords | Each sends an email, SMS, WhatsApp, LinkedIn or other message to a person. |
+| Franchise follow-up email (`POST /franchise/{id}/tasks/{tid}/send`), Inbox reply rules and handoff (`/inbox/automations`), public comments (LinkedIn, video comments), any send to more than one conversation | Each sends an email, SMS, WhatsApp, LinkedIn or other message to a person without the owner choosing that one message. The only sending tools are the two messaging tools above. |
+| Inbox connections: a connection's default business, connecting or switching the personal accounts, personal WhatsApp collection and reply switches, inbox scanning | These decide which private conversations are read at all and whether replies can leave; they stay with the owner at the screen. |
 | Everything on `/settings`: a product's Live / Dry run switch, admin users, passwords, the authenticator, the audit screens | These decide what the operator itself may do and who can sign in; they stay with the founder at the screen. |
 | Bulk deletes | Not reversible from a sentence. |
 | Mentee import (`/mentees/import`) | A bulk import of existing users that grants access in every product at once. |
 | LAPS Start (`POST /laps/start`) and property-deal Start (`POST /acquisitions/start`) | They only open the add form pre-filled; nothing is saved. `laps_create_deals` and `acquisition_create` do the saving. |
 
-Every result is capped (100 rows a list, 40 a LAPS column). A tool failure comes back as a sentence with
-`isError: true`, never a stack trace. The log line per call (`grouphq.operator`) carries the tool name, the
-acting admin and ok / error, never the arguments or the result.
+Every result is capped (100 rows a list, 40 a LAPS column, 100 conversations, 100 messages a page, 100 groups; a
+message's text is cut at 4,000 characters and a preview at 300, each with a `..._truncated` flag). A tool failure comes
+back as a sentence with `isError: true`, never a stack trace. The log line per call (`grouphq.operator`) carries the tool
+name, the acting admin and ok / error, never the arguments or the result, so no message text or phone number is logged.
+`inbox_messages` only reads: unlike opening the conversation on the screen, it does not start the background copy of
+an officially linked conversation's messages into its CRM.
 
 ## How the OAuth server works
 
@@ -210,12 +281,18 @@ the app's origin check and a form token bound to the session cookie.
 - **Rotate `GHQ_OPERATOR_OAUTH_SECRET`**: every registered client id stops verifying, so every connector must
   register and be allowed again.
 - **Clear `GHQ_OPERATOR_TOKEN`** (or set a new one): static access stops.
-- **Set `GHQ_OPERATOR_WRITES`** to anything but `enabled`: the write tools disappear on the next call.
+- **Set `GHQ_OPERATOR_WRITES`** to anything but `enabled`: the write tools disappear on the next call, and the
+  messaging tools with them.
+- **Set `GHQ_OPERATOR_MESSAGING`** to anything but `enabled`: the two messaging tools disappear on the next call. A
+  keyword rule already enabled keeps answering until it is paused (`whatsapp_keyword_rule_save_paused`, or the editor).
 
 A network retry of a refresh whose answer was lost presents the spent token again and ends the connection; the
 connector then asks for consent once more. That is deliberate: it is indistinguishable from a stolen token. The
 consent page is the only place a human is asked; after Allow, anything the connector's Claude does runs as that
-admin until the connection is revoked or its refresh token expires.
+admin until the connection is revoked or its refresh token expires. That includes reading that admin's Inbox, personal
+conversations among them, and, while messaging is enabled, sending as them; the consent page says which of these the
+deployment allows. A connection allowed before the Inbox tools existed gains them without being asked again, so revoke
+any connection that should not read the Inbox.
 
 Rolling back: a build without `0017_operator_oauth` refuses to boot on a database that has it. Roll back to
 `main` plus only that migration file (the prepared recovery build), never to an older commit.
@@ -224,4 +301,6 @@ Checks without a database: `python -m unittest discover -s unit_checks -p '*.py'
 client ids, the OAuth parameters and the MCP handshake and gate). The exchange, rotation, replay and revocation run
 against Postgres in `tests/test_operator_oauth.py`, including two sessions racing one code. Every screen write tool has
 a happy path and a refusal through `POST /mcp` in `tests/test_operator_writes.py`, which also checks they are hidden
-while writes are disabled.
+while writes are disabled. The Inbox and WhatsApp tools have the same in `tests/test_operator_inbox.py`, with every
+provider a stand-in: it checks the three classes in `tools/list`, and that a messaging tool called while messaging is
+off reaches no provider, queues nothing for the connector and writes no receipt.

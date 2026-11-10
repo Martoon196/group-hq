@@ -93,10 +93,13 @@ HNH_PARTNER_TOKEN = os.environ.get("HNH_PARTNER_TOKEN", "")
 # named by GHQ_OPERATOR_USER_EMAIL; GHQ_OPERATOR_OAUTH_SECRET signs the OAuth client ids, codes and tokens that a
 # claude.ai connector gets after the admin signs in here and presses Allow. The API is mounted only when at least
 # one of the two is validly set. GHQ_OPERATOR_WRITES="enabled" offers the write tools; anything else is read only.
+# GHQ_OPERATOR_MESSAGING="enabled" (and writes enabled) offers the messaging tools, the only ones that cause a message to
+# reach a real person: an Inbox reply, and switching a WhatsApp keyword rule on. Anything else keeps them hidden.
 GHQ_OPERATOR_TOKEN = os.environ.get("GHQ_OPERATOR_TOKEN", "")
 GHQ_OPERATOR_OAUTH_SECRET = os.environ.get("GHQ_OPERATOR_OAUTH_SECRET", "")
 GHQ_OPERATOR_USER_EMAIL = os.environ.get("GHQ_OPERATOR_USER_EMAIL", "").strip().lower()
 GHQ_OPERATOR_WRITES = (os.environ.get("GHQ_OPERATOR_WRITES") or "").strip().lower()
+GHQ_OPERATOR_MESSAGING = (os.environ.get("GHQ_OPERATOR_MESSAGING") or "").strip().lower()
 
 
 def _valid_secret(value: str) -> bool:
@@ -117,6 +120,11 @@ def operator_configured() -> bool:
 
 def operator_writes_enabled() -> bool:
     return GHQ_OPERATOR_WRITES == "enabled"
+
+
+def operator_messaging_enabled() -> bool:
+    """Sending needs both switches: a deployment that is read only never sends, whatever this one says."""
+    return GHQ_OPERATOR_MESSAGING == "enabled" and operator_writes_enabled()
 
 
 def _int(name: str, default: int) -> int:

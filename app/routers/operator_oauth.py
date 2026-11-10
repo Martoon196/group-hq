@@ -231,6 +231,7 @@ def _consent_page(request: Request, user: User, params: dict, status_code: int =
                    "code_challenge": params["code_challenge"], "code_challenge_method": "S256", "state": params["state"],
                    "scope": params["scope"]},
         "csrf": csrf_token(request), "writes_enabled": config.operator_writes_enabled(),
+        "messaging_enabled": config.operator_messaging_enabled(),
     }, status_code)
     response.headers["Cache-Control"] = "no-store"
     return response

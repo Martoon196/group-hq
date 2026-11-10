@@ -43,6 +43,8 @@ services:
       # GHQ_OPERATOR_TOKEN is the static bearer for Claude Code / Claude Desktop (acting as GHQ_OPERATOR_USER_EMAIL);
       # GHQ_OPERATOR_OAUTH_SECRET signs the tokens a claude.ai connector gets. Each 32-256 characters, shared with
       # nothing else; rotating the secret signs every connector out. Writes are off until GHQ_OPERATOR_WRITES is "enabled".
+      # GHQ_OPERATOR_MESSAGING "enabled" (with writes enabled) offers the tools that send a message to a real person:
+      # an Inbox reply and switching a WhatsApp keyword rule on. Anything else keeps them hidden.
       - key: GHQ_OPERATOR_TOKEN
         sync: false
       - key: GHQ_OPERATOR_OAUTH_SECRET
@@ -50,6 +52,8 @@ services:
       - key: GHQ_OPERATOR_USER_EMAIL
         sync: false
       - key: GHQ_OPERATOR_WRITES
+        value: "disabled"
+      - key: GHQ_OPERATOR_MESSAGING
         value: "disabled"
       - key: ORDRIS_BASE_URL
         value: https://ordris.io
