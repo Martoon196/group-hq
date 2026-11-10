@@ -97,6 +97,14 @@ link. **Needs a region** on the dashboard (and the Mentees filter of that name) 
 Home partner has no area yet, with a button to the Hello New Home page where the founder assigns it. What each mentee
 gets, where the links show and the region process: `docs/mentee-earnings.md`; the four contracts: `docs/connectors.md`.
 
+## Operator API (Claude over MCP)
+
+Group HQ speaks the Model Context Protocol at `/mcp`, so a claude.ai custom connector (OAuth: sign in here and press
+Allow), Claude Desktop or Claude Code (a static bearer, `GHQ_OPERATOR_TOKEN`) can read the dashboard, CRM, people,
+mentees, grants, LAPS, property deals, webinars and non-secret settings, and, only when `GHQ_OPERATOR_WRITES=enabled`,
+make the `/crm` follow-up changes as a named admin. Mounted only when a credential is set; rotating
+`GHQ_OPERATOR_OAUTH_SECRET` signs every connector out. Setup, the tool list and the limits: `docs/operator-api.md`.
+
 ## Guards worth knowing about
 
 - A live recompute is always as of today: the as-of date on the Grants page and `--today` on the job

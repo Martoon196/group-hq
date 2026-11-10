@@ -72,8 +72,14 @@ app.include_router(territories.router)
 app.include_router(audit.router)
 app.include_router(settings.router)
 app.include_router(growth.router)
+# The operator API (docs/operator-api.md): the OAuth server for claude.ai connectors and the MCP server at /mcp, mounted
+# only when a credential is validly set. The .well-known documents must sit at the root, so neither router has a prefix.
+if config.operator_configured():
+    from .routers import operator_mcp, operator_oauth  # noqa: E402
+    app.include_router(operator_oauth.router)
+    app.include_router(operator_mcp.router)
 
-NO_STORE_PREFIXES = ("/login", "/password")
+NO_STORE_PREFIXES = ("/login", "/password", "/mcp", "/oauth")
 
 
 @app.middleware("http")

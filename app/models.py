@@ -9,8 +9,8 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text,
-                        UniqueConstraint, text)
+from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, Numeric, String,
+                        Text, UniqueConstraint, text)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -1121,3 +1121,47 @@ class AcquisitionThread(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
     __table_args__ = (Index("ix_acquisition_threads_thread", "account_key", "thread_sha256"),)
+
+
+# ---- operator API OAuth state (alembic/versions/0017_operator_oauth.py; docs/operator-api.md) ----
+OPERATOR_GRANT_REVOKED_REASONS = ("owner", "client", "code_replay", "refresh_reuse", "client_mismatch")
+
+
+class OperatorOAuthGrant(Base):
+    """One connected client (a claude.ai connector, say) for one admin. Only hashes of its client id are kept."""
+    __tablename__ = "operator_oauth_grants"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    client_id_hash: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    client_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    revoked_reason: Mapped[str | None] = mapped_column(String(20))
+
+
+class OperatorOAuthCode(Base):
+    """A consented authorisation code, by hash; redeemable once, for two minutes."""
+    __tablename__ = "operator_oauth_codes"
+    code_hash: Mapped[bytes] = mapped_column(LargeBinary, primary_key=True)
+    client_id_hash: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    client_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    redirect_uri_hash: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    code_challenge: Mapped[str] = mapped_column(String(43), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    grant_id: Mapped[int | None] = mapped_column(ForeignKey("operator_oauth_grants.id"))
+
+
+class OperatorOAuthToken(Base):
+    """An access or refresh token of a grant, by hash. Refresh tokens are rotated: rotated_at marks one spent."""
+    __tablename__ = "operator_oauth_tokens"
+    token_hash: Mapped[bytes] = mapped_column(LargeBinary, primary_key=True)
+    grant_id: Mapped[int] = mapped_column(ForeignKey("operator_oauth_grants.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime)
+

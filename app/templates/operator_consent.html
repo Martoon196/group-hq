@@ -1,0 +1,18 @@
+{% extends "app_base.html" %}
+{% set title = "Allow access | Group HQ" %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">Operator API</span><h1>Allow {{ client_name }} to use Group HQ?</h1>
+  <p class="help">It will act as <strong>{{ user.email }}</strong> and send you back to <strong>{{ redirect_host }}</strong>.</p>
+</div>
+<section class="panel mt-2" aria-label="What it can do">
+  <h2>What it can do</h2>
+  <p>Scope <code>operator</code>: read the dashboard, CRM leads and plans, people, mentees, grants, the LAPS board, property deals, webinars and the non-secret settings{% if writes_enabled %}, and change CRM follow-up plans (start, hold, resume, record a call, sync Property Predator leads){% else %}. Changes are off on this deployment (GHQ_OPERATOR_WRITES){% endif %}. It never sees passwords, authenticator secrets or product tokens.</p>
+  <p class="help">Access lasts one hour at a time and renews itself for up to 30 days. Revoke it any time at <a href="/oauth/connections">Connected apps</a>.</p>
+  <form method="post" action="/oauth/authorize" class="form-actions">
+    {% for name, value in fields.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn btn-primary" type="submit" name="decision" value="allow">Allow</button>
+    <button class="btn btn-ghost" type="submit" name="decision" value="deny">Deny</button>
+  </form>
+</section>
+{% endblock %}

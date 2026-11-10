@@ -1,0 +1,141 @@
+"""The MCP server at /mcp: Streamable HTTP, stateless, JSON responses only (docs/operator-api.md).
+
+A bearer (the static GHQ_OPERATOR_TOKEN, or an access token from app.routers.operator_oauth) names the admin
+every call acts as. The body is JSON-RPC 2.0, one request or a batch; notifications get 202 with no body.
+The methods are the tools subset of MCP: initialize, ping, tools/list and tools/call, with the tools in
+app.services.operator_tools. Each tool runs in its own database session as that admin; a write tool commits
+and leaves an operator.tool audit row next to the rows the service layer itself writes. Every call is one log
+line (tool, user, ok or error), never the arguments or the result. A tool's failure is reported in the result
+as plain English with isError true; a traceback never leaves the server.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
+
+from .. import config
+from ..db import SessionLocal
+from ..models import User
+from ..services import operator_tools as tools
+from ..services.audit import audit
+from .operator_oauth import NO_STORE, acting_user, method_not_allowed, unauthorised
+
+router = APIRouter()
+log = logging.getLogger("grouphq.operator")
+
+PROTOCOL_VERSION = "2025-06-18"
+MAX_BODY = 256 * 1024
+MAX_BATCH = 20
+PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR = -32700, -32600, -32601, -32602, -32603
+
+
+def _json(payload: Any, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(payload, status_code=status_code, headers=NO_STORE)
+
+
+def _result(id_, result) -> dict:
+    return {"jsonrpc": "2.0", "id": id_, "result": result}
+
+
+def _error(id_, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": id_, "error": {"code": code, "message": message}}
+
+
+def _tool_failure(message: str) -> dict:
+    return {"content": [{"type": "text", "text": message}], "isError": True}
+
+
+@router.get("/mcp", include_in_schema=False)
+def mcp_get():
+    return method_not_allowed()
+
+
+@router.post("/mcp", include_in_schema=False)
+async def mcp(request: Request) -> Response:
+    body = await request.body()
+    if len(body) > MAX_BODY:
+        return _json(_error(None, INVALID_REQUEST, "request too large"), 413)
+    return await run_in_threadpool(_handle, request.headers.get("authorization"), body)
+
+
+def _handle(authorization: str | None, body: bytes) -> Response:
+    with SessionLocal() as db:
+        user = acting_user(db, authorization)
+        if user is None:
+            return unauthorised()
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            return _json(_error(None, PARSE_ERROR, "the body is not JSON"), 400)
+        if isinstance(payload, list):
+            if not payload or len(payload) > MAX_BATCH:
+                return _json(_error(None, INVALID_REQUEST, f"a batch holds 1 to {MAX_BATCH} messages"), 400)
+            replies = [reply for reply in (_dispatch(db, user, message) for message in payload) if reply is not None]
+            return _json(replies) if replies else Response(status_code=202, headers=NO_STORE)
+        reply = _dispatch(db, user, payload)
+        return _json(reply) if reply is not None else Response(status_code=202, headers=NO_STORE)
+
+
+def _dispatch(db, user: User, message: Any) -> dict | None:
+    """One JSON-RPC message to one reply, or None for a notification."""
+    if not isinstance(message, dict) or message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str):
+        return _error(None, INVALID_REQUEST, "not a JSON-RPC 2.0 request")
+    method, id_ = message["method"], message.get("id")
+    params = message.get("params")
+    if params is None:
+        params = {}
+    if method.startswith("notifications/"):
+        return None
+    if id_ is None or not isinstance(id_, (str, int)) or isinstance(id_, bool):
+        return _error(None, INVALID_REQUEST, "a request needs a string or number id")
+    if not isinstance(params, dict):
+        return _error(id_, INVALID_PARAMS, "params must be an object")
+    if method == "initialize":
+        return _result(id_, {"protocolVersion": PROTOCOL_VERSION, "capabilities": {"tools": {}},
+                             "serverInfo": {"name": "group-hq", "version": "1"},
+                             "instructions": ("Group HQ is the founder's private admin app. Read tools answer from its database; "
+                                              "write tools exist only when the deployment enables them and always act as the "
+                                              "signed-in admin. Nothing here sends a message to a lead.")})
+    if method == "ping":
+        return _result(id_, {})
+    if method == "tools/list":
+        return _result(id_, {"tools": [tool.listing() for tool in tools.available()]})
+    if method == "tools/call":
+        return _call(db, user, id_, params)
+    return _error(id_, METHOD_NOT_FOUND, f"method not found: {method[:80]}")
+
+
+def _call(db, user: User, id_, params: dict) -> dict:
+    name = params.get("name")
+    arguments = params.get("arguments")
+    if arguments is None:
+        arguments = {}
+    if not isinstance(name, str) or not isinstance(arguments, dict):
+        return _error(id_, INVALID_PARAMS, "tools/call takes a tool name and an arguments object")
+    tool = tools.get(name)
+    if tool is None:
+        return _error(id_, INVALID_PARAMS, f"unknown tool: {name[:80]}")
+    if tool.write and not config.operator_writes_enabled():
+        log.info("tool=%s user=%s result=refused", tool.name, user.email)
+        return _result(id_, _tool_failure(tools.WRITES_DISABLED))
+    try:
+        result = tool.run(db, user, arguments)
+        if tool.write:
+            audit(db, user, "operator.tool", f"tool:{tool.name}", after={"ok": True})
+            db.commit()
+        text = json.dumps(result, ensure_ascii=False, default=str)
+    except tools.ToolError as exc:
+        db.rollback()
+        log.info("tool=%s user=%s result=error", tool.name, user.email)
+        return _result(id_, _tool_failure(str(exc)))
+    except Exception:   # noqa: BLE001  (whatever failed, the caller gets a sentence and the log gets the trace)
+        db.rollback()
+        log.exception("tool=%s user=%s result=failed", tool.name, user.email)
+        return _result(id_, _tool_failure(f"{tool.name} could not complete; the server log has the details"))
+    log.info("tool=%s user=%s result=ok", tool.name, user.email)
+    return _result(id_, {"content": [{"type": "text", "text": text}], "isError": False})
