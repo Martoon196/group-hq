@@ -1,6 +1,11 @@
 """What every operator tool is made of (docs/operator-api.md): the Tool record, the ToolError a tool raises with a
 plain sentence for the model, and the argument helpers. app.services.operator_tools (the read tools and the CRM
-write tools) and app.services.operator_writes (the screens' write tools) both build on it."""
+write tools), app.services.operator_writes (the screens' write tools) and app.services.operator_inbox (the Inbox and
+WhatsApp tools) all build on it.
+
+A tool is in one of three classes. A read tool (neither flag) is always offered. A write tool (write=True) changes
+Group HQ and is offered only while writes are enabled. A messaging tool (messaging=True, and write=True because it also
+writes) causes a message to reach a real person and is offered only while messaging is enabled as well."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -23,9 +28,14 @@ class Tool:
     input_schema: dict
     run: Callable[[Session, User, dict], Any]
     write: bool = False
+    messaging: bool = False
 
     def listing(self) -> dict:
-        return {"name": self.name, "description": self.description, "inputSchema": self.input_schema}
+        listing = {"name": self.name, "description": self.description, "inputSchema": self.input_schema}
+        if self.messaging:
+            # MCP's hints for a client's own confirmation step: not read only, and it reaches outside this system.
+            listing["annotations"] = {"readOnlyHint": False, "openWorldHint": True}
+        return listing
 
 
 def _int(args: dict, name: str) -> int:

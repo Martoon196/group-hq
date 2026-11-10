@@ -3,8 +3,10 @@
 A read tool answers from the same queries the screens use and returns compact JSON: ids, names, states and ISO
 timestamps, never a password hash, authenticator secret, token or product credential. A CRM write tool goes
 through app.services.campaigns exactly as app.routers.crm does, so the same rules, audit rows and refusals apply; the
-caller commits. Every other screen's write tools are in app.services.operator_writes and run that screen's own code.
-Write tools are offered only while GHQ_OPERATOR_WRITES is "enabled".
+caller commits. Every other screen's write tools are in app.services.operator_writes and run that screen's own code;
+the Inbox and WhatsApp tools (read, write and messaging) are in app.services.operator_inbox.
+Write tools are offered only while GHQ_OPERATOR_WRITES is "enabled"; messaging tools, the only ones that cause a message
+to reach a real person, only while GHQ_OPERATOR_MESSAGING is "enabled" as well.
 
 A ToolError is a sentence for the model ("Campaign lead 12 was not found"); anything else that goes wrong is
 reported as a generic failure by the router, never as a traceback.
@@ -23,6 +25,7 @@ from ..models import (Acquisition, AuditLog, CampaignAction, CampaignLead, Campa
 from . import campaigns, settings
 from . import acquisitions as acquisitions_service
 from . import laps as laps_service
+from . import operator_inbox
 from .operator_base import Tool, ToolError, _int, _schema, _text
 from .operator_writes import WRITE_TOOLS as SCREEN_WRITE_TOOLS
 from .relaunch72_crm import CrmUnavailable, fetch_leads
@@ -34,6 +37,7 @@ DEFAULT_LIMIT = 25
 MAX_QUERY = 120
 SECRET_WORDS = ("token", "secret", "key", "password", "credential")
 WRITES_DISABLED = "writes are disabled on this deployment (GHQ_OPERATOR_WRITES is not \"enabled\")"
+MESSAGING_DISABLED = operator_inbox.MESSAGING_DISABLED
 
 
 # ---- argument helpers -------------------------------------------------------------------------------------------
@@ -156,6 +160,7 @@ def group_hq_overview(db: Session, user: User, args: dict) -> dict:
     }
     recent = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(12).all()
     return {"as_of": _iso(utcnow()), "acting_as": user.email, "writes_enabled": config.operator_writes_enabled(),
+            "messaging_enabled": config.operator_messaging_enabled(),
             "stats": stats, "recent_changes": [_audit_row(r) for r in recent]}
 
 
@@ -308,7 +313,7 @@ def _scrub(value):
 
 def settings_get(db: Session, user: User, args: dict) -> dict:
     return {"settings": _scrub(settings.get_all()), "product_modes": settings.product_modes(db),
-            "writes_enabled": config.operator_writes_enabled()}
+            "writes_enabled": config.operator_writes_enabled(), "messaging_enabled": config.operator_messaging_enabled()}
 
 
 # ---- write tools (app.routers.crm's actions, through app.services.campaigns) -------------------------------------
@@ -398,7 +403,7 @@ READ_TOOLS: tuple[Tool, ...] = (
          _schema({"brand": {"type": "string", "enum": list(WEBINAR_BRANDS)}}), webinars_list),
     Tool("settings_get", "The non-secret display settings, product facts and each product's Live / Dry run mode.",
          _schema(), settings_get),
-)
+) + operator_inbox.READ_TOOLS
 
 CRM_WRITE_TOOLS: tuple[Tool, ...] = (
     Tool("crm_start_plan", "Start the Property Predator first-conversation follow-up plan for a lead. Plans only; nothing is sent.",
@@ -416,16 +421,26 @@ CRM_WRITE_TOOLS: tuple[Tool, ...] = (
          crm_sync_property_predator, write=True),
 )
 
-# The CRM's write tools, then every admin screen's (app.services.operator_writes).
-WRITE_TOOLS: tuple[Tool, ...] = CRM_WRITE_TOOLS + SCREEN_WRITE_TOOLS
-assert len({t.name for t in READ_TOOLS + WRITE_TOOLS}) == len(READ_TOOLS + WRITE_TOOLS), "tool names are unique"
+# The CRM's write tools, then every admin screen's (app.services.operator_writes), then the Inbox's and the keyword
+# editor's that send nothing (app.services.operator_inbox).
+WRITE_TOOLS: tuple[Tool, ...] = CRM_WRITE_TOOLS + SCREEN_WRITE_TOOLS + operator_inbox.WRITE_TOOLS
+# The tools that cause a message to reach a real person. Kept apart from WRITE_TOOLS: enabling writes never offers them.
+MESSAGING_TOOLS: tuple[Tool, ...] = operator_inbox.MESSAGING_TOOLS
+EVERY_TOOL: tuple[Tool, ...] = READ_TOOLS + WRITE_TOOLS + MESSAGING_TOOLS
+assert len({t.name for t in EVERY_TOOL}) == len(EVERY_TOOL), "tool names are unique"
+assert not any(t.write or t.messaging for t in READ_TOOLS), "a read tool changes nothing"
+assert all(t.write and not t.messaging for t in WRITE_TOOLS), "a write tool sends nothing"
+assert all(t.write and t.messaging for t in MESSAGING_TOOLS), "a messaging tool also writes"
 
-ALL_TOOLS: dict[str, Tool] = {tool.name: tool for tool in READ_TOOLS + WRITE_TOOLS}
+ALL_TOOLS: dict[str, Tool] = {tool.name: tool for tool in EVERY_TOOL}
 
 
-def available(*, writes_enabled: bool | None = None) -> list[Tool]:
+def available(*, writes_enabled: bool | None = None, messaging_enabled: bool | None = None) -> list[Tool]:
+    """The tools this deployment offers now: read tools always, write tools while writes are enabled, messaging tools
+    only while writes and messaging both are."""
     writes = config.operator_writes_enabled() if writes_enabled is None else writes_enabled
-    return [tool for tool in READ_TOOLS + WRITE_TOOLS if writes or not tool.write]
+    messaging = (config.operator_messaging_enabled() if messaging_enabled is None else messaging_enabled) and writes
+    return [tool for tool in EVERY_TOOL if (messaging if tool.messaging else writes or not tool.write)]
 
 
 def get(name: str) -> Tool | None:

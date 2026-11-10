@@ -80,7 +80,8 @@ class OperatorMcpTests(unittest.TestCase):
     def setUp(self):
         self.patches = [patch.object(config, "GHQ_OPERATOR_TOKEN", STATIC), patch.object(config, "GHQ_OPERATOR_OAUTH_SECRET", SECRET),
                         patch.object(config, "GHQ_OPERATOR_USER_EMAIL", "founder@example.test"),
-                        patch.object(config, "GHQ_OPERATOR_WRITES", ""), patch.object(config, "BASE_URL", "https://hq.example.test"),
+                        patch.object(config, "GHQ_OPERATOR_WRITES", ""), patch.object(config, "GHQ_OPERATOR_MESSAGING", ""),
+                        patch.object(config, "BASE_URL", "https://hq.example.test"),
                         patch.object(mcp, "SessionLocal", FakeSession)]
         for p in self.patches:
             p.start()
@@ -137,6 +138,31 @@ class OperatorMcpTests(unittest.TestCase):
         with patch.object(config, "GHQ_OPERATOR_WRITES", "enabled"):
             names = [t["name"] for t in self.rpc("tools/list").json()["result"]["tools"]]
         self.assertEqual(names, [t.name for t in tools.READ_TOOLS + tools.WRITE_TOOLS])
+
+    def test_messaging_tools_need_writes_and_messaging_both_enabled(self):
+        def names():
+            return [t["name"] for t in self.rpc("tools/list").json()["result"]["tools"]]
+
+        def reply():
+            return self.rpc("tools/call", {"name": "inbox_reply", "arguments": {"thread_ticket": "t", "message": "m"}}).json()["result"]
+        messaging = [t.name for t in tools.MESSAGING_TOOLS]
+        self.assertEqual(messaging, ["whatsapp_keyword_rule_save", "inbox_reply"])
+        off = "sending messages is switched off on this deployment (GHQ_OPERATOR_MESSAGING)"
+        with patch.object(config, "GHQ_OPERATOR_MESSAGING", "enabled"):        # messaging alone: still read only
+            self.assertFalse(config.operator_messaging_enabled())
+            self.assertEqual(names(), [t.name for t in tools.READ_TOOLS])
+            self.assertEqual((reply()["isError"], reply()["content"][0]["text"]), (True, off))
+        with patch.object(config, "GHQ_OPERATOR_WRITES", "enabled"):           # writes alone: no messaging tool
+            self.assertEqual(names(), [t.name for t in tools.READ_TOOLS + tools.WRITE_TOOLS])
+            self.assertEqual((reply()["isError"], reply()["content"][0]["text"]), (True, off))
+            with patch.object(config, "GHQ_OPERATOR_MESSAGING", "enabled"):
+                self.assertTrue(config.operator_messaging_enabled())
+                self.assertEqual(names(), [t.name for t in tools.READ_TOOLS + tools.WRITE_TOOLS + tools.MESSAGING_TOOLS])
+                listed = {t["name"]: t for t in self.rpc("tools/list").json()["result"]["tools"]}
+                for name in messaging:
+                    self.assertEqual(listed[name]["annotations"], {"readOnlyHint": False, "openWorldHint": True})
+                self.assertNotIn("annotations", listed["crm_start_plan"])
+        self.assertFalse(any(t.messaging for t in tools.READ_TOOLS + tools.WRITE_TOOLS))
 
     def test_read_tool_over_fixed_rows_with_the_static_token(self):
         response = self.rpc("tools/call", {"name": "crm_leads", "arguments": {"limit": 10}})

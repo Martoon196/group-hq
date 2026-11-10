@@ -10,9 +10,10 @@ from ..models import User
 from ..services import inbox as service, inbox_crm, inbox_organisation, inbox_scanner, inbox_claude, inbox_automations
 from ..services import acquisitions
 from ..services.inbox_providers import InboxError, client
-from ..templating import go, render
+from ..templating import Refused, go, render
 
 router = APIRouter()
+SETUP_ERROR = "Inbox account configuration needs checking. Existing channels remain available in their workspaces."
 
 
 @router.get("/inbox/channels")
@@ -78,30 +79,27 @@ def thread_context(db, user, value, cursor=None):
             "reply_receipts": service.replies(db, account, bound["thread"]), "request_id": str(uuid.uuid4())}
 
 
-@router.get(service.PAGE, response_class=HTMLResponse)
-def inbox(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    selected = request.query_params.getlist("account")
-    brand, channel = request.query_params.get("brand", ""), request.query_params.get("channel", "")
-    kind = request.query_params.get("kind", "")
-    ctx = {"user": user, "section": "inbox", "brands": service.BRANDS, "channels": service.CHANNELS,
-           "selected": selected, "brand_filter": brand, "channel_filter": channel,
-           "accounts": [], "results": [], "threads": [], "setup_error": None, "kind_filter": kind, "kinds": inbox_organisation.KINDS}
+def conversation_list(db, user, selected, brand="", channel="", kind="", triage_filter=""):
+    """The Inbox's conversation list for one admin, before paging (the screen and the operator's inbox_conversations
+    tool): the accounts they can see, each account's read result, and the conversations the filters leave, newest
+    first, each carrying its triage result, category and "needs me" flag. A bad filter is the screen's 400; a broken
+    account configuration comes back as the fourth value, the sentence the screen shows above an empty list."""
     if brand and brand not in service.BRANDS:
         raise HTTPException(400, "Choose a valid business.")
+    accounts, results, threads, setup_error = [], [], [], None
     try:
-        ctx["accounts"], ctx["results"], ctx["threads"] = service.snapshot(user.id, selected, channel=channel, db=db, user_email=user.email, kind=kind)
+        accounts, results, threads = service.snapshot(user.id, selected, channel=channel, db=db, user_email=user.email, kind=kind)
     except InboxError:
-        ctx["setup_error"] = "Inbox account configuration needs checking. Existing channels remain available in their workspaces."
-    triage_filter = request.query_params.get("triage", "")
+        setup_error = SETUP_ERROR
     if triage_filter and triage_filter not in inbox_scanner.FILTERS:
         raise HTTPException(400, "Choose an inbox triage filter.")
-    history = inbox_scanner.read_results(db, user.id, ctx["threads"])
+    history = inbox_scanner.read_results(db, user.id, threads)
     from sqlalchemy import select
     from ..models import AppSetting
-    hold_keys = {inbox_automations._hold_key(user.id, t["account"], t["id"]) for t in ctx["threads"]}
+    hold_keys = {inbox_automations._hold_key(user.id, t["account"], t["id"]) for t in threads}
     holds = {row.key for row in db.scalars(select(AppSetting).where(AppSetting.key.in_(hold_keys))) if row.value.get("held")} if hold_keys else set()
     visible = []
-    for thread in ctx["threads"]:
+    for thread in threads:
         result = history.get(inbox_scanner.result_key(user.id, thread["account"], thread["id"]), {})
         thread["triage"] = result
         choice = thread["organisation"]
@@ -118,6 +116,19 @@ def inbox(request: Request, background_tasks: BackgroundTasks, db: Session = Dep
         if (not triage_filter or triage_filter == thread["category"] or
                 (triage_filter == "handoff" and thread["needs_owner"])):
             visible.append(thread)
+    return accounts, results, visible, setup_error
+
+
+@router.get(service.PAGE, response_class=HTMLResponse)
+def inbox(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    selected = request.query_params.getlist("account")
+    brand, channel = request.query_params.get("brand", ""), request.query_params.get("channel", "")
+    kind = request.query_params.get("kind", "")
+    triage_filter = request.query_params.get("triage", "")
+    ctx = {"user": user, "section": "inbox", "brands": service.BRANDS, "channels": service.CHANNELS,
+           "selected": selected, "brand_filter": brand, "channel_filter": channel,
+           "accounts": [], "results": [], "threads": [], "setup_error": None, "kind_filter": kind, "kinds": inbox_organisation.KINDS}
+    ctx["accounts"], ctx["results"], visible, ctx["setup_error"] = conversation_list(db, user, selected, brand, channel, kind, triage_filter)
     try:
         page = max(1, min(int(request.query_params.get("page", "1")), max(1, (len(visible) + 49) // 50)))
     except ValueError:
@@ -151,6 +162,17 @@ def scan(enabled: bool = Form(...), db: Session = Depends(get_db), user: User = 
     return go("/inbox", ok="Scanning connected conversations." if enabled else "Inbox scanning paused.")
 
 
+def reply_status(account, receipt) -> tuple[str, bool]:
+    """The sentence the screen flashes for a reply's receipt, and whether it is good news (the ok flash) or not."""
+    status = {"queued": "Your reply is queued for your personal connector.", "accepted": "The channel accepted your reply.",
+              "bridge_accepted": ("Growth HQ recorded your reply. Reopen the thread to see its WhatsApp status."
+                                  if account.provider == "r72_whatsapp" else "Your connector accepted the reply. Delivery to the original app is not confirmed."),
+              "calling": service.MESSAGES["outcome_unknown"],
+              "outcome_unknown": service.MESSAGES["outcome_unknown"],
+              "rejected": service.MESSAGES.get(receipt.reason, "The channel refused the reply.")}[receipt.state]
+    return status, receipt.state in ("queued", "accepted", "bridge_accepted")
+
+
 @router.post(service.PAGE + "/reply", dependencies=[Depends(check_origin)])
 def reply(request: Request, thread_ticket: str = Form(...), request_id: str = Form(...),
           message: str = Form(...), db: Session = Depends(get_db), user: User = Depends(require_admin)):
@@ -168,14 +190,24 @@ def reply(request: Request, thread_ticket: str = Form(...), request_id: str = Fo
         response.headers["Cache-Control"] = "no-store"
         return response
     from urllib.parse import urlencode
-    status = {"queued": "Your reply is queued for your personal connector.", "accepted": "The channel accepted your reply.",
-              "bridge_accepted": ("Growth HQ recorded your reply. Reopen the thread to see its WhatsApp status."
-                                  if account.provider == "r72_whatsapp" else "Your connector accepted the reply. Delivery to the original app is not confirmed."),
-              "calling": service.MESSAGES["outcome_unknown"],
-              "outcome_unknown": service.MESSAGES["outcome_unknown"],
-              "rejected": service.MESSAGES.get(receipt.reason, "The channel refused the reply.")}[receipt.state]
+    status, good = reply_status(account, receipt)
     return go(service.PAGE + "?" + urlencode({"account": account.key, "thread": thread_ticket}),
-              **({"ok": status} if receipt.state in ("queued", "accepted", "bridge_accepted") else {"err": status}))
+              **({"ok": status} if good else {"err": status}))
+
+
+def link_crm(db, user, account, bound, thread_ticket, brand, display_name="", contact_id="", copy_messages=False):
+    """Link a resolved conversation to a business CRM, creating the contact unless contact_id names an existing one
+    (the Add to CRM button and the operator's inbox_link_crm tool). The CRM's answer and the flash. Raises Refused
+    with the screen's sentence when the CRM is unavailable or says no; the local link is written only after the CRM
+    confirms."""
+    try:
+        result = inbox_crm.connect(db, user, thread_ticket, brand, display_name, contact_id, copy_messages=copy_messages)
+    except inbox_crm.CrmUnavailable as error:
+        raise Refused(str(error)) from None
+    if account.provider == "local":
+        from hashlib import sha256
+        inbox_crm.sync_thread(account.key, sha256(bound["thread"].encode()).hexdigest(), user.id)
+    return result, "Conversation linked to the selected business CRM."
 
 
 @router.post("/inbox/crm", dependencies=[Depends(check_origin)])
@@ -183,14 +215,22 @@ def crm_connect(thread_ticket: str = Form(...), brand: str = Form(...), display_
                 contact_id: str = Form(""), copy_messages: bool = Form(False), db: Session = Depends(get_db), user: User = Depends(require_admin)):
     from urllib.parse import urlencode
     account, bound = service.resolve(thread_ticket, user.id, user.email, db)
+    back = "/inbox?" + urlencode({"account": account.key, "thread": thread_ticket})
     try:
-        inbox_crm.connect(db, user, thread_ticket, brand, display_name, contact_id, copy_messages=copy_messages)
-    except inbox_crm.CrmUnavailable as error:
-        return go("/inbox?" + urlencode({"account": account.key, "thread": thread_ticket}), err=str(error))
-    if account.provider == "local":
-        from hashlib import sha256
-        inbox_crm.sync_thread(account.key, sha256(bound["thread"].encode()).hexdigest(), user.id)
-    return go("/inbox?" + urlencode({"account": account.key, "thread": thread_ticket}), ok="Conversation linked to the selected business CRM.")
+        _, linked = link_crm(db, user, account, bound, thread_ticket, brand, display_name, contact_id, copy_messages)
+    except Refused as refusal:
+        return go(back, err=str(refusal))
+    return go(back, ok=linked)
+
+
+def organise_conversation(db, user, account, bound, kind, brands, sync_brands, note=""):
+    """Save a resolved conversation's type, related businesses, message-copy choices and private note (the Save
+    conversation choices button and the operator's inbox_organise tool). The flash; a refusal is the screen's 400."""
+    linked = inbox_crm.links(db, account, bound["thread"])
+    if set(sync_brands) - {link.brand for link in linked}:
+        raise HTTPException(400, "Link a CRM contact before choosing message copying.")
+    inbox_organisation.save(db, user, account, bound["thread"], kind, brands, sync_brands, note)
+    return "Conversation choices saved. Your reply channel has not changed."
 
 
 @router.post("/inbox/organise", dependencies=[Depends(check_origin)])
@@ -199,11 +239,8 @@ def organise(thread_ticket: str = Form(...), kind: str = Form(...), brands: list
              db: Session = Depends(get_db), user: User = Depends(require_admin)):
     from urllib.parse import urlencode
     account, bound = service.resolve(thread_ticket, user.id, user.email, db)
-    linked = inbox_crm.links(db, account, bound["thread"])
-    if set(sync_brands) - {link.brand for link in linked}:
-        raise HTTPException(400, "Link a CRM contact before choosing message copying.")
-    inbox_organisation.save(db, user, account, bound["thread"], kind, brands, sync_brands, note)
-    return go("/inbox?" + urlencode({"account": account.key, "thread": thread_ticket}), ok="Conversation choices saved. Your reply channel has not changed.")
+    saved = organise_conversation(db, user, account, bound, kind, brands, sync_brands, note)
+    return go("/inbox?" + urlencode({"account": account.key, "thread": thread_ticket}), ok=saved)
 
 
 @router.get("/inbox/crm/search")

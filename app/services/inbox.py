@@ -86,8 +86,13 @@ def resolve(value, user_id, user_email="", db=None):
         raise HTTPException(409, "Refresh the inbox before continuing.") from None
 
 
+def visible_accounts(db=None, user_email=""):
+    """The accounts one admin sees in the Inbox: every business account, a personal account only for its owner."""
+    return tuple(a for a in accounts(db) if not a.owner_email or a.owner_email == user_email.lower())
+
+
 def snapshot(user_id, selected, brand="", channel="", *, db=None, user_email="", kind=""):
-    allowed = tuple(a for a in accounts(db) if not a.owner_email or a.owner_email == user_email.lower())
+    allowed = visible_accounts(db, user_email)
     if set(selected) - {a.key for a in allowed} or (brand and brand not in BRANDS) or (channel and channel not in CHANNELS):
         raise HTTPException(400, "Unknown inbox filter")
     from . import inbox_organisation
