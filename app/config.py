@@ -87,6 +87,37 @@ KP_PARTNER_TOKEN = os.environ.get("KP_PARTNER_TOKEN", "")
 HNH_BASE_URL = os.environ.get("HNH_BASE_URL", "https://hellonewhome.co.uk").rstrip("/")
 HNH_PARTNER_TOKEN = os.environ.get("HNH_PARTNER_TOKEN", "")
 
+# Operator API (docs/operator-api.md): Claude reads Group HQ, and changes it only when writes are enabled, through
+# the Model Context Protocol at /mcp. Two credentials, each shared with nothing else and 32-256 characters:
+# GHQ_OPERATOR_TOKEN is the static bearer a Claude Code or Claude Desktop connection presents, acting as the admin
+# named by GHQ_OPERATOR_USER_EMAIL; GHQ_OPERATOR_OAUTH_SECRET signs the OAuth client ids, codes and tokens that a
+# claude.ai connector gets after the admin signs in here and presses Allow. The API is mounted only when at least
+# one of the two is validly set. GHQ_OPERATOR_WRITES="enabled" offers the write tools; anything else is read only.
+GHQ_OPERATOR_TOKEN = os.environ.get("GHQ_OPERATOR_TOKEN", "")
+GHQ_OPERATOR_OAUTH_SECRET = os.environ.get("GHQ_OPERATOR_OAUTH_SECRET", "")
+GHQ_OPERATOR_USER_EMAIL = os.environ.get("GHQ_OPERATOR_USER_EMAIL", "").strip().lower()
+GHQ_OPERATOR_WRITES = (os.environ.get("GHQ_OPERATOR_WRITES") or "").strip().lower()
+
+
+def _valid_secret(value: str) -> bool:
+    return 32 <= len(value or "") <= 256
+
+
+def operator_static_token_configured() -> bool:
+    return _valid_secret(GHQ_OPERATOR_TOKEN)
+
+
+def operator_oauth_configured() -> bool:
+    return _valid_secret(GHQ_OPERATOR_OAUTH_SECRET)
+
+
+def operator_configured() -> bool:
+    return operator_static_token_configured() or operator_oauth_configured()
+
+
+def operator_writes_enabled() -> bool:
+    return GHQ_OPERATOR_WRITES == "enabled"
+
 
 def _int(name: str, default: int) -> int:
     raw = (os.environ.get(name) or "").strip()
