@@ -114,6 +114,10 @@ def save_rule(db: Session, user: User, form: dict):
                 problem("An enabled rule already matches that keyword in one of these groups.", 409)
     item = {"id": rule_id, "brand": brand, "name": name, "keywords": keywords, "message": message,
             "groupIds": group_ids, "matchMode": form["matchMode"], "enabled": enabled}
+    if enabled:
+        # Since when this rule has been on without a break: a request the listener missed while it was offline is
+        # answered only if it was typed after this (ingest_missed). A paused rule carries no such time.
+        item["enabledAt"] = (existing.get("enabledAt") if existing and existing["enabled"] else None) or _stamp(_now())
     updated = {"revision": current["revision"] + 1,
                "rules": [r for r in current["rules"] if r["id"] != rule_id] + [item]}
     if len(updated["rules"]) > 100:
@@ -238,6 +242,38 @@ def ingest(db: Session, data: dict, body: bytes) -> dict:
     if len(hits) != 1:
         return {"outcome": "ignored", "deliveryId": None}
     result = _admit(db, data, sha, hits[0], state["revision"])
+    db.commit()
+    return result
+
+
+MISSED_HOURS = 72            # how long after it was typed a request missed while the listener was offline is still answered
+
+
+def ingest_missed(db: Session, data: dict, body: bytes) -> dict:
+    """A group message WhatsApp delivered late because the listener was offline when it was typed. It is answered as a
+    live request would have been, but only if its rule was already on when it was typed (and has stayed on), and it
+    is at most MISSED_HOURS old: the owner's rule was answering, only the listener was not there. Anything else is the
+    owner's to ask for with a catch-up or an import. Never raises for a message outside those bounds: the listener's
+    outbox must drain."""
+    observed = _event(data, EVENT_FIELDS)
+    lock_rules(db)
+    old = _recorded(db, data["eventId"])
+    if old:
+        return {"outcome": "replayed", "deliveryId": old.delivery_id}
+    state = rules(db)
+    hits = [r for r in state["rules"] if r["enabled"] and data["groupId"] in r["groupIds"] and matches(data["text"], r["keywords"], r["matchMode"])]
+    if len(hits) != 1:
+        return {"outcome": "ignored", "deliveryId": None}
+    rule, now = hits[0], datetime.now(timezone.utc)
+    if rule.get("enabledAt"):
+        since = datetime.fromisoformat(rule["enabledAt"])
+    else:
+        # A rule saved before enabledAt existed: it has been on at least since the rules were last saved.
+        since = db.get(AppSetting, RULES_KEY).updated_at.replace(tzinfo=timezone.utc)
+    skew = timedelta(seconds=CATCHUP_SKEW)
+    if not max(since, now - timedelta(hours=MISSED_HOURS)) - skew <= observed <= now + skew:
+        return {"outcome": "outside_window", "deliveryId": None}
+    result = _admit(db, data, hashlib.sha256(body).hexdigest(), rule, state["revision"])
     db.commit()
     return result
 

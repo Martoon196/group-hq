@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const {findTrigger} = require('./matcher.cjs');
 const {createCatchup, spoolOrder, setAside} = require('./catchup.cjs');
+const {createMissed} = require('./missed.cjs');
 const BASE = '/api/whatsapp-keywords/v1';
 const LISTENER = 'personal-7510';
 
@@ -89,6 +90,9 @@ async function main() {
   client.wantGroupHistory = catchup.wanted;
   client.on('group_seen', message => { try { catchup.seen(message); } catch { /* Live rules do not depend on it. */ } });
   client.on('group_history', (bundle,provider) => { try { catchup.accept(bundle,provider); } catch { /* The page is asked for again. */ } });
+  // Requests typed while this listener was offline arrive late; Growth HQ decides which of them its rules still answer.
+  const missed = createMissed({client,spool,phoneOf,pairOnly,note});
+  client.on('group_missed', message => { try { missed.seen(message); } catch { /* Live rules do not depend on it. */ } });
   client.on('message', async msg => {
     try {
       if (pairOnly || !ready || msg.fromMe || typeof msg.body !== 'string') return;
@@ -125,6 +129,7 @@ async function main() {
     if (pairOnly || !ready || busy) return; busy=true;
     try {
       snapshot = await api('GET','rules');
+      await missed.submit(snapshot).catch(()=>note('Requests missed while offline need checking; live replies continue.'));
       void catchup.tick().catch(()=>note('Catch-up needs attention; live replies continue.'));
       if (Date.now()-groupsAt > 300000) {
         const chats = await client.getChats();
