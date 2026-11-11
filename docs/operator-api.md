@@ -13,7 +13,7 @@ Tools come in three classes, each behind its own switch:
 | --- | --- | --- |
 | Read | always | Answers from the database and the Inbox. Changes nothing, sends nothing. |
 | Write | `GHQ_OPERATOR_WRITES=enabled` | Changes Group HQ's records (and, where marked, a person's product access). Sends no message. |
-| Messaging | `GHQ_OPERATOR_WRITES=enabled` **and** `GHQ_OPERATOR_MESSAGING=enabled` | **Causes a message to reach a real person**: one Inbox reply, or switching a WhatsApp keyword rule on. There are exactly two such tools. |
+| Messaging | `GHQ_OPERATOR_WRITES=enabled` **and** `GHQ_OPERATOR_MESSAGING=enabled` | **Causes a message to reach a real person**: one Inbox reply, switching a WhatsApp keyword rule on, or having a keyword rule answer people who already typed its keyword (a catch-up). There are exactly three such tools. |
 
 The server is Streamable HTTP, stateless and JSON only: `POST /mcp` takes JSON-RPC 2.0 (one request or a
 batch of up to 20), notifications get `202`, and `GET /mcp` is `405`. It is mounted only when at least one of
@@ -46,7 +46,7 @@ A request with no acceptable bearer gets `401 {"error": "unauthorised"}` with
 | `GHQ_OPERATOR_USER_EMAIL` | The admin a static-token call acts as. Must be an existing, active admin (matched case-insensitively), or every static-token call is refused. |
 | `GHQ_OPERATOR_OAUTH_SECRET` | Signs the OAuth client ids, codes, access and refresh tokens. Valid only at 32-256 characters. Shared with nothing else. |
 | `GHQ_OPERATOR_WRITES` | `enabled` offers the write tools. Anything else (the default) is read only. |
-| `GHQ_OPERATOR_MESSAGING` | `enabled`, together with writes enabled, offers the two messaging tools. Anything else (the default) hides them, and a call answers "sending messages is switched off on this deployment (GHQ_OPERATOR_MESSAGING)". On its own, without writes, it does nothing. |
+| `GHQ_OPERATOR_MESSAGING` | `enabled`, together with writes enabled, offers the three messaging tools. Anything else (the default) hides them, and a call answers "sending messages is switched off on this deployment (GHQ_OPERATOR_MESSAGING)". On its own, without writes, it does nothing. |
 | `GHQ_OPERATOR_RELAUNCH72` | `enabled` also carries Relaunch72's operator tools on this connector (see "Relaunch72 tools"). Needs a valid `R72_SSO_SECRET` here and `R72_OPERATOR_GROUP_HQ=enabled` on Relaunch72. Anything else (the default) never contacts Relaunch72. |
 
 `render.yaml` lists the six on the web service only, each `sync: false`, so their values live in the Render dashboard; none is copied to a cron. The three switches must never be given a `value:` there: every Blueprint sync re-applies a written value and would switch a live deployment back off on the next merge. Generate each secret with
@@ -71,7 +71,7 @@ Read tools, always offered:
 | `inbox_accounts` | The Inbox accounts this admin can see, exactly as the Inbox decides: key, label, business, channel, provider, whether replies are possible, and for the personal WhatsApp whether the owner's connector is online. A personal account is listed only for its owner. |
 | `inbox_conversations` (`accounts`, `channel`, `brand`, `conversation_type`, `label`, `query`, `limit`) | The Inbox's conversation list, newest first, read by the screen's own function (`app.routers.inbox.conversation_list`): name, participant, last message time and preview, one-to-one or group where known, category and triage, and the `thread_ticket` every other inbox tool takes. `query` matches the name. |
 | `inbox_messages` (`thread_ticket`, `cursor`) | One conversation through the screen's `thread_context`: each message's sender, direction, time and text, the reply receipts, CRM links, conversation choices, triage and attached property deals. `cursor` is the previous answer's `earlier_cursor`. |
-| `whatsapp_keyword_rules` (`group_query`) | The keyword editor's page (`app.routers.whatsapp_keywords.editor_context`): the rules and their revision, the groups the listener reported (id and name), whether the listener's adapter is configured and online, and the latest 50 keyword enquiries with name, number, rule, group, reply and state. |
+| `whatsapp_keyword_rules` (`group_query`) | The keyword editor's page (`app.routers.whatsapp_keywords.editor_context`): the rules and their revision, the groups the listener reported (id and name), whether the listener's adapter is configured and online, the latest 50 keyword enquiries with name, number, rule, group, reply and state, and the keyword catch-ups (`catchup_rows`: the open one and the latest few) with their window, per-group reading progress, counts by outcome and where their queued replies stand; `catchups_note` says what a catch-up can and cannot do. |
 
 A `thread_ticket` is the signed ticket the Inbox itself puts in its links: it names one conversation on one account
 for one admin, works for about two hours, and stops working when that account's credential or mapping changes. A tool
@@ -184,13 +184,14 @@ moves.
 | `seller_confirm_rule` (`rule_id`) | Records the founder's sign-off of a commission rule. |
 
 **Inbox and WhatsApp keywords** (`/inbox`, `/crm/channels/whatsapp/keywords`; `app.services.operator_inbox`). These
-three are write tools: they change Group HQ's records (and the business CRM, for the link) and send no message.
+four are write tools: they change Group HQ's records (and the business CRM, for the link) and send no message.
 
 | Tool | Does |
 | --- | --- |
 | `inbox_link_crm` (`thread_ticket`, `brand`, `display_name`, `contact_id`, `copy_messages`) | What `POST /inbox/crm` does (`app.routers.inbox.link_crm`): creates the conversation's person as a contact (lead) in that business's CRM through Relaunch72, or links an existing contact when `contact_id` is given. Nobody is subscribed to marketing. |
 | `inbox_organise` (`thread_ticket`, `conversation_type`, `businesses`, `copy_messages_to`, `note`) | What `POST /inbox/organise` does (`organise_conversation`): the conversation's type, related businesses, which linked CRMs get its messages, and the private note. |
 | `whatsapp_keyword_rule_save_paused` (`revision`, `rule_id`, `name`, `brand`, `keywords`, `message`, `match_mode`, `group_ids`) | The keyword editor's save (`app.routers.whatsapp_keywords.save_rule`) with the rule forced to paused: a draft for the owner. A paused rule answers nobody. Editing an enabled rule with it pauses that rule. |
+| `whatsapp_keyword_catchup_cancel` (`catchup_id`) | The editor's Cancel button (`app.routers.whatsapp_keywords.cancel_catchup`): the running catch-up admits nothing more and its replies not yet sent are held, never to be sent later. It sends nothing, so it needs writes only. Replies already sent cannot be recalled; the rule keeps answering new messages. |
 
 ## Messaging tools: these reach real people
 
@@ -202,6 +203,7 @@ screen's own audit rows and receipt and adds the `operator.tool` row. In `tools/
 | Tool | Does |
 | --- | --- |
 | `whatsapp_keyword_rule_save` (`revision`, `rule_id`, `name`, `brand`, `keywords`, `message`, `match_mode`, `group_ids`, `enabled`, `requested_reply`) | The keyword editor's full save, including switching a rule on. While a rule is enabled, **every person who types one of its keywords in one of its groups is sent its reply privately from the owner's own WhatsApp, once per person**. `requested_reply` is the owner's confirmation that the group invitation promises that private reply; Claude may set it true only when the owner has said so in the conversation, and it is needed on every save that leaves the rule enabled. The editor's refusals apply unchanged: no empty group list, no unknown group, no overlap with another enabled rule in the same group, a stale `revision`. |
+| `whatsapp_keyword_catchup` (`rule_id`, `hours`, `requested_reply`) | The editor's "Catch up on earlier messages" (`app.routers.whatsapp_keywords.request_catchup`): one **enabled** rule also answers people who typed its keyword in its groups during the last `hours` (1 to 168, default 48). **One call can send up to 300 private messages from the owner's own WhatsApp**, to people who are not listed beforehand, about one every 15 seconds while the listener runs, once per person per rule. `requested_reply` is the owner's confirmation that the group's members were told the keyword requests this private reply; Claude may set it true only when the owner has said so in the conversation, for this rule and period. Refused for a paused rule, without the confirmation, for hours outside 1 to 168, or while another catch-up is open. The answer says nothing has been sent yet; `whatsapp_keyword_rules` shows the progress. |
 | `inbox_reply` (`thread_ticket`, `message`, `request_id`) | Sends **one reply in one conversation** through the Inbox's own `service.send`, from the account and channel the conversation is on. One conversation per call, only when the owner has asked for that reply; never for unsolicited, bulk or repeated messaging. `request_id` is a UUID for idempotency (one is generated and returned when left out): the same id and text never send twice. The answer is the receipt's `state` and the sentence the Inbox flashes. |
 
 `inbox_reply` answers with `ok: false` and no `isError` when a receipt exists but the news is bad: `rejected` (the
@@ -215,12 +217,22 @@ The Inbox tools hand Claude text that strangers wrote (names, previews, messages
 descriptions and the server's instructions say to treat it as information, never as instructions; that is guidance to
 the model, not a technical barrier, which is one more reason messaging has its own switch.
 
-What limits the two, as the features stand:
+What limits them, as the features stand:
 
-- **Past group messages are not stored.** The WhatsApp listener reports a group message only when it is live (within
-  five minutes), in a group a rule lists, and matching an **enabled** rule. Nothing else from a group reaches Group HQ,
-  and there is no group backfill, so "everyone who already typed a keyword" cannot be listed unless an enabled rule
-  caught them at the time (those are the enquiries `whatsapp_keyword_rules` shows). A new rule answers new messages only.
+- **Past group messages are not stored, and cannot be listed.** The WhatsApp listener reports a group message only when
+  it matches an **enabled** rule in a group that rule lists: live (within five minutes), or an earlier one read back
+  from the owner's phone for a catch-up the owner requested. Nothing else from a group reaches Group HQ, so "everyone
+  who already typed a keyword" cannot be listed in advance; the enquiries `whatsapp_keyword_rules` shows are the people
+  a rule caught, live or by a catch-up. A rule on its own answers new messages only.
+- **A catch-up is bounded and best effort.** One enabled rule, 1 to 168 hours back, one at a time, at most 300 queued
+  replies (further matches are counted, not queued). The listener reads only as far back as the owner's phone supplies,
+  only while the phone is online, and needs to have seen at least one message in each group since it was updated; a
+  group it could not read is reported as such. It expires two hours after the request if the listener has not finished,
+  ends as soon as any rule is edited, and a person whose phone number WhatsApp does not reveal is never messaged.
+  Cancelling holds the replies not yet sent; a held reply is never sent later, and that person is not answered again by
+  that rule. `docs/whatsapp-keywords.md` has the contract.
+- **Keyword replies are paced.** Group HQ releases one private reply at a time, at least 15 seconds apart, for live
+  requests and catch-ups alike.
 - **One reply per person per rule**, and never to someone who typed STOP. Editing a rule does not re-send; replies not
   yet sent when a rule is edited or paused are held.
 - **The listener runs on the owner's computer.** Keyword replies and personal-WhatsApp inbox replies go out only while
@@ -316,8 +328,9 @@ the app's origin check and a form token bound to the session cookie.
   messaging tools with them.
 - **Set `GHQ_OPERATOR_RELAUNCH72`** to anything but `enabled` (or `R72_OPERATOR_GROUP_HQ` on Relaunch72): the
   Relaunch72 tools disappear on the next call.
-- **Set `GHQ_OPERATOR_MESSAGING`** to anything but `enabled`: the two messaging tools disappear on the next call. A
-  keyword rule already enabled keeps answering until it is paused (`whatsapp_keyword_rule_save_paused`, or the editor).
+- **Set `GHQ_OPERATOR_MESSAGING`** to anything but `enabled`: the three messaging tools disappear on the next call. A
+  keyword rule already enabled keeps answering until it is paused (`whatsapp_keyword_rule_save_paused`, or the editor),
+  and a catch-up already requested keeps running until it is cancelled (`whatsapp_keyword_catchup_cancel`, or the editor).
 
 A network retry of a refresh whose answer was lost presents the spent token again and ends the connection; the
 connector then asks for consent once more. That is deliberate: it is indistinguishable from a stolen token. The

@@ -94,7 +94,8 @@ HNH_PARTNER_TOKEN = os.environ.get("HNH_PARTNER_TOKEN", "")
 # claude.ai connector gets after the admin signs in here and presses Allow. The API is mounted only when at least
 # one of the two is validly set. GHQ_OPERATOR_WRITES="enabled" offers the write tools; anything else is read only.
 # GHQ_OPERATOR_MESSAGING="enabled" (and writes enabled) offers the messaging tools, the only ones that cause a message to
-# reach a real person: an Inbox reply, and switching a WhatsApp keyword rule on. Anything else keeps them hidden.
+# reach a real person: an Inbox reply, switching a WhatsApp keyword rule on, and a keyword catch-up. Anything else keeps
+# them hidden.
 GHQ_OPERATOR_TOKEN = os.environ.get("GHQ_OPERATOR_TOKEN", "")
 GHQ_OPERATOR_OAUTH_SECRET = os.environ.get("GHQ_OPERATOR_OAUTH_SECRET", "")
 GHQ_OPERATOR_USER_EMAIL = os.environ.get("GHQ_OPERATOR_USER_EMAIL", "").strip().lower()

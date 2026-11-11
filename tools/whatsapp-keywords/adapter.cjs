@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const {findTrigger} = require('./matcher.cjs');
+const {createCatchup, spoolOrder, setAside} = require('./catchup.cjs');
 const BASE = '/api/whatsapp-keywords/v1';
 const LISTENER = 'personal-7510';
 
@@ -83,13 +84,18 @@ async function main() {
   client.prepareHistory = direct.prepareHistory;
   client.on('direct_history',(bundle,provider)=>{void direct.acceptHistory(bundle,provider).catch(()=>note('Private history import needs attention.'));});
   client.on('direct_message', event => { void direct.accept(event).catch(() => note('Private WhatsApp intake needs attention.')); });
+  // Earlier group messages are read only for a catch-up Growth HQ has open; its failures never reach the loops below.
+  const catchup = createCatchup({client,root,spool,phoneOf,pairOnly,note,current:()=>snapshot});
+  client.wantGroupHistory = catchup.wanted;
+  client.on('group_seen', message => { try { catchup.seen(message); } catch { /* Live rules do not depend on it. */ } });
+  client.on('group_history', (bundle,provider) => { try { catchup.accept(bundle,provider); } catch { /* The page is asked for again. */ } });
   client.on('message', async msg => {
     try {
       if (pairOnly || !ready || msg.fromMe || typeof msg.body !== 'string') return;
       const observedAt = new Date(Number(msg.timestamp)*1000).toISOString();
       let payload;
       if (msg.from?.endsWith('@g.us')) {
-        if (Math.abs(Date.now()-Date.parse(observedAt)) > 300000) return; // No historical chat backfill.
+        if (Math.abs(Date.now()-Date.parse(observedAt)) > 300000) return; // Live only. Earlier messages are read solely for an open catch-up (catchup.cjs).
         if (!findRule(snapshot, msg.from, msg.body) || !msg.author) return;
         const phone = await phoneOf(msg.author); if (!phone) {note('A matching request needs phone identity review; no DM sent.');return;}
         const contact = await msg.getContact().catch(()=>null);
@@ -119,6 +125,7 @@ async function main() {
     if (pairOnly || !ready || busy) return; busy=true;
     try {
       snapshot = await api('GET','rules');
+      void catchup.tick().catch(()=>note('Catch-up needs attention; live replies continue.'));
       if (Date.now()-groupsAt > 300000) {
         const chats = await client.getChats();
         await api('POST','groups',{listenerId:LISTENER,groups:chats.filter(c=>c.isGroup).map(c=>({id:c.id._serialized,name:String(c.name).slice(0,200)}))});
@@ -127,11 +134,11 @@ async function main() {
       const files=await Promise.all((await fs.readdir(spool)).filter(n=>n.endsWith('.json')).map(async name=>{
         const file=path.join(spool,name);return {file,event:JSON.parse(await fs.readFile(file,'utf8'))};
       }));
-      // Controls precede every send even when a large intake backlog exists.
-      files.sort((a,b)=>(a.event.action==='opt-outs'?0:1)-(b.event.action==='opt-outs'?0:1));
+      // Controls precede every send even when a large intake backlog exists; a catch-up group's report follows its events.
+      files.sort((a,b)=>spoolOrder(a.event.action)-spoolOrder(b.event.action));
       for (const {file,event} of files) {
         try {await api('POST',event.action,event.value);await fs.unlink(file);}
-        catch(e) {if([400,409,413].includes(e.status)){await fs.rename(file,file+'.held');note('An intake event needs review; preserved locally.');}else throw e;}
+        catch(e) {if(setAside(e.status,event.action)){await fs.rename(file,file+'.held');note('An intake event needs review; preserved locally.');}else throw e;}
       }
       // Recovery never re-sends a calling operation. Only its recorded outcome is retried.
       for (const name of (await fs.readdir(outcomes)).filter(n=>n.endsWith('.json'))) {
@@ -161,10 +168,10 @@ async function main() {
     } catch {note('Growth HQ connection needs checking. Saved requests remain in the outbox.');}
     finally {busy=false;}
   }
-  const timer=setInterval(()=>void drain(),5000);
+  const timer=setInterval(()=>{void catchup.flush().catch(()=>{});void drain();},5000);
   // A disabled or older inbox server must never interrupt the existing group rule loop.
   const directTimer = setInterval(() => { void direct.tick().catch(() => {}); }, 5000);
-  const stop=async()=>{clearInterval(timer);clearInterval(directTimer);ready=false;await client.destroy().catch(()=>{});await pairing.close();process.exit(0);};
+  const stop=async()=>{clearInterval(timer);clearInterval(directTimer);ready=false;await catchup.flush().catch(()=>{});await client.destroy().catch(()=>{});await pairing.close();process.exit(0);};
   process.on('SIGTERM',stop);process.on('SIGINT',stop);
   note('Private pairing page ready. No external browser is needed.');
   try {await client.initialize();}catch(error){pairing.setStatus('error');clearInterval(timer);clearInterval(directTimer);await client.destroy().catch(()=>{});throw error;}

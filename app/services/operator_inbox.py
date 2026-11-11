@@ -7,11 +7,12 @@ conversation's messages, and the keyword rules with the groups and enquiries the
 screens' own functions (visible_accounts, conversation_list, thread_context, editor_context), so a personal account
 stays with its owner and a provider is read exactly as the screen reads it. They change nothing.
 
-Write tools change Group HQ and send nothing: link a conversation to a business CRM, save a conversation's choices, and
-save a keyword rule paused. Messaging tools cause a message to reach a real person: the full keyword-rule save (an
-enabled rule answers group members privately) and one Inbox reply. Both go through the code the screens' buttons run
-(link_crm, organise_conversation, save_rule, inbox.send), so the same validation, receipts and audit rows apply, and a
-refusal comes back as the screen's own sentence.
+Write tools change Group HQ and send nothing: link a conversation to a business CRM, save a conversation's choices,
+save a keyword rule paused, and cancel a keyword catch-up. Messaging tools cause a message to reach a real person: the
+full keyword-rule save (an enabled rule answers group members privately), a keyword catch-up (the rule also answers
+people who typed its keyword earlier) and one Inbox reply. All go through the code the screens' buttons run (link_crm,
+organise_conversation, save_rule, request_catchup, cancel_catchup, inbox.send), so the same validation, receipts and
+audit rows apply, and a refusal comes back as the screen's own sentence.
 
 Every result is bounded: at most 100 rows a list, a message's text cut at 4,000 characters with a flag. No credential,
 adapter secret or token is ever returned.
@@ -191,6 +192,31 @@ def _rule_row(rule: dict, names: dict) -> dict:
             "groups_total": len(groups)}
 
 
+def _catchup_row(item: dict) -> dict:
+    """One catch-up as keywords_screen.catchup_rows shows it: what was asked, where the listener's reading stands, what
+    the matches came to and how far the queued replies have gone."""
+    return {"id": item["id"], "rule_id": item["ruleId"], "rule_name": item["ruleName"], "state": item["state"],
+            "reason": item["reason"], "hours": item["hours"], "since": item["since"], "until": item["until"],
+            "requested_by": item["requestedBy"], "requested_at": item["requestedAt"], "expires_at": item["expiresAt"],
+            "closed_at": item["closedAt"], "counts": item["counts"], "replies": item["replies"],
+            "groups": [{"id": g["id"], "name": g["name"], "status": g["status"], "reached_since": g["reachedSince"],
+                        "messages_read": g["scanned"], "matched": g["matched"], "without_phone_number": g["unresolved"],
+                        "reported_at": g["reportedAt"]} for g in item["groups"][:MAX_ITEMS]]}
+
+
+CATCHUP_NOTE = (
+    "A catch-up answers people who typed a rule's keyword BEFORE now: the listener on the owner's computer reads that "
+    "rule's groups back over the hours asked (1 to 168) and Group HQ queues the rule's reply for each person who typed "
+    "a keyword in that time, once per person per rule, never to someone who sent STOP or whom the rule already "
+    "answered, and at most 300 replies a catch-up (counts.over_cap were found but not queued). Replies leave about one "
+    "every 15 seconds while the listener runs. It reads only as far back as the owner's phone supplies "
+    "(reached_since false means the whole period was not read; status unavailable means the group could not be read), "
+    "it cannot list who typed a keyword before any reply is queued, it stops if the listener has not finished within "
+    "two hours or any rule is edited, and a person whose phone number WhatsApp does not reveal is never messaged. "
+    "state: open (the listener is reading), done, expired, cancelled. replies counts the queued replies by delivery "
+    "state.")
+
+
 def whatsapp_keyword_rules(db: Session, user: User, args: dict) -> dict:
     group_query = _text(args, "group_query", 120).lower()
     ctx = keywords_screen.editor_context(db)
@@ -214,10 +240,11 @@ def whatsapp_keyword_rules(db: Session, user: User, args: dict) -> dict:
             "groups": [{"id": g["id"], "name": g["name"]} for g in shown[:MAX_ITEMS]], "groups_matching": len(shown),
             "groups_total": len(groups), "groups_truncated": len(shown) > MAX_ITEMS,
             "deliveries": deliveries, "deliveries_note": (
-                "The latest 50 keyword enquiries. Only a message that matched an enabled rule in one of its groups, while the "
-                "listener was running, is ever recorded; other group messages are not stored. Each person gets a rule's reply "
-                "once. \"sent\" means WhatsApp accepted the private message, not that it was delivered or read; "
-                "\"outcome_unknown\" is never retried.")}
+                "The latest 50 keyword enquiries. Only a message that matched an enabled rule in one of its groups is ever "
+                "recorded: live while the listener was running, or an earlier one found by a catch-up; other group messages "
+                "are not stored. Each person gets a rule's reply once. \"sent\" means WhatsApp accepted the private "
+                "message, not that it was delivered or read; \"outcome_unknown\" is never retried."),
+            "catchups": [_catchup_row(c) for c in ctx["catchups"]], "catchups_note": CATCHUP_NOTE}
 
 
 # ==== write tools (nothing is sent) ====================================================================================
@@ -290,6 +317,12 @@ def whatsapp_keyword_rule_save_paused(db: Session, user: User, args: dict) -> di
     return data
 
 
+def whatsapp_keyword_catchup_cancel(db: Session, user: User, args: dict) -> dict:
+    item, message = _screen(keywords_screen.cancel_catchup, db, user, catchup_id=_text(args, "catchup_id", 64, required=True))
+    return _done(message, catchup_id=item["id"], rule_id=item["ruleId"], state=item["state"], replies_held=item["held"],
+                 note="Replies this catch-up had already sent cannot be recalled; the ones held will not be sent later.")
+
+
 # ==== messaging tools (a real message reaches a real person) ===========================================================
 def _switch(args: dict, name: str, current: bool = False) -> bool:
     raw = args.get(name)
@@ -307,6 +340,22 @@ def whatsapp_keyword_rule_save(db: Session, user: User, args: dict) -> dict:
     data["note"] = ("Enabled: anyone who types a keyword in one of these groups from now on, while the listener is running, "
                     "gets this reply privately, once." if data["enabled"] else "Saved paused: this rule answers nobody.")
     return data
+
+
+def whatsapp_keyword_catchup(db: Session, user: User, args: dict) -> dict:
+    hours = args.get("hours", keywords_service.CATCHUP_DEFAULT_HOURS)
+    if isinstance(hours, bool) or not isinstance(hours, int):
+        raise ToolError("hours must be a whole number from 1 to 168")
+    item, message = _screen(keywords_screen.request_catchup, db, user, rule_id=_text(args, "rule_id", 64, required=True),
+                            hours=hours, requested_reply=_switch(args, "requested_reply"))
+    return _done(message, catchup_id=item["id"], rule_id=item["ruleId"], rule_name=item["ruleName"], state=item["state"],
+                 hours=item["hours"], since=item["since"], until=item["until"], expires_at=item["expiresAt"],
+                 group_ids=[g["id"] for g in item["groups"]], listener_online=whatsapp_direct.online(db),
+                 note=("Nothing has been sent yet. The listener on the owner's computer now reads these groups back to "
+                       "\"since\" and each person who typed the keyword in that time is queued this rule's reply, once, about "
+                       f"one every {keywords_service.SEND_GAP} seconds, up to {keywords_service.CATCHUP_CAP}. It must finish "
+                       "reading before expires_at. Read whatsapp_keyword_rules for the progress and counts; "
+                       "whatsapp_keyword_catchup_cancel stops it."))
 
 
 def inbox_reply(db: Session, user: User, args: dict) -> dict:
@@ -371,8 +420,10 @@ READ_TOOLS: tuple[Tool, ...] = (
          inbox_messages),
     Tool("whatsapp_keyword_rules", "The WhatsApp group-keyword rules (someone types a keyword in a chosen group and gets one "
          "private reply): every rule and the revision a save needs, the groups the listener reported (id and name), whether "
-         "the listener is connected and running, and the latest 50 keyword enquiries with who asked and whether their reply "
-         "was sent. Only messages that matched an enabled rule are ever recorded; past group messages cannot be searched.",
+         "the listener is connected and running, the latest 50 keyword enquiries with who asked and whether their reply "
+         "was sent, and the keyword catch-ups (a request for a rule to answer people who typed its keyword earlier) with "
+         "their progress and counts. Only messages that matched an enabled rule are ever recorded, so past group messages "
+         "cannot be listed or searched here; catchups_note says exactly what a catch-up can and cannot do.",
          _schema({"group_query": _str("Case-insensitive text to find in a group's name; at most 100 groups are listed.", 120)}),
          whatsapp_keyword_rules),
 )
@@ -401,13 +452,20 @@ WRITE_TOOLS: tuple[Tool, ...] = (
          "pauses it (and holds its replies not yet sent). Same checks as the editor: at least one reported group, 1 to 20 "
          "keywords, a reply of up to 4,000 characters." + KEEP,
          _schema(RULE_FIELDS, ["revision"]), whatsapp_keyword_rule_save_paused, write=True),
+    Tool("whatsapp_keyword_catchup_cancel", "Cancel a running WhatsApp keyword catch-up (see whatsapp_keyword_rules for its "
+         "id). This sends nothing: no more earlier messages are answered, and the catch-up's replies not yet sent are held "
+         "and never sent later. Replies already sent cannot be recalled. The rule itself stays as it is and keeps answering "
+         "new messages.",
+         _schema({"catchup_id": _str("The catch-up's id from whatsapp_keyword_rules.", 40)}, ["catchup_id"]),
+         whatsapp_keyword_catchup_cancel, write=True),
 )
 
 MESSAGING_TOOLS: tuple[Tool, ...] = (
     Tool("whatsapp_keyword_rule_save", "Create or edit a WhatsApp group-keyword rule, including switching it on. " + REAL_PEOPLE +
          " While a rule is enabled, every person who types one of its keywords in one of its groups is sent its reply privately "
          "from the owner's own WhatsApp, once per person, for as long as the listener on the owner's computer runs. It answers "
-         "new messages only, never earlier ones. Set requested_reply true ONLY when the owner has said in this conversation "
+         "new messages only; earlier ones are answered only by whatsapp_keyword_catchup. Set requested_reply true ONLY when "
+         "the owner has said in this conversation "
          "that the group's members were told this keyword requests this private reply; never assume it. Enabling without it is "
          "refused, as is a rule that overlaps another enabled rule in the same group. Editing a rule never re-sends to people "
          "already answered. To draft without sending use whatsapp_keyword_rule_save_paused." + KEEP,
@@ -416,6 +474,23 @@ MESSAGING_TOOLS: tuple[Tool, ...] = (
                   "requested_reply": _bool("The owner's confirmation that the group invitation promises this private reply. "
                                            "Needed every time a rule is saved enabled. Only true when the owner said so.")},
                  ["revision"]), whatsapp_keyword_rule_save, write=True, messaging=True),
+    Tool("whatsapp_keyword_catchup", "Make one ENABLED WhatsApp group-keyword rule also answer people who ALREADY typed its "
+         "keyword: the listener reads the rule's groups back over the last `hours` and the rule's reply is sent privately to "
+         "each person who typed a keyword in that time. " + REAL_PEOPLE + " One call can send up to 300 private messages from "
+         "the owner's own WhatsApp, to people who are not listed beforehand, about one every 15 seconds while the listener "
+         "on the owner's computer runs. Each person still gets a rule's reply once: anyone the rule already answered, or who "
+         "sent STOP, is skipped. Use it only when the owner has asked in this conversation for this catch-up of this rule. "
+         "Set requested_reply true ONLY when the owner has said in this conversation that the group's members were told this "
+         "keyword requests this private reply; never assume it. Refused for a paused rule, without that confirmation, or "
+         "while another catch-up is running. It reads only as far back as the owner's phone supplies, stops if the listener "
+         "has not finished within two hours or if any rule is edited, and never messages a person whose number WhatsApp does "
+         "not reveal. whatsapp_keyword_rules shows its progress; whatsapp_keyword_catchup_cancel stops it.",
+         _schema({"rule_id": _str("The enabled rule to catch up, from whatsapp_keyword_rules.", 40),
+                  "hours": {"type": "integer", "minimum": keywords_service.CATCHUP_HOURS[0], "maximum": keywords_service.CATCHUP_HOURS[1],
+                            "description": "How many hours back to look, 1 to 168 (7 days). Default 48."},
+                  "requested_reply": _bool("The owner's confirmation that the group's members were told this keyword requests "
+                                           "this private reply. Needed on every catch-up. Only true when the owner said so.")},
+                 ["rule_id"]), whatsapp_keyword_catchup, write=True, messaging=True),
     Tool("inbox_reply", "Send ONE reply in ONE Inbox conversation, from the account and channel the conversation is on. " + REAL_PEOPLE +
          " Use it only to answer a person in their own conversation when the owner has asked for that reply; never for "
          "unsolicited, bulk or repeated messaging, and never to work through a list of people. The answer carries the receipt "
