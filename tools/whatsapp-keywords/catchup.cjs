@@ -27,8 +27,11 @@ function openCatchups(snapshot, at) {
 }
 
 function createCatchup({client, root, spool, phoneOf, current, pairOnly = false, note = () => {}, openJournal, now = Date.now,
-    sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), limits = {}}) {
+    sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), limits = {}, trace = process.env.GHQ_WA_CATCHUP_TRACE === 'true'}) {
   const limit = {...LIMITS, ...limits};
+  // GHQ_WA_CATCHUP_TRACE=true logs the shape of each request and answer (counts, flags and times only: never a message,
+  // a name, a number or an ID), to see what a real phone returns.
+  const tell = message => { if (trace) note('Catch-up trace: ' + message); };
   const anchors = new Map(), names = new Map(), states = new Map(), finished = new Set();
   let journal, dirty = false, busy = false, active = null;
   // One sealed file: per group, the newest stored message (key, time, sender and its own text). That text is the single
@@ -68,6 +71,15 @@ function createCatchup({client, root, spool, phoneOf, current, pairOnly = false,
     const messages = (bundle.messages ?? []).filter(m => m?.key?.remoteJid === active.groupId);
     const chat = (bundle.chats ?? []).find(c => c?.id === active.groupId);
     const answers = typeof bundle.sessionId === 'string' && bundle.sessionId === active.requestId;
+    if (trace) {
+      const all = bundle.messages ?? [], times = messages.map(m => Number(m.messageTimestamp?.toNumber?.() ?? m.messageTimestamp)).filter(Number.isFinite);
+      const day = t => new Date(t * 1000).toISOString();
+      tell(`answer chats=${(bundle.chats ?? []).length} messages=${all.length} forThisGroup=${messages.length}`
+        + ` otherChats=${new Set(all.map(m => m?.key?.remoteJid).filter(j => j && j !== active.groupId)).size}`
+        + ` groupListed=${Boolean(chat)} end=${chat?.endOfHistoryTransferType ?? 'none'}`
+        + ` session=${typeof bundle.sessionId !== 'string' ? 'absent' : answers ? 'match' : 'other'}`
+        + (times.length ? ` oldest=${day(Math.min(...times))} newest=${day(Math.max(...times))}` : ''));
+    }
     if (!messages.length && !chat && !answers) return;
     active.queue.push({messages, provider, answers, ended:chat?.endOfHistoryTransferType === 1});
     active.wake?.();
@@ -113,12 +125,14 @@ function createCatchup({client, root, spool, phoneOf, current, pairOnly = false,
     active = {groupId:job.groupId, queue:[], wake:null, requestId:null};
     let timer, silent = false;
     try {
-      const requestId = await client.fetchGroupHistory(job.groupId, state.cursor);
+      const requestId = await client.fetchGroupHistory(job.groupId, state.cursor, {seconds:state.seconds});
+      tell(`asked page=${state.pages} unit=${state.seconds ? 'seconds' : 'milliseconds'} anchorFromMe=${Boolean(state.cursor.fromMe)}`
+        + ` anchorAt=${new Date(state.cursor.timestamp * 1000).toISOString()}`);
       active.requestId = typeof requestId === 'string' ? requestId : null;
       timer = setTimeout(() => { silent = true; active?.wake?.(); }, limit.pageTimeout);
       for (;;) {
         if (!active.queue.length) {
-          if (silent) return 'silent';
+          if (silent) { tell('no answer in time'); return 'silent'; }
           await new Promise(resolve => { active.wake = resolve; });
           active.wake = null;
           continue;
@@ -143,7 +157,7 @@ function createCatchup({client, root, spool, phoneOf, current, pairOnly = false,
   }
 
   async function group(job) {
-    const state = states.get(job.key) ?? {cursor:null, read:new Set(), scanned:0, matched:0, unresolved:0, pages:0, silent:0, nextAt:0};
+    const state = states.get(job.key) ?? {cursor:null, read:new Set(), scanned:0, matched:0, unresolved:0, pages:0, silent:0, nextAt:0, seconds:false};
     states.set(job.key, state);
     if (now() < state.nextAt) return;
     const closing = () => now() >= job.expires - limit.grace;
@@ -158,7 +172,15 @@ function createCatchup({client, root, spool, phoneOf, current, pairOnly = false,
       if (!live(job.id)) return;
       if (state.cursor.timestamp * 1000 < job.since) return report(job, state, 'scanned', true);
       if (state.pages >= limit.pages || (state.pages && closing())) return report(job, state, 'scanned', false);
+      const before = state.scanned;
       const outcome = await page(job, state);
+      if (outcome === 'ended' && !state.pages && state.scanned === before && !state.seconds) {
+        // The very first request came back empty. Before believing a busy group has nothing earlier, ask once more with
+        // the stored message's time in seconds, the other form phones are known to be asked in.
+        state.seconds = true; tell('first answer empty; asking again with the time in seconds');
+        await sleep(limit.pause);
+        continue;
+      }
       if (outcome === 'ended') return report(job, state, 'scanned', state.cursor.timestamp * 1000 < job.since);   // The phone holds nothing earlier.
       if (outcome === 'silent') {
         state.silent++;
