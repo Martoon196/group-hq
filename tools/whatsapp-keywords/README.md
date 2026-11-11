@@ -11,6 +11,10 @@ Keep the process running. Ctrl+C stops it. Credentials and Signal keys use one e
 
 For personal one-to-one text, open Growth HQ's Inbox > Personal connections with this same listener running. Select **Collect personal WhatsApp conversations and available history** and save. Enable **Allow replies from this WhatsApp number** separately to reply in the original chat. The device collects incoming and outgoing text while online. With collection enabled, the next normal listener start advertises desktop history support and accepts history the phone supplies. An already-paired phone may supply fewer initial chats. It also requests older pages for known direct chats until the phone reports its earliest available message. The phone controls how much it supplies. Media history retains captions or media-type labels. The owner can link a conversation to an individual business CRM from the inbox.
 
+## If the listener was off
+
+Keywords typed while this listener was not running are no longer lost. When it starts again WhatsApp delivers what it held back, and each matching request is passed to Group HQ, which answers it if its rule was already switched on when it was typed and it is at most 72 hours old. So: switch a rule on **before** you post its invitation, and a restart, a sleeping PC or a pulled drive only delays the replies. A keyword typed before its rule was switched on is still not answered automatically.
+
 ## Catch up on earlier messages
 
 A rule answers new messages only. To answer people who already typed the keyword, open the keyword screen, find the enabled rule and use **Catch up on earlier messages**: choose how far back (6 hours to 7 days), tick the confirmation and submit. With this listener running, it asks your phone for each of the rule's groups' earlier messages, a page of 50 at a time, and submits only those that match the rule inside the period. Group HQ then queues one private reply per person (never someone already answered by that rule, never someone who sent STOP, at most 300 per catch-up) and this listener sends them about one every 15 seconds. The screen shows progress and has a Cancel button.

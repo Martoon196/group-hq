@@ -8,6 +8,7 @@ import pytest
 from app import config
 from app.models import KeywordDelivery, KeywordEvent
 from app.services import whatsapp_keywords as service
+from tests.conftest import session
 
 SECRET = 'test-keyword-adapter-secret-' + 'x' * 32
 GROUP = '123456789@g.us'
@@ -439,3 +440,88 @@ def test_two_catch_up_callbacks_for_one_person_queue_one_reply(client, admin_cli
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert sorted(pool.map(run, payloads)) == ['already_contacted', 'queued']
     assert db.query(KeywordDelivery).count() == 1 and service.catchups(db)[0]['counts']['queued'] == 1
+
+
+# ---- requests missed while the listener was offline (POST /missed-events) ------------------------------------------------
+def missed(client, event_id, hours_ago, **kw):
+    response = signed(client, 'POST', BASE + '/missed-events', past(event_id, hours_ago, **kw))
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def backdate_rule(hours):
+    """As if the rule had been switched on that long ago and left on."""
+    from datetime import timedelta
+    with session() as db:
+        saved = service.rules(db)
+        for rule in saved['rules']:
+            rule['enabledAt'] = (datetime.now(timezone.utc) - timedelta(hours=hours)).replace(microsecond=0).isoformat()
+        service.put_setting(db, service.RULES_KEY, saved, 'test')
+        db.commit()
+
+
+def test_a_request_typed_while_the_listener_was_offline_is_answered_once_if_its_rule_was_already_on(client, admin_client, monkeypatch):
+    monkeypatch.setattr(config, 'WHATSAPP_KEYWORD_ADAPTER_SECRET', SECRET)
+    inventory(client)
+    assert create(admin_client).status_code == 303
+    backdate_rule(10)
+    first = missed(client, 'missed-1', 4)
+    assert first['outcome'] == 'queued'
+    assert missed(client, 'missed-1', 4) == {'outcome': 'replayed', 'deliveryId': first['deliveryId']}
+    assert missed(client, 'missed-2', 3)['outcome'] == 'already_contacted'          # the same person asked twice
+    with session() as db:
+        job = db.get(KeywordDelivery, first['deliveryId'])
+        assert (job.state, job.sender_phone, job.reply) == ('pending', '447700900123', 'Hi Emma, https://example.test/plan')
+    # It leaves through the ordinary paced outbox.
+    assert signed(client, 'GET', BASE + '/pending').json() == {'deliveryIds': [first['deliveryId']]}
+    # The same message later seen by the live path is the one event it already was.
+    assert signed(client, 'POST', BASE + '/missed-events', past('missed-3', 0.01, **person(7))).json()['outcome'] == 'queued'
+
+
+def test_a_missed_request_from_before_the_rule_was_on_or_too_old_is_not_answered(client, admin_client, monkeypatch):
+    monkeypatch.setattr(config, 'WHATSAPP_KEYWORD_ADAPTER_SECRET', SECRET)
+    inventory(client)
+    assert create(admin_client).status_code == 303
+    backdate_rule(10)
+    assert missed(client, 'before-rule', 11, **person(1)) == {'outcome': 'outside_window', 'deliveryId': None}
+    assert missed(client, 'not-a-keyword', 2, text='hello all', **person(2)) == {'outcome': 'ignored', 'deliveryId': None}
+    assert missed(client, 'other-group', 2, groupId='999999999@g.us', **person(3)) == {'outcome': 'ignored', 'deliveryId': None}
+    backdate_rule(200)
+    assert missed(client, 'too-old', service.MISSED_HOURS + 1, **person(4)) == {'outcome': 'outside_window', 'deliveryId': None}
+    assert missed(client, 'in-time', service.MISSED_HOURS - 1, **person(5))['outcome'] == 'queued'
+    stop = signed(client, 'POST', BASE + '/opt-outs', {'eventId': 'stop-9', 'senderPhone': person(6)['senderPhone'], 'action': 'STOP',
+                                                       'observedAt': datetime.now(timezone.utc).isoformat()})
+    assert stop.status_code == 200
+    assert missed(client, 'stopped', 1, **person(6))['outcome'] == 'opted_out'
+    with session() as db:
+        assert db.query(KeywordDelivery).count() == 1
+
+
+def test_pausing_a_rule_forgets_when_it_was_on_and_enabling_starts_the_clock_again(client, admin_client, monkeypatch):
+    monkeypatch.setattr(config, 'WHATSAPP_KEYWORD_ADAPTER_SECRET', SECRET)
+    inventory(client)
+    assert create(admin_client).status_code == 303
+    with session() as db:
+        [rule] = service.rules(db)['rules']
+    started = rule['enabledAt']
+    assert datetime.fromisoformat(started).tzinfo is not None
+    backdate_rule(10)
+    with session() as db:
+        earlier = service.rules(db)['rules'][0]['enabledAt']
+    assert create(admin_client, revision=1, rule_id=rule['id'], message='Hi {name}, edited').status_code == 303    # edited, still on
+    with session() as db:
+        assert service.rules(db)['rules'][0]['enabledAt'] == earlier
+    assert create(admin_client, revision=2, rule_id=rule['id'], enabled=False).status_code == 303
+    with session() as db:
+        assert 'enabledAt' not in service.rules(db)['rules'][0]
+    assert missed(client, 'while-paused', 1)['outcome'] == 'ignored'
+    assert create(admin_client, revision=3, rule_id=rule['id']).status_code == 303
+    assert missed(client, 'typed-while-paused', 1, **person(8)) == {'outcome': 'outside_window', 'deliveryId': None}
+    # A rule saved before enabledAt existed: on at least since the rules were last saved.
+    with session() as db:
+        saved = service.rules(db)
+        del saved['rules'][0]['enabledAt']
+        service.put_setting(db, service.RULES_KEY, saved, 'test')
+        db.commit()
+    assert missed(client, 'legacy-before', 1, **person(9)) == {'outcome': 'outside_window', 'deliveryId': None}
+    assert missed(client, 'legacy-after', 0, **person(10))['outcome'] == 'queued'

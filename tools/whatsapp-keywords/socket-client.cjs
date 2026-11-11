@@ -95,6 +95,8 @@ class SocketClient extends EventEmitter {
         // The phone's answer to fetchGroupHistory is a notice in this stream; it is read only while a catch-up waits for it.
         if(this.wantGroupHistory?.())void this.groupHistoryNotice(socket,packet).catch(()=>{});
         this.groupSeen(packet);
+        // WhatsApp marks what it held back while this device was offline ('append'); the live path below never takes it.
+        if(!event.requestId&&(event.type==='append'||Number(packet.messageTimestamp)*1000<this.connectedAt-2000))this.groupMissed(packet);
       }
       if (this.allowHistory?.()) {
         const archived=(event.messages||[]).filter(m=>event.type==='append' || event.requestId ||
@@ -142,6 +144,7 @@ class SocketClient extends EventEmitter {
   remember(lid,pn) {if(lid?.endsWith('@lid')&&pn?.endsWith('@c.us'))this.mapping.set(lid,pn);}
   // Every group's newest stored message is the anchor a later catch-up pages back from (catchup.cjs keeps one per group).
   groupSeen(packet) {try{const seen=groupPacket(packet,this.provider);if(seen)this.emit('group_seen',seen);}catch{/* Live intake does not depend on it. */}}
+  groupMissed(packet) {try{const missed=groupPacket(packet,this.provider);if(missed&&!missed.fromMe&&missed.body!==null)this.emit('group_missed',missed);}catch{/* Live intake does not depend on it. */}}
   async groupHistoryNotice(socket,packet) {
     const p=this.provider, notice=p.getHistoryMsg(packet.message);
     // Only this account's own phone can answer; Baileys drops the same notice from anyone else.

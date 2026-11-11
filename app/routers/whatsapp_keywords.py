@@ -138,6 +138,8 @@ def dispatch_adapter(action, request, background_tasks, db, body):
         result = service.sync_groups(db, service.json_object(body))
     elif request.method == "POST" and action == "events":
         result = service.ingest(db, service.json_object(body), body)
+    elif request.method == "POST" and action == "missed-events":
+        result = service.ingest_missed(db, service.json_object(body), body)
     elif request.method == "POST" and action == "catchup-events":
         result = service.ingest_catchup(db, service.json_object(body), body)
     elif request.method == "POST" and action == "opt-outs":

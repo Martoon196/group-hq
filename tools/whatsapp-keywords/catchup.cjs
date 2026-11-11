@@ -17,7 +17,7 @@ const progressFile = (id, groupId) => sha('catchup-progress:' + id + ':' + group
 const spoolOrder = action => action === 'opt-outs' ? 0 : /^catchups\//.test(action) ? 2 : 1;
 // A refusal that will not change on retry is set aside. A server from before catch-up answers 404 to its two actions;
 // those must not block the live requests queued behind them.
-const setAside = (status, action) => [400,409,413].includes(status) || (status === 404 && /^catchup/.test(action));
+const setAside = (status, action) => [400,409,413].includes(status) || (status === 404 && /^(catchup|missed)/.test(action));
 
 // The catch-ups Growth HQ has open in this snapshot and that have not run out by this clock. An older server sends none.
 function openCatchups(snapshot, at) {
