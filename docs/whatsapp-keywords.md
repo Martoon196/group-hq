@@ -51,6 +51,10 @@ How the listener reads history with the pinned Baileys 7.0.0-rc14 (`socket-clien
 
 `GHQ_WA_PAIR_ONLY=true` refuses all of it: no anchor is kept, the phone is never asked and nothing is submitted. Offline tests cannot prove what a real phone returns; run the live acceptance check in `tools/whatsapp-keywords/README.md` once before relying on it.
 
+## Import from an exported chat
+
+On-demand history is at the phone's discretion. A listener linked without the phone's on-demand history support gets an empty answer to every request (zero messages, with the chat marked "more remain on primary"), and that registration is fixed at pairing. For that case the owner exports the group chat on the phone (Export chat, without media) and the matching messages are imported through the operator tool `whatsapp_keyword_import` (`service.import_requests`). Each imported message must stand as a request the rule would have answered live: one of its groups, a matching text, inside the last 7 days. One bad entry refuses the whole import. Admission is the live path (`_admit`): STOP, once per person per rule, and a stable event ID per exported message so a repeated import has no effect. The reply is queued for the number itself (`<digits>@c.us`) and leaves through the ordinary paced outbox; the listener needs no change. A member saved in the owner's contacts appears in an export by name without a number and cannot be imported.
+
 ## Relaunch72 integration handoff
 
 The keyword screen is the single owner editor. RL72 may add a brand-scoped entry that opens this existing editor, rather than another rule database. This patch has **no canonical CRM write/export API**. The recent enquiries are a separate intake/outbox, explicitly labelled as awaiting identity matching. They are not inserted into `CampaignLead`, and are not represented as signed Meta receipts or verified contact points.

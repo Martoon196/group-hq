@@ -146,7 +146,7 @@ class OperatorMcpTests(unittest.TestCase):
         def reply():
             return self.rpc("tools/call", {"name": "inbox_reply", "arguments": {"thread_ticket": "t", "message": "m"}}).json()["result"]
         messaging = [t.name for t in tools.MESSAGING_TOOLS]
-        self.assertEqual(messaging, ["whatsapp_keyword_rule_save", "whatsapp_keyword_catchup", "inbox_reply"])
+        self.assertEqual(messaging, ["whatsapp_keyword_rule_save", "whatsapp_keyword_catchup", "whatsapp_keyword_import", "inbox_reply"])
         off = "sending messages is switched off on this deployment (GHQ_OPERATOR_MESSAGING)"
         with patch.object(config, "GHQ_OPERATOR_MESSAGING", "enabled"):        # messaging alone: still read only
             self.assertFalse(config.operator_messaging_enabled())

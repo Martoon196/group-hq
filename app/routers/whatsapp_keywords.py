@@ -72,6 +72,15 @@ def cancel_catchup(db: Session, user: User, *, catchup_id: str) -> tuple[dict, s
                                     + (f", and {held} repl{'y' if held == 1 else 'ies'} not yet sent will not go out." if held else "."))
 
 
+def import_requests(db: Session, user: User, *, rule_id: str, entries: list, requested_reply: bool = False) -> tuple[dict, str]:
+    """The operator's whatsapp_keyword_import tool: earlier requests read from an exported group chat, queued as the
+    rule's replies. What was queued and the sentence; a refusal is the service's HTTPException and nothing is queued."""
+    result = service.import_requests(db, user, rule_id, entries, requested_reply)
+    queued = result["counts"]["queued"]
+    return result, (f"{queued} repl{'y' if queued == 1 else 'ies'} queued. They leave about one every {service.SEND_GAP} "
+                    "seconds while the listener on your computer runs.")
+
+
 @router.get(PAGE, response_class=HTMLResponse)
 def editor(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     ctx = editor_context(db)
