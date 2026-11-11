@@ -12,6 +12,24 @@ function privateSocketJid(jid) {
   if(!/^[1-9][0-9]{4,29}@(c\.us|lid)$/.test(jid))throw Error('Private recipient required');
   return jid.replace(/@c\.us$/,'@s.whatsapp.net');
 }
+const eventIdOf=(remoteJid,participant,id)=>'group-keyword:'+crypto.createHash('sha256').update(JSON.stringify([remoteJid,participant||'',id])).digest('hex');
+// A group message as the phone keeps it, live or from history: its key (enough to ask the phone for what came before it),
+// time, sender and text. Only a message the phone stores as a chat row is returned; no freshness rule applies here.
+const STORED=['imageMessage','videoMessage','audioMessage','documentMessage','stickerMessage','contactMessage','locationMessage'];
+function groupPacket(packet,provider) {
+  const key=packet?.key, groupId=toTransportJid(key?.remoteJid);
+  if(!groupId?.endsWith('@g.us')||typeof key.id!=='string'||!key.id.length||key.id.length>200)return null;
+  const stamp=packet.messageTimestamp, timestamp=typeof stamp==='object'&&stamp?.toNumber?stamp.toNumber():Number(stamp);
+  if(!Number.isFinite(timestamp)||timestamp<=0)return null;
+  const content=provider.normalizeMessageContent(packet.message);
+  const text=content?.conversation??content?.extendedTextMessage?.text;
+  if(typeof text!=='string'&&!STORED.some(type=>content?.[type]))return null;
+  // The phone's history copy may carry the sender beside the key rather than inside it.
+  const participant=key.participant||packet.participant||'', author=key.fromMe?null:toTransportJid(participant);
+  return {groupId,id:key.id,fromMe:Boolean(key.fromMe),timestamp,author:author&&!author.endsWith('@g.us')?author:null,
+    alt:toTransportJid(key.participantAlt),body:typeof text==='string'&&text.length<=4096?text:null,
+    name:typeof packet.pushName==='string'?packet.pushName.slice(0,200):'',eventId:eventIdOf(key.remoteJid,participant,key.id)};
+}
 function incomingMessage(packet,connectedAt,provider) {
   if(packet?.key?.fromMe||!packet?.key?.id||typeof packet.key.id!=='string')return null;
   const timestamp=Number(packet.messageTimestamp);
@@ -23,7 +41,7 @@ function incomingMessage(packet,connectedAt,provider) {
   if(typeof body!=='string')return null;
   const author=from.endsWith('@g.us')?toTransportJid(packet.key.participant):undefined;
   if(from.endsWith('@g.us')&&(!author||author.endsWith('@g.us')))return null;
-  const eventId='group-keyword:'+crypto.createHash('sha256').update(JSON.stringify([packet.key.remoteJid,packet.key.participant||'',packet.key.id])).digest('hex');
+  const eventId=eventIdOf(packet.key.remoteJid,packet.key.participant,packet.key.id);
   return {from,author,body,timestamp,fromMe:false,id:{_serialized:eventId},
     getContact:async()=>({pushname:typeof packet.pushName==='string'?packet.pushName.slice(0,200):''})};
 }
@@ -61,9 +79,9 @@ class SocketClient extends EventEmitter {
     socket.ev.on('creds.update',()=>{void this.auth.saveCreds().catch(()=>this.persistenceFailed());});
     socket.ev.on('connection.update',update=>{void this.connectionUpdate(socket,update).catch(()=>this.persistenceFailed());});
     socket.ev.on('messaging-history.set',bundle=>{
-      if (!this.pairOnly && !this.closed && socket===this.socket && this.allowHistory?.()) {
-        this.emit('direct_history',bundle,p);
-      }
+      if (this.pairOnly || this.closed || socket!==this.socket) return;
+      for (const packet of bundle.messages||[]) this.groupSeen(packet);
+      if (this.allowHistory?.()) this.emit('direct_history',bundle,p);
     });
     socket.ev.on('chats.upsert',chats=>{
       if (!this.pairOnly && !this.closed && socket===this.socket && this.allowHistory?.()) {
@@ -73,6 +91,11 @@ class SocketClient extends EventEmitter {
     });
     socket.ev.on('messages.upsert',event=>{
       if(this.pairOnly||!this.ready||this.closed||socket!==this.socket)return;
+      for(const packet of event.messages||[]) {
+        // The phone's answer to fetchGroupHistory is a notice in this stream; it is read only while a catch-up waits for it.
+        if(this.wantGroupHistory?.())void this.groupHistoryNotice(socket,packet).catch(()=>{});
+        this.groupSeen(packet);
+      }
       if (this.allowHistory?.()) {
         const archived=(event.messages||[]).filter(m=>event.type==='append' || event.requestId ||
           Number(m.messageTimestamp)*1000 < this.connectedAt-2000);
@@ -87,9 +110,7 @@ class SocketClient extends EventEmitter {
         }
         const message=incomingMessage(packet,this.connectedAt,p);
         if(!message)continue;
-        const raw=message.author||message.from;
-        const alternative=toTransportJid(message.author?packet.key.participantAlt:packet.key.remoteJidAlt);
-        if(raw.endsWith('@lid')&&alternative?.endsWith('@c.us'))this.mapping.set(raw,alternative);
+        this.remember(message.author||message.from,toTransportJid(message.author?packet.key.participantAlt:packet.key.remoteJidAlt));
         this.emit('message',message);
       }
     });
@@ -118,6 +139,20 @@ class SocketClient extends EventEmitter {
       this.reconnectTimer=setTimeout(()=>{void this.connect().catch(()=>this.persistenceFailed());},delay);
     }
   }
+  remember(lid,pn) {if(lid?.endsWith('@lid')&&pn?.endsWith('@c.us'))this.mapping.set(lid,pn);}
+  // Every group's newest stored message is the anchor a later catch-up pages back from (catchup.cjs keeps one per group).
+  groupSeen(packet) {try{const seen=groupPacket(packet,this.provider);if(seen)this.emit('group_seen',seen);}catch{/* Live intake does not depend on it. */}}
+  async groupHistoryNotice(socket,packet) {
+    const p=this.provider, notice=p.getHistoryMsg(packet.message);
+    // Only this account's own phone can answer; Baileys drops the same notice from anyone else.
+    if(!notice||packet.key?.fromMe!==true||notice.syncType!==p.proto.HistorySync.HistorySyncType.ON_DEMAND)return;
+    // Read here rather than from Baileys' messaging-history.set: its event buffer drops any message it has already
+    // emitted in a history set, so a second catch-up over the same days would silently see nothing.
+    const data=await p.downloadAndProcessHistorySyncNotification(notice,{});
+    if(this.pairOnly||this.closed||socket!==this.socket||!this.wantGroupHistory?.())return;
+    for(const pair of data.lidPnMappings||[])this.remember(toTransportJid(pair.lid),toTransportJid(pair.pn));
+    this.emit('group_history',{messages:data.messages||[],chats:data.chats||[],sessionId:notice.peerDataRequestSessionId||null},p);
+  }
   persistenceFailed() {this.ready=false;this.closed=true;clearTimeout(this.reconnectTimer);this.socket?.end(undefined);this.emit('auth_failure');}
   requireReady() {if(!this.ready||this.closed)throw Error('WhatsApp is not linked');}
   async getChats() {
@@ -134,6 +169,13 @@ class SocketClient extends EventEmitter {
       return {pn:pn?.endsWith('@c.us')?pn:null};
     }));
   }
+  // One page of a group's earlier messages, older than the given stored message. The phone answers out of band.
+  async fetchGroupHistory(groupId,before) {
+    if(this.pairOnly)throw Error('Pairing only; group history is off');
+    this.requireReady();
+    if(!/^[0-9-]{5,80}@g\.us$/.test(groupId)||typeof before?.id!=='string'||!Number.isFinite(before.timestamp))throw Error('Group message required');
+    return this.socket.fetchMessageHistory(50,{remoteJid:groupId,fromMe:Boolean(before.fromMe),id:before.id},before.timestamp*1000);
+  }
   async sendMessage(recipient,message) {
     if(this.pairOnly)throw Error('Pairing only; sending is off');
     this.requireReady();const jid=privateSocketJid(recipient);
@@ -144,4 +186,4 @@ class SocketClient extends EventEmitter {
   }
   async destroy() {this.closed=true;this.ready=false;clearTimeout(this.reconnectTimer);this.socket?.end(undefined);await this.auth?.flush();}
 }
-module.exports={SocketClient,toTransportJid,privateSocketJid,incomingMessage};
+module.exports={SocketClient,toTransportJid,privateSocketJid,incomingMessage,groupPacket};

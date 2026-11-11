@@ -211,8 +211,8 @@ def test_tools_list_offers_read_always_write_with_writes_and_messaging_only_with
 
 def test_the_classes_are_what_they_say_and_the_descriptions_carry_the_warnings():
     assert READ == ["inbox_accounts", "inbox_conversations", "inbox_messages", "whatsapp_keyword_rules"]
-    assert WRITE == ["inbox_link_crm", "inbox_organise", "whatsapp_keyword_rule_save_paused"]
-    assert MESSAGING == ["whatsapp_keyword_rule_save", "inbox_reply"]
+    assert WRITE == ["inbox_link_crm", "inbox_organise", "whatsapp_keyword_rule_save_paused", "whatsapp_keyword_catchup_cancel"]
+    assert MESSAGING == ["whatsapp_keyword_rule_save", "whatsapp_keyword_catchup", "inbox_reply"]
     for tool in operator_inbox.READ_TOOLS:
         assert not tool.write and not tool.messaging and operator_tools.get(tool.name) is tool
     for tool in operator_inbox.WRITE_TOOLS:
@@ -224,6 +224,11 @@ def test_the_classes_are_what_they_say_and_the_descriptions_carry_the_warnings()
     assert "ONLY when the owner has said in this conversation" in save.description
     assert "enabled" not in operator_tools.get("whatsapp_keyword_rule_save_paused").input_schema["properties"]
     assert "requested_reply" not in operator_tools.get("whatsapp_keyword_rule_save_paused").input_schema["properties"]
+    catchup = operator_tools.get("whatsapp_keyword_catchup")
+    assert "ONLY when the owner has said in this conversation" in catchup.description and "up to 300 private messages" in catchup.description
+    assert catchup.input_schema["required"] == ["rule_id"] and catchup.input_schema["properties"]["hours"]["maximum"] == 168
+    assert "sends nothing" in operator_tools.get("whatsapp_keyword_catchup_cancel").description
+    assert "never earlier ones" not in save.description and "whatsapp_keyword_catchup" in save.description
     reply = operator_tools.get("inbox_reply").description
     assert "ONE reply in ONE Inbox conversation" in reply and "never for unsolicited, bulk" in reply and "DO NOT send it again" in reply
     assert operator_tools.available(writes_enabled=True, messaging_enabled=False) == list(operator_tools.READ_TOOLS + operator_tools.WRITE_TOOLS)
@@ -644,6 +649,94 @@ def test_the_paused_save_pauses_an_enabled_rule(messaging, listener):
     held = ok(messaging, "whatsapp_keyword_rule_save_paused", revision=1, rule_id=live["rule_id"], message="Hi {name}, updated")
     assert held["enabled"] is False and saved_rules()["rules"][0]["enabled"] is False
     assert typed(listener)["outcome"] == "ignored"
+
+
+# ---- whatsapp_keyword_catchup (messaging) and whatsapp_keyword_catchup_cancel (write) ---------------------------------
+def earlier(client, catchup_id: str, event_id: str = "earlier-1", hours_ago: float = 3, **sender) -> dict:
+    """The listener submits a group message it read back from the phone for an open catch-up."""
+    response = kw.signed(client, "POST", kw.BASE + "/catchup-events", {**kw.past(event_id, hours_ago, text="land", **sender), "catchupId": catchup_id})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_keyword_catchup_is_refused_while_messaging_is_off_and_nothing_starts(mcp, listener, admin_client):
+    rule = ok(mcp, "whatsapp_keyword_rule_save_paused", **land_rule())["rule_id"]
+    before = audit_count()
+    is_error, text = call(mcp, "whatsapp_keyword_catchup", rule_id=rule, hours=48, requested_reply=True)
+    assert is_error and text == OFF and audit_count() == before
+    with session() as db:
+        assert keywords.catchups(db) == []
+    assert read(mcp, "whatsapp_keyword_rules")["catchups"] == []
+    assert kw.signed(listener, "GET", kw.BASE + "/rules").json()["catchups"] == [] and count(KeywordDelivery) == 0
+
+
+def test_keyword_catchup_answers_earlier_messages_through_the_editors_own_request(messaging, listener):
+    live = ok(messaging, "whatsapp_keyword_rule_save", **land_rule(enabled=True, requested_reply=True))
+    rule = live["rule_id"]
+    data = ok(messaging, "whatsapp_keyword_catchup", rule_id=rule, requested_reply=True)        # hours left out: 48
+    assert data["message"].startswith("Catch-up requested.") and "Nothing has been sent yet" in data["note"]
+    assert (data["rule_id"], data["rule_name"], data["state"], data["hours"], data["group_ids"], data["listener_online"]) == (
+        rule, "Land masterclass", "open", 48, [kw.GROUP], False)
+    assert actions("whatsapp-keyword:") == ["whatsapp.keyword.save", "whatsapp.keyword.catchup"]
+    [offered] = kw.signed(listener, "GET", kw.BASE + "/rules").json()["catchups"]
+    assert (offered["id"], offered["ruleId"], offered["since"], offered["until"]) == (data["catchup_id"], rule, data["since"], data["until"])
+
+    queued = earlier(listener, data["catchup_id"])                                              # the listener found one earlier request
+    assert queued["outcome"] == "queued" and earlier(listener, data["catchup_id"], "earlier-2", 5)["outcome"] == "already_contacted"
+    with session() as db:
+        job = db.get(KeywordDelivery, queued["deliveryId"])
+        assert (job.state, job.reply) == ("pending", "Hi Emma, here is the masterclass: https://example.test/land")
+    shown = read(messaging, "whatsapp_keyword_rules")
+    [row] = shown["catchups"]
+    assert (row["id"], row["rule_id"], row["rule_name"], row["state"], row["hours"], row["requested_by"]) == (
+        data["catchup_id"], rule, "Land masterclass", "open", 48, ADMIN_EMAIL)
+    assert row["counts"]["queued"] == 1 and row["counts"]["already_contacted"] == 1 and row["replies"] == {"pending": 1}
+    assert row["groups"] == [{"id": kw.GROUP, "name": "Income test group", "status": "pending", "reached_since": False,
+                              "messages_read": 0, "matched": 0, "without_phone_number": 0, "reported_at": None}]
+    assert "deliveryIds" not in json.dumps(shown) and "300" in shown["catchups_note"] and "found by a catch-up" in shown["deliveries_note"]
+
+    refused(messaging, "whatsapp_keyword_catchup", "A catch-up is already running. Wait for it to finish, or cancel it first.",
+            rule_id=rule, requested_reply=True)
+    assert count(KeywordDelivery) == 1
+
+
+def test_keyword_catchup_refusals_are_the_editors_and_start_nothing(messaging, listener):
+    draft = ok(messaging, "whatsapp_keyword_rule_save", **land_rule())
+    refused(messaging, "whatsapp_keyword_catchup", "Enable this rule before catching up on earlier messages.",
+            rule_id=draft["rule_id"], requested_reply=True)
+    live = ok(messaging, "whatsapp_keyword_rule_save", revision=1, rule_id=draft["rule_id"], enabled=True, requested_reply=True)
+    rule = live["rule_id"]
+    refused(messaging, "whatsapp_keyword_catchup", "Confirm these group members were told this keyword requests this private reply before catching up.",
+            rule_id=rule, hours=24)
+    refused(messaging, "whatsapp_keyword_catchup", "requested_reply must be true or false", rule_id=rule, requested_reply="yes")
+    refused(messaging, "whatsapp_keyword_catchup", "Choose how far back to look: from 1 hour to 7 days (168 hours).", rule_id=rule, hours=0, requested_reply=True)
+    refused(messaging, "whatsapp_keyword_catchup", "Choose how far back to look: from 1 hour to 7 days (168 hours).", rule_id=rule, hours=169, requested_reply=True)
+    refused(messaging, "whatsapp_keyword_catchup", "hours must be a whole number from 1 to 168", rule_id=rule, hours="48", requested_reply=True)
+    refused(messaging, "whatsapp_keyword_catchup", "hours must be a whole number from 1 to 168", rule_id=rule, hours=True, requested_reply=True)
+    refused(messaging, "whatsapp_keyword_catchup", "Rule not found", rule_id=str(uuid.uuid4()), requested_reply=True)
+    refused(messaging, "whatsapp_keyword_catchup", "rule_id is required", requested_reply=True)
+    with session() as db:
+        assert keywords.catchups(db) == []
+    assert kw.signed(listener, "GET", kw.BASE + "/rules").json()["catchups"] == []
+
+
+def test_keyword_catchup_cancel_is_a_write_tool_that_stops_it_and_holds_unsent_replies(messaging, listener, monkeypatch):
+    rule = ok(messaging, "whatsapp_keyword_rule_save", **land_rule(enabled=True, requested_reply=True))["rule_id"]
+    started = ok(messaging, "whatsapp_keyword_catchup", rule_id=rule, hours=6, requested_reply=True)
+    queued = earlier(listener, started["catchup_id"])
+    monkeypatch.setattr(config, "GHQ_OPERATOR_MESSAGING", "")                   # cancelling needs writes only: it sends nothing
+    refused(messaging, "whatsapp_keyword_catchup_cancel", "Catch-up not found", catchup_id=str(uuid.uuid4()))
+    refused(messaging, "whatsapp_keyword_catchup_cancel", "catchup_id is required")
+    data = ok(messaging, "whatsapp_keyword_catchup_cancel", catchup_id=started["catchup_id"])
+    assert (data["state"], data["replies_held"], data["rule_id"]) == ("cancelled", 1, rule) and "1 reply not yet sent will not go out" in data["message"]
+    assert actions("whatsapp-keyword:") == ["whatsapp.keyword.save", "whatsapp.keyword.catchup", "whatsapp.keyword.catchup.cancel"]
+    begin = kw.signed(listener, "POST", kw.BASE + "/deliveries/" + queued["deliveryId"] + "/begin", {})
+    assert begin.json() == {"send": False, "state": "held"}
+    assert kw.signed(listener, "GET", kw.BASE + "/rules").json()["catchups"] == []
+    [row] = read(messaging, "whatsapp_keyword_rules")["catchups"]
+    assert (row["state"], row["reason"], row["replies"]) == ("cancelled", "owner", {"held": 1})
+    refused(messaging, "whatsapp_keyword_catchup_cancel", "That catch-up is no longer running.", catchup_id=started["catchup_id"])
+    assert saved_rules()["rules"][0]["enabled"] is True                         # the rule keeps answering new messages
 
 
 # ---- inbox_reply (messaging) ------------------------------------------------------------------------------------------
