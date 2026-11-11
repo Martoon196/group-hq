@@ -23,4 +23,6 @@ What it needs: your phone online; this listener running and finishing within two
 
 Update the one existing listener process in place. Reuse its private data directory and sealed socket session. The personal controls start off. To pause, clear them in Personal connections. On server rollback the older server ignores the separate personal setting, and its group rules continue to work. The scoped worker retries recorded send outcomes without sending again after recovery.
 
+If a catch-up reads less than expected, start the listener once with `GHQ_WA_CATCHUP_TRACE=true`. It then logs the shape of each request to the phone and each answer (counts, flags and times only: never a message, a name, a number or an ID), which shows what the phone returned. When a group's very first answer comes back empty, the listener asks once more with the stored message's time in seconds before it accepts that nothing earlier exists.
+
 Run offline matcher/auth/catch-up checks with `npm test`. These checks do not connect WhatsApp or prove delivery, and they cannot prove that a real phone answers a history request.

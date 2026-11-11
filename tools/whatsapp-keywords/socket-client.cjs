@@ -170,11 +170,13 @@ class SocketClient extends EventEmitter {
     }));
   }
   // One page of a group's earlier messages, older than the given stored message. The phone answers out of band.
-  async fetchGroupHistory(groupId,before) {
+  // The stored message's time is sent in milliseconds, as the request's field is named, or (seconds:true) in seconds, as
+  // the library's own example passes it; which one a phone honours is only known from a live answer.
+  async fetchGroupHistory(groupId,before,{seconds=false}={}) {
     if(this.pairOnly)throw Error('Pairing only; group history is off');
     this.requireReady();
     if(!/^[0-9-]{5,80}@g\.us$/.test(groupId)||typeof before?.id!=='string'||!Number.isFinite(before.timestamp))throw Error('Group message required');
-    return this.socket.fetchMessageHistory(50,{remoteJid:groupId,fromMe:Boolean(before.fromMe),id:before.id},before.timestamp*1000);
+    return this.socket.fetchMessageHistory(50,{remoteJid:groupId,fromMe:Boolean(before.fromMe),id:before.id},seconds?before.timestamp:before.timestamp*1000);
   }
   async sendMessage(recipient,message) {
     if(this.pairOnly)throw Error('Pairing only; sending is off');

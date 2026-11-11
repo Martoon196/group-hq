@@ -22,7 +22,7 @@ const snapshotOf=(changes={})=>({revision:3,listenerId:'personal-7510',rules:[ru
   since:new Date((T0-48*hour)*1000).toISOString(),until:new Date(T0*1000).toISOString(),
   expiresAt:new Date((T0+2*hour)*1000).toISOString(),groupIds:[GROUP],pendingGroupIds:[GROUP],...changes}]});
 
-async function bench(t,{phone=[],snapshot=snapshotOf(),answer=true,pairOnly=false,limits={},openJournal,phoneOf}={}) {
+async function bench(t,{phone=[],snapshot=snapshotOf(),answer=true,pairOnly=false,limits={},openJournal,phoneOf,trace=false}={}) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'ghq-catchup-fixture-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const spool=path.join(root,'events');await fs.mkdir(spool);
@@ -30,19 +30,19 @@ async function bench(t,{phone=[],snapshot=snapshotOf(),answer=true,pairOnly=fals
   let catchup;
   // The stand-in phone: asked for what came before a stored message, it answers out of band with at most 50 older ones.
   const client={ready:true,closed:false,pairOnly,learned:[],remember:(lid,pn)=>client.learned.push([lid,pn]),
-    fetchGroupHistory:async(groupId,before)=>{
-      const requestId='REQ'+(state.requests.push({groupId,before})),reply=state.answer;
+    fetchGroupHistory:async(groupId,before,options={})=>{
+      const requestId='REQ'+(state.requests.push({groupId,before,seconds:Boolean(options.seconds)})),reply=state.answer;
       if(reply)setImmediate(()=>{
         const older=state.phone.filter(m=>m.key.remoteJid===groupId&&m.messageTimestamp.toNumber()<before.timestamp)
           .sort((a,b)=>b.messageTimestamp.toNumber()-a.messageTimestamp.toNumber()).slice(0,50);
-        const bundle=typeof reply==='function'?reply(older,requestId):{messages:older,chats:[],sessionId:null};
+        const bundle=typeof reply==='function'?reply(older,requestId,Boolean(options.seconds)):{messages:older,chats:[],sessionId:null};
         if(bundle)state.receiver.accept(bundle,plain);
       });
       return requestId;
     },sendMessage:()=>assert.fail('A catch-up never sends: Growth HQ releases each reply')};
   catchup=createCatchup({client,root,spool,pairOnly,current:()=>state.snapshot,now:()=>state.clock,sleep:async()=>{},
     note:message=>state.notes.push(message),openJournal,phoneOf:phoneOf??(async id=>/^[1-9][0-9]{6,14}@c\.us$/.test(id)?id.split('@')[0]:null),
-    limits:{pageTimeout:20,...limits}});
+    limits:{pageTimeout:20,...limits},trace});
   state.receiver=catchup;
   const outbox=async()=>Object.fromEntries(await Promise.all((await fs.readdir(spool)).sort().map(async name=>[name,JSON.parse(await fs.readFile(path.join(spool,name),'utf8'))])));
   const submitted=async()=>Object.values(await outbox()).filter(e=>e.action==='catchup-events').map(e=>e.value);
@@ -226,7 +226,8 @@ test('the phone saying nothing earlier remains ends the group; a late copy of an
   // An empty answer counts only when the phone ties it to this very request.
   const c=await bench(t,{phone:[],answer:(_older,requestId)=>({messages:[],chats:[],sessionId:requestId})});
   c.catchup.seen(groupPacket(past(1,'Land'),plain));await c.catchup.tick();
-  assert.equal(c.state.requests.length,1);assert.equal((await c.report()).status,'scanned');assert.equal((await c.submitted()).length,1);
+  // A very first answer that is empty is asked for once more in the other time form before it is believed.
+  assert.deepEqual(c.state.requests.map(r=>r.seconds),[false,true]);assert.equal((await c.report()).status,'scanned');assert.equal((await c.submitted()).length,1);
 });
 
 test('a group never seen is retried until the catch-up is about to expire, then reported unavailable',async t=>{
@@ -299,7 +300,7 @@ test('anchors survive a restart in one sealed private file that holds only each 
   const again=createCatchup({client:b.client,root:b.root,spool:b.spool,current:()=>snapshotOf(),now:()=>b.state.clock,sleep:async()=>{},
     phoneOf:async id=>id.split('@')[0],limits:{pageTimeout:20}});
   b.state.receiver=again;await again.tick();
-  assert.deepEqual(b.state.requests[0],{groupId:GROUP,before:{id:'H1',fromMe:false,timestamp:T0-60}});
+  assert.deepEqual(b.state.requests[0],{groupId:GROUP,before:{id:'H1',fromMe:false,timestamp:T0-60},seconds:false});
   assert.deepEqual((await b.submitted()).map(e=>[e.text,e.senderName]).sort(),[['Land',''],['Land','Synthetic Sender']]);
   // Only the newest groups are kept.
   const many=await bench(t,{limits:{anchors:2}});
@@ -316,4 +317,35 @@ test('the outbox posts controls first, then requests, then each catch-up group\'
   // A server from before catch-up has neither action: its 404 sets them aside, while any other failure is retried.
   assert.equal(setAside(404,'catchup-events'),true);assert.equal(setAside(404,'catchups/'+ID+'/progress'),true);
   assert.equal(setAside(404,'events'),false);assert.equal(setAside(503,'catchup-events'),false);assert.equal(setAside(undefined,'catchup-events'),false);
+});
+
+test('a first answer that comes back empty is asked for once more with the time in seconds, and the trace shows only shapes',async t=>{
+  // A phone that honours the request only when the stored message's time is in seconds: the milliseconds form gets an
+  // empty "nothing earlier" answer, as the first live run did.
+  const phone=[past(20,'Land',{name:'Fixture Asker'}),past(30,'chat'),past(49*60,'old')];
+  const b=await bench(t,{phone,trace:true,answer:(older,requestId,seconds)=>seconds
+    ?{messages:older,chats:[],sessionId:null}:{messages:[],chats:[{id:GROUP,endOfHistoryTransferType:1}],sessionId:requestId}});
+  b.catchup.seen(groupPacket(past(1,'hello',{sender:'447700900200'}),plain));
+  await b.catchup.tick();
+  assert.deepEqual(b.state.requests.slice(0,2).map(r=>r.seconds),[false,true]);
+  assert.ok(b.state.requests.slice(1).every(r=>r.seconds),'once the seconds form is in use it stays in use');
+  assert.deepEqual((await b.submitted()).map(v=>v.senderName),['Fixture Asker']);
+  const report=await b.report();
+  assert.equal(report.status,'scanned');assert.equal(report.reachedSince,true);assert.equal(report.matched,1);
+  const traced=b.state.notes.filter(n=>n.startsWith('Catch-up trace: '));
+  assert.ok(traced.some(n=>/asked page=0 unit=milliseconds/.test(n))&&traced.some(n=>/unit=seconds/.test(n)));
+  assert.ok(traced.some(n=>/answer chats=1 messages=0 forThisGroup=0 otherChats=0 groupListed=true end=1 session=match/.test(n)));
+  assert.ok(traced.some(n=>/first answer empty; asking again/.test(n)));
+  // Shapes only: no message text, sender name, phone number, group ID or message ID ever reaches the log.
+  for(const line of b.state.notes)assert.doesNotMatch(line,/Land|Fixture|4477009|123456789|H20|REQ/);
+});
+
+test('a phone that has nothing earlier in either form ends the group after the second empty answer, and without the trace nothing extra is logged',async t=>{
+  const b=await bench(t,{phone:[],answer:(older,requestId)=>({messages:[],chats:[],sessionId:requestId})});
+  b.catchup.seen(groupPacket(past(1,'hello',{sender:'447700900200'}),plain));
+  await b.catchup.tick();
+  assert.deepEqual(b.state.requests.map(r=>r.seconds),[false,true]);
+  const report=await b.report();
+  assert.equal(report.status,'scanned');assert.equal(report.reachedSince,false);assert.equal(report.scanned,1);
+  assert.ok(b.state.notes.every(n=>!n.startsWith('Catch-up trace: ')));
 });
