@@ -104,7 +104,7 @@ def _dispatch(db, user: User, message: Any) -> dict | None:
                              "instructions": ("Group HQ is the founder's private admin app. Read tools answer from its database and "
                                               "its Inbox; write tools exist only when the deployment enables them and always act "
                                               "as the signed-in admin. Write tools send nothing. Only the messaging tools "
-                                              "(inbox_reply, whatsapp_keyword_rule_save and whatsapp_keyword_catchup), offered "
+                                              "(inbox_reply, whatsapp_keyword_rule_save, whatsapp_keyword_catchup and whatsapp_keyword_import), offered "
                                               "only when the deployment enables messaging as well, cause a message to reach a "
                                               "real person: use them only when the founder has asked for that message in this "
                                               "conversation, one conversation at a time, never for unsolicited or bulk "

@@ -358,6 +358,21 @@ def whatsapp_keyword_catchup(db: Session, user: User, args: dict) -> dict:
                        "whatsapp_keyword_catchup_cancel stops it."))
 
 
+def whatsapp_keyword_import(db: Session, user: User, args: dict) -> dict:
+    raw = args.get("requests")
+    if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+        raise ToolError("requests must be a list of the exported messages")
+    fields = {"group_id": "groupId", "phone": "phone", "name": "name", "text": "text", "at": "at"}
+    entries = [{there: item.get(here, "") for here, there in fields.items()} for item in raw]
+    result, message = _screen(keywords_screen.import_requests, db, user, rule_id=_text(args, "rule_id", 64, required=True),
+                              entries=entries, requested_reply=_switch(args, "requested_reply"))
+    return _done(message, rule_id=result["ruleId"], rule_name=result["ruleName"], requests=result["requests"], counts=result["counts"],
+                 listener_online=whatsapp_direct.online(db),
+                 note=("queued: a reply now waits for the listener. already_contacted: this rule answered that person before. "
+                       "opted_out: they sent STOP. replayed: this same exported message was imported before. Read "
+                       "whatsapp_keyword_rules for each reply's state."))
+
+
 def inbox_reply(db: Session, user: User, args: dict) -> dict:
     ticket = _ticket(args)
     message = args.get("message")
@@ -491,6 +506,29 @@ MESSAGING_TOOLS: tuple[Tool, ...] = (
                   "requested_reply": _bool("The owner's confirmation that the group's members were told this keyword requests "
                                            "this private reply. Needed on every catch-up. Only true when the owner said so.")},
                  ["rule_id"]), whatsapp_keyword_catchup, write=True, messaging=True),
+    Tool("whatsapp_keyword_import", "Queue one ENABLED WhatsApp group-keyword rule's reply for people who typed its keyword "
+         "earlier, from messages the owner read out of an EXPORTED GROUP CHAT (WhatsApp's \"Export chat\"). For when the "
+         "owner's phone will not give the listener a group's earlier messages, so whatsapp_keyword_catchup finds nobody. "
+         + REAL_PEOPLE + " One call can send up to 300 private messages from the owner's own WhatsApp, about one every 15 "
+         "seconds while the listener runs. Pass each exported message exactly as the export shows it: never invent, guess "
+         "or complete a number, a name, a text or a time, and never include a person the export does not show typing the "
+         "keyword. Every request must be in one of the rule's groups, match its keywords and be from the last 7 days, or "
+         "the whole call is refused and nothing is queued. Each person still gets a rule's reply once: anyone it already "
+         "answered, or who sent STOP, is skipped. Use it only when the owner has asked in this conversation for these "
+         "people to be answered, and set requested_reply true ONLY when the owner has said the group's members were told "
+         "this keyword requests this private reply.",
+         _schema({"rule_id": _str("The enabled rule, from whatsapp_keyword_rules.", 40),
+                  "requests": {"type": "array", "minItems": 1, "maxItems": keywords_service.CATCHUP_CAP, "items": {
+                      "type": "object", "additionalProperties": False, "required": ["group_id", "phone", "text", "at"], "properties": {
+                          "group_id": _str("The group the message was typed in: one of the rule's group ids.", 90),
+                          "phone": _str("The sender's number as the export shows it, in international form (+44...).", 40),
+                          "name": _str("The sender's name as the export shows it, or empty.", 200),
+                          "text": _str("The message text exactly as exported.", 4096),
+                          "at": _str("When it was sent: ISO date and time with offset, e.g. 2026-11-06T14:32:00+00:00.", 40)}},
+                      "description": "The exported messages that typed the keyword, one per message."},
+                  "requested_reply": _bool("The owner's confirmation that the group's members were told this keyword requests "
+                                           "this private reply. Needed on every import. Only true when the owner said so.")},
+                 ["rule_id", "requests"]), whatsapp_keyword_import, write=True, messaging=True),
     Tool("inbox_reply", "Send ONE reply in ONE Inbox conversation, from the account and channel the conversation is on. " + REAL_PEOPLE +
          " Use it only to answer a person in their own conversation when the owner has asked for that reply; never for "
          "unsolicited, bulk or repeated messaging, and never to work through a list of people. The answer carries the receipt "

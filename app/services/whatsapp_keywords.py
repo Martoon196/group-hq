@@ -387,6 +387,75 @@ def catchup_progress(db: Session, catchup_id: str, data: dict) -> dict:
     return {"ok": True, "state": item["state"]}
 
 
+IMPORT_DAYS = 7              # how far back an imported request's time may be
+IMPORT_FIELDS = {"groupId", "phone", "name", "text", "at"}
+
+
+def import_requests(db: Session, user: User, rule_id: str, entries: list, requested_reply: bool) -> dict:
+    """Earlier keyword requests the owner read from an exported group chat, for when the phone will not hand its history to
+    the listener. Each entry is one message as the export shows it: the group, the sender's number and name, the text and
+    the time. Every entry must stand as a request this rule would have answered live (one of its groups, a matching
+    text, inside the last IMPORT_DAYS days), or the whole import is refused and nothing is queued. Then exactly the live
+    rules (_admit): STOP is respected and a person gets a rule's reply once. Nothing is sent here: the listener sends
+    each queued reply, paced as every other."""
+    lock_rules(db)
+    state = rules(db)
+    rule = next((r for r in state["rules"] if r["id"] == rule_id), None)
+    if not rule:
+        problem("Rule not found", 404)
+    if not rule["enabled"]:
+        problem("Enable this rule before importing earlier requests.")
+    if not requested_reply:
+        problem("Confirm these group members were told this keyword requests this private reply before importing.")
+    if not isinstance(entries, list) or not 1 <= len(entries) <= CATCHUP_CAP:
+        problem(f"Import 1 to {CATCHUP_CAP} requests at a time.")
+    now = _now()
+    earliest, latest = now - timedelta(days=IMPORT_DAYS), now + timedelta(seconds=CATCHUP_SKEW)
+    checked = []
+    for number, entry in enumerate(entries, 1):
+        where = f"Request {number}: "
+        if not isinstance(entry, dict) or set(entry) != IMPORT_FIELDS or any(not isinstance(v, str) for v in entry.values()):
+            problem(where + "give the group, phone, name, text and time.")
+        if entry["groupId"] not in rule["groupIds"]:
+            problem(where + "that group is not one of this rule's groups.")
+        phone = re.sub(r"[\s().-]", "", entry["phone"]).removeprefix("+")
+        if not re.fullmatch(r"[1-9][0-9]{6,14}", phone):
+            problem(where + "the phone number must be in international form, for example +447700900123.")
+        if len(entry["name"]) > 200 or not 1 <= len(entry["text"]) <= 4096:
+            problem(where + "the name or text is too long.")
+        if not matches(entry["text"], rule["keywords"], rule["matchMode"]):
+            problem(where + "that message does not match this rule's keywords.")
+        try:
+            at = datetime.fromisoformat(entry["at"].replace("Z", "+00:00"))
+        except ValueError:
+            problem(where + "the time must be an ISO date and time with its offset.")
+        if at.tzinfo is None:
+            problem(where + "the time must carry its offset, for example 2026-11-06T14:32:00+00:00.")
+        if not earliest <= at <= latest:
+            problem(where + f"the message must be from the last {IMPORT_DAYS} days.")
+        at = at.astimezone(timezone.utc).replace(microsecond=0)
+        # One exported message is one event however often it is imported: the same rule, group, sender and minute.
+        material = json.dumps([rule["id"], entry["groupId"], phone, _stamp(at)])
+        checked.append({"eventId": "import:" + hashlib.sha256(material.encode()).hexdigest(), "listenerId": LISTENER,
+                        "groupId": entry["groupId"], "senderId": phone + "@c.us", "senderPhone": phone,
+                        "senderName": entry["name"].strip(), "text": entry["text"], "observedAt": _stamp(at)})
+    counts = dict.fromkeys(("queued", "already_contacted", "opted_out", "replayed"), 0)
+    queued = []
+    for data in checked:
+        old = _recorded(db, data["eventId"])
+        if old:
+            counts["replayed"] += 1
+            continue
+        result = _admit(db, data, hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest(), rule, state["revision"])
+        counts[result["outcome"]] += 1
+        if result["outcome"] == "queued":
+            queued.append(result["deliveryId"])
+    audit(db, user, "whatsapp.keyword.import", "whatsapp-keyword:" + rule["id"],
+          after={"requests": len(checked), "revision": state["revision"], **counts})
+    db.commit()
+    return {"ruleId": rule["id"], "ruleName": rule["name"], "requests": len(checked), "counts": counts, "deliveryIds": queued}
+
+
 def pending(db: Session) -> dict:
     """The next private reply the listener may send: at most one, and none within SEND_GAP seconds of the last one
     begun, so a busy group or a catch-up leaves the owner's number slowly. A reply queued under earlier rules is held

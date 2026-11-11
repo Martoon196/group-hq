@@ -212,7 +212,7 @@ def test_tools_list_offers_read_always_write_with_writes_and_messaging_only_with
 def test_the_classes_are_what_they_say_and_the_descriptions_carry_the_warnings():
     assert READ == ["inbox_accounts", "inbox_conversations", "inbox_messages", "whatsapp_keyword_rules"]
     assert WRITE == ["inbox_link_crm", "inbox_organise", "whatsapp_keyword_rule_save_paused", "whatsapp_keyword_catchup_cancel"]
-    assert MESSAGING == ["whatsapp_keyword_rule_save", "whatsapp_keyword_catchup", "inbox_reply"]
+    assert MESSAGING == ["whatsapp_keyword_rule_save", "whatsapp_keyword_catchup", "whatsapp_keyword_import", "inbox_reply"]
     for tool in operator_inbox.READ_TOOLS:
         assert not tool.write and not tool.messaging and operator_tools.get(tool.name) is tool
     for tool in operator_inbox.WRITE_TOOLS:
@@ -857,3 +857,77 @@ def test_overview_and_settings_say_whether_messaging_is_on(mcp, monkeypatch):
     monkeypatch.setattr(config, "GHQ_OPERATOR_MESSAGING", "enabled")
     assert read(mcp, "group_hq_overview")["messaging_enabled"] is True
     assert (read(mcp, "settings_get")["writes_enabled"], read(mcp, "settings_get")["messaging_enabled"]) == (True, True)
+
+
+# ---- whatsapp_keyword_import (messaging): earlier requests read from an exported group chat -------------------------------
+def exported(phone: str = "+44 7700 900123", name: str = "Emma Fixture", text: str = "Land", hours_ago: float = 30, group: str = kw.GROUP) -> dict:
+    """One message as WhatsApp's "Export chat" shows it: who, what and when."""
+    return {"group_id": group, "phone": phone, "name": name, "text": text,
+            "at": (utcnow() - timedelta(hours=hours_ago)).replace(microsecond=0).isoformat() + "+00:00"}
+
+
+def test_keyword_import_is_refused_while_messaging_is_off_and_nothing_is_queued(mcp, listener):
+    rule = ok(mcp, "whatsapp_keyword_rule_save_paused", **land_rule())["rule_id"]
+    before = audit_count()
+    is_error, text = call(mcp, "whatsapp_keyword_import", rule_id=rule, requests=[exported()], requested_reply=True)
+    assert is_error and text == OFF and audit_count() == before and count(KeywordDelivery) == 0
+
+
+def test_keyword_import_queues_one_reply_per_person_for_the_listener_to_send(messaging, listener):
+    rule = ok(messaging, "whatsapp_keyword_rule_save", **land_rule(enabled=True, requested_reply=True))["rule_id"]
+    requests = [exported(), exported("+44 7700 900123", hours_ago=20),             # the same person typed it twice
+                exported("447700900456", "Sam", "land!", 3), exported("+44 (0)7700-900.789".replace("(0)", ""), "", "LAND", 100)]
+    data = ok(messaging, "whatsapp_keyword_import", rule_id=rule, requests=requests, requested_reply=True)
+    assert data["message"].startswith("3 replies queued.") and data["requests"] == 4
+    assert data["counts"] == {"queued": 3, "already_contacted": 1, "opted_out": 0, "replayed": 0}
+    assert actions("whatsapp-keyword:")[-1] == "whatsapp.keyword.import" and last_audit()[0] == "operator.tool"
+    with session() as db:
+        jobs = db.scalars(select(KeywordDelivery).order_by(KeywordDelivery.created_at, KeywordDelivery.sender_phone)).all()
+        assert sorted((j.sender_phone, j.sender_id, j.state, j.group_id) for j in jobs) == [
+            ("447700900123", "447700900123@c.us", "pending", kw.GROUP), ("447700900456", "447700900456@c.us", "pending", kw.GROUP),
+            ("447700900789", "447700900789@c.us", "pending", kw.GROUP)]
+        replies = {j.sender_phone: j.reply for j in jobs}
+        assert replies["447700900123"] == "Hi Emma, here is the masterclass: https://example.test/land"
+        assert replies["447700900789"] == "Hi there, here is the masterclass: https://example.test/land"
+    # The listener is handed them as any other reply: one at a time, and a number is a private chat it can send to.
+    [first] = kw.signed(listener, "GET", kw.BASE + "/pending").json()["deliveryIds"]
+    permission = kw.signed(listener, "POST", kw.BASE + f"/deliveries/{first}/begin", {}).json()
+    assert permission["send"] is True and permission["recipientId"].endswith("@c.us") and "masterclass" in permission["message"]
+    # Importing the same export again queues nobody twice.
+    again = ok(messaging, "whatsapp_keyword_import", rule_id=rule, requests=requests, requested_reply=True)
+    assert again["counts"] == {"queued": 0, "already_contacted": 0, "opted_out": 0, "replayed": 4} and count(KeywordDelivery) == 3
+    shown = read(messaging, "whatsapp_keyword_rules")
+    assert len(shown["deliveries"]) == 3 and {d["sender_phone"] for d in shown["deliveries"]} == {"+447700900123", "+447700900456", "+447700900789"}
+
+
+def test_keyword_import_respects_stop_and_people_already_answered(messaging, listener):
+    rule = ok(messaging, "whatsapp_keyword_rule_save", **land_rule(enabled=True, requested_reply=True))["rule_id"]
+    stop = kw.signed(listener, "POST", kw.BASE + "/opt-outs", {"eventId": "stop-1", "senderPhone": "447700900456", "action": "STOP",
+                                                                "observedAt": (utcnow() - timedelta(hours=1)).isoformat() + "Z"})
+    assert stop.status_code == 200, stop.text
+    data = ok(messaging, "whatsapp_keyword_import", rule_id=rule, requested_reply=True,
+              requests=[exported("447700900456", "Sam"), exported("447700900123")])
+    assert data["counts"] == {"queued": 1, "already_contacted": 0, "opted_out": 1, "replayed": 0} and count(KeywordDelivery) == 1
+
+
+def test_keyword_import_refuses_the_whole_call_when_any_request_does_not_stand(messaging, listener):
+    rule = ok(messaging, "whatsapp_keyword_rule_save", **land_rule(enabled=True, requested_reply=True))["rule_id"]
+    good = exported()
+    for bad, sentence in (
+            (exported(text="can I buy land near me?"), "Request 2: that message does not match this rule's keywords."),
+            (exported(group="999999999999@g.us"), "Request 2: that group is not one of this rule's groups."),
+            (exported(phone="07700 900123"), "Request 2: the phone number must be in international form, for example +447700900123."),
+            (exported(hours_ago=8 * 24), "Request 2: the message must be from the last 7 days."),
+            (exported(hours_ago=-2), "Request 2: the message must be from the last 7 days."),
+            ({**exported(), "at": "2026-11-06T14:32:00"}, "Request 2: the time must carry its offset, for example 2026-11-06T14:32:00+00:00."),
+            ({**exported(), "at": "Friday afternoon"}, "Request 2: the time must be an ISO date and time with its offset.")):
+        refused(messaging, "whatsapp_keyword_import", sentence, rule_id=rule, requests=[good, bad], requested_reply=True)
+    refused(messaging, "whatsapp_keyword_import", "Confirm these group members were told this keyword requests this private reply before importing.",
+            rule_id=rule, requests=[good])
+    refused(messaging, "whatsapp_keyword_import", "Import 1 to 300 requests at a time.", rule_id=rule, requests=[], requested_reply=True)
+    refused(messaging, "whatsapp_keyword_import", "Rule not found", rule_id="no-such-rule", requests=[good], requested_reply=True)
+    assert count(KeywordDelivery) == 0, "one bad request and nothing at all is queued"
+    paused = ok(messaging, "whatsapp_keyword_rule_save_paused", rule_id=rule, revision=saved_rules()["revision"])
+    assert paused["enabled"] is False
+    refused(messaging, "whatsapp_keyword_import", "Enable this rule before importing earlier requests.", rule_id=rule, requests=[good], requested_reply=True)
+    assert count(KeywordDelivery) == 0
