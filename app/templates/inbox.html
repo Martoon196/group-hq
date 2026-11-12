@@ -120,9 +120,11 @@
       <label>Private conversation note <textarea name="note" rows="2" maxlength="2000">{{ organisation.note }}</textarea></label>
       <button class="btn btn-primary" type="submit">Save conversation choices</button>
     </form>
-    {% for link in crm_links %}<p><a class="btn btn-secondary" href="/inbox/crm/contact?brand={{ link.brand|urlencode }}&amp;contact={{ link.contact_id|urlencode }}">Open {{ brands[link.brand] }} contact</a></p>
+    {% for link in crm_links %}<p><a class="btn btn-secondary" href="/inbox/crm/contact?brand={{ link.brand|urlencode }}&amp;contact={{ link.contact_id|urlencode }}">Open {{ brands[link.brand] }} contact</a>
+      {% if whatsapp_send_url(link.brand, link.contact_id) %}<a class="btn btn-secondary" href="{{ whatsapp_send_url(link.brand, link.contact_id) }}">Send a WhatsApp</a>{% endif %}</p>
       {% if link.last_error %}<p>{{ link.last_error }}</p>{% endif %}{% endfor %}
-    {% if canonical_contact %}<a class="btn btn-secondary" href="/inbox/crm/contact?brand=mhp&amp;contact={{ canonical_contact|urlencode }}">Open MHP CRM contact</a>{% endif %}
+    {% if canonical_contact %}<a class="btn btn-secondary" href="/inbox/crm/contact?brand=mhp&amp;contact={{ canonical_contact|urlencode }}">Open MHP CRM contact</a>
+      {% if whatsapp_send_url("mhp", canonical_contact) %}<a class="btn btn-secondary" href="{{ whatsapp_send_url("mhp", canonical_contact) }}">Send a WhatsApp</a>{% endif %}{% endif %}
     {% if crm_configured %}
       <form method="post" action="/inbox/crm"><input type="hidden" name="thread_ticket" value="{{ thread_ticket }}">
       {{ crm_business_select() }}

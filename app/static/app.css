@@ -300,3 +300,27 @@ table.data td.detail { max-width: 46ch; word-break: break-word; }
 }
 .today-inbox-problems { margin-bottom: .9rem; }
 .today-clear-all { margin-left: .2rem; }
+
+/* Send a WhatsApp (whatsapp_send.html): one column, one main button per step, comfortable on a phone. */
+.wa-send { max-width: 640px; }
+.wa-send .panel h2 { font-size: 1.35rem; }
+.wa-send .eyebrow { margin-bottom: .3em; }
+.wa-quiet { background: var(--mist); }
+.wa-who { font-size: 1.1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.wa-bubble { margin: 0 0 1rem; padding: .8rem 1rem; background: #E7F8E1; border: 1px solid #CDE9C3; border-radius: 4px 14px 14px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wa-form { display: grid; gap: 1rem; margin-top: 1rem; }
+.wa-pick { border: 1px solid var(--line); border-radius: 10px; padding: .7rem 1rem; margin: 0; display: grid; gap: .5rem; min-width: 0; }
+.wa-pick legend { font-weight: 700; font-size: .92rem; padding: 0 .3rem; }
+.wa-pick label { display: flex; align-items: center; gap: .6rem; cursor: pointer; min-height: 2.2rem; }
+.wa-pick input { accent-color: var(--pink); margin: 0; }
+.wa-main { justify-self: start; }
+.wa-more { margin-top: .6rem; }
+.wa-more summary { cursor: pointer; font-size: .9rem; color: var(--pink-deep); }
+.wa-messages, .wa-history { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.2rem; }
+.wa-messages li + li, .wa-history li + li { border-top: 1px solid var(--line); padding-top: 1.2rem; }
+.wa-messages h3 { font-size: 1rem; margin-bottom: .5rem; }
+.wa-history p { margin-bottom: .5rem; }
+.wa-status { border-width: 2px; }
+.wa-good { border-color: var(--green); }
+.wa-bad { border-color: #9B1C4B; }
+@media (max-width: 620px) { .wa-main { width: 100%; justify-self: stretch; } }
