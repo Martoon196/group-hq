@@ -76,7 +76,14 @@
     var failed = box.getAttribute("data-fragment-fail") || "Couldn't load this panel. Reload the page to try again.";
     fetch(src, { credentials: "same-origin", redirect: "manual", headers: { "Accept": "text/html" } })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
-      .then(function (html) { box.innerHTML = html; box.removeAttribute("aria-busy"); })
+      .then(function (html) {
+        box.innerHTML = html; box.removeAttribute("aria-busy");
+        // A panel may add its own count to a total already on the page (Today's "Waiting for you").
+        var into = box.getAttribute("data-fragment-add-to"), counted = box.querySelector("[data-count]");
+        if (into && counted) document.querySelectorAll(into).forEach(function (total) {
+          total.textContent = String((parseInt(total.textContent, 10) || 0) + (parseInt(counted.getAttribute("data-count"), 10) || 0));
+        });
+      })
       .catch(function () {
         var p = document.createElement("p");
         p.className = "bad-text";

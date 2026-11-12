@@ -1,0 +1,13 @@
+{# One "what needs you" group on Today: its heading with a count, and its items. Needs `group` and `today`. #}
+<div class="panel-head"><h2>{{ group.title }} <span class="today-count">{{ group.total }}</span></h2>{% if group.more %}<a class="btn btn-ghost btn-sm" href="{{ group.href }}">All {{ group.total }}</a>{% endif %}</div>
+<ul class="today-items">
+  {% for item in group.items %}
+  <li>
+    <a class="today-item{% if item.overdue(today) %} is-overdue{% endif %}" href="{{ item.href }}"{% if item.href.startswith("http") %} target="_blank" rel="noopener noreferrer"{% endif %}>
+      <span class="today-item-main"><strong>{{ item.title }}</strong><span class="today-item-detail">{{ item.detail }}</span></span>
+      <span class="today-item-side">{% if item.brand %}<span class="chip today-brand">{{ item.brand | upper }}</span>{% endif %}{% set due = item.due_words(today) %}{% if due %}<span class="today-due">{{ due }}</span>{% endif %}</span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% if group.more %}<p class="small muted today-more"><a href="{{ group.href }}">{{ group.more }} more</a></p>{% endif %}

@@ -1,0 +1,20 @@
+{# The inbox panel of Today, loaded after the page (app.js, data-fragment-src): replies that need the founder and
+   inbox accounts that are not connected. data-count is added to the page's total. #}
+{% if problems %}
+<ul class="today-health today-inbox-problems">
+  {% for h in problems %}
+  <li class="today-health-{{ h.level }}">
+    <span class="today-dot" aria-hidden="true"></span>
+    <span class="today-health-text"><strong>{{ h.title }}</strong><span>{{ h.why }}</span></span>
+    {% if h.href %}<a class="btn btn-ghost btn-sm" href="{{ h.href }}">{{ h.action }}</a>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if group.total %}
+{% include "_today_group.html" %}
+{% else %}
+<div class="panel-head"><h2>Replies waiting for you</h2><a class="btn btn-ghost btn-sm" href="/inbox">Open the inbox</a></div>
+<p class="muted">{{ group.empty }}</p>
+{% endif %}
+<span hidden data-count="{{ group.total }}"></span>
