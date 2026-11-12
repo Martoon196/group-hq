@@ -21,6 +21,7 @@ from ..services import laps, laps_sync
 from ..services.audit import audit, changes
 from ..templating import Refused, go, render
 from .people import get_or_404
+from .whatsapp_send import url as whatsapp_send_url
 
 router = APIRouter(dependencies=[Depends(check_origin)])
 
@@ -283,8 +284,12 @@ def source(lead_id: int, db: Session = Depends(get_db), user: User = Depends(req
 @router.get("/laps/deals/{deal_id}", response_class=HTMLResponse)
 def deal_page(deal_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     deal = get_or_404(db, LapsDeal, deal_id)
+    # A card that follows a CRM contact can open that contact's Send a WhatsApp screen.
+    kind, _, ref = (deal.origin or "").partition(":")
+    lead = db.get(CampaignLead, int(ref)) if kind == "crm" and ref.isdigit() else None
     return render(request, "laps_deal.html", {
         "user": user, "section": "laps", "deal": deal, "brands": laps.BRANDS, "labels": laps.LABELS,
+        "whatsapp_url": whatsapp_send_url(lead.brand, lead.external_id) if lead and lead.source_system == "relaunch72" else "",
         "pipeline": laps.PIPELINE, "moves": MOVES, "gbp": gbp, "furthest": laps.furthest(deal),
         "origin": origin_of(deal), "siblings": siblings(db, [deal]).get(deal.id, []),
         "value": "" if deal.value_pence is None else f"{deal.value_pence / 100:.2f}".removesuffix(".00")})

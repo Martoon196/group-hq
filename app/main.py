@@ -51,6 +51,8 @@ app.include_router(laps.router)
 from .routers import acquisitions  # noqa: E402
 app.include_router(acquisitions.router)
 app.include_router(crm.router)
+from .routers import whatsapp_send  # noqa: E402
+app.include_router(whatsapp_send.router)
 from .routers import webinars  # noqa: E402
 app.include_router(webinars.router)
 app.include_router(whatsapp_keywords.router)

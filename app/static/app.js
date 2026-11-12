@@ -11,7 +11,7 @@
     if (e.defaultPrevented || !f.hasAttribute("data-submit-once")) return;
     if (f.dataset.submitted) { e.preventDefault(); return; }
     f.dataset.submitted = "1";
-    f.querySelectorAll("button[type=submit]").forEach(function (b) { b.dataset.label = b.textContent; b.disabled = true; b.textContent = "Importing..."; });
+    f.querySelectorAll("button[type=submit]").forEach(function (b) { b.dataset.label = b.textContent; b.disabled = true; b.textContent = f.getAttribute("data-submit-once") || "Importing..."; });
   });
   window.addEventListener("pageshow", function (e) {
     if (!e.persisted) return;          // back to a page restored from the cache: let its form be sent again

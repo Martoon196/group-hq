@@ -28,6 +28,26 @@ class ReplyRefused(CrmUnavailable):
     pass
 
 
+class OwnerWhatsAppRefused(CrmUnavailable):
+    """Relaunch72 answered a one-to-one WhatsApp owner command (whatsappOwner…) with a definite no before doing
+    anything; .code is its error code (owner_send_unavailable while the switch is off). Nothing was queued."""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def _owner_whatsapp_refusal(response):
+    """The error code of a definite refusal (400, 401, 403, 404, 409), or None when the outcome is not known."""
+    if response.status_code not in (400, 401, 403, 404, 409):
+        return None
+    try:
+        code = response.json().get("error")
+    except (ValueError, AttributeError):
+        code = None
+    return code if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,60}", code) else f"http_{response.status_code}"
+
+
 def command(user, brand, action, *, transport=None, request_id=None, **payload):
     if brand == "piuk" and not config.GHQ_INBOX_PIUK_CRM_ENABLED:
         raise CrmUnavailable("The Prop Invest UK CRM workspace needs connecting.")
@@ -43,6 +63,8 @@ def command(user, brand, action, *, transport=None, request_id=None, **payload):
             response = client.post(ORIGIN + PATH, content=body, headers={"Content-Type": "application/json",
                 "X-GHQ-Timestamp": stamp, "X-GHQ-Signature": signature})
         if response.status_code != 200:
+            if action.startswith("whatsappOwner") and (code := _owner_whatsapp_refusal(response)):
+                raise OwnerWhatsAppRefused(code)
             if action == "whatsappReply" and response.status_code in (400, 403, 404, 409):
                 raise ReplyRefused("This WhatsApp conversation cannot receive this reply.")
             if response.status_code == 403:
@@ -55,6 +77,12 @@ def command(user, brand, action, *, transport=None, request_id=None, **payload):
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError()
+        if action.startswith("whatsappOwner"):
+            # One-to-one WhatsApp from the Martin Howard Property number: Relaunch72's answer for this brand, as it gave it.
+            uuid.UUID(result["workspaceId"])
+            if result.get("brand") != brand or not isinstance(result["result"], dict):
+                raise ValueError()
+            return result["result"]
         if action in ("whatsappThreads", "whatsappMessages", "whatsappReply"):
             # The dedicated reader validates each native ID and the returned account/thread binding.
             return result

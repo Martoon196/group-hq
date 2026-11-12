@@ -1,0 +1,151 @@
+{% extends "app_base.html" %}
+{% set title = "Send a WhatsApp | Group HQ" %}
+{% set who = view.name or "this contact" %}
+{% set chosen = view.chosen if view.chosen is defined else none %}
+{% macro target() %}<input type="hidden" name="brand" value="{{ view.brand }}"><input type="hidden" name="contact" value="{{ view.contact }}">{% endmacro %}
+{# The message being checked or sent, carried from one form to the next exactly as it was typed. #}
+{% macro carry(m, link) %}<input type="hidden" name="link" value="{{ link }}"><input type="hidden" name="kind" value="{{ m.kind }}"><input type="hidden" name="checked" value="{{ m.checked }}">
+  {% if m.kind == "template" %}<input type="hidden" name="template" value="{{ m.template }}"><input type="hidden" name="layout" value="{{ m.layout }}">
+    {% for n in m.names %}<input type="hidden" name="name" value="{{ n }}"><input type="hidden" name="blank" value="{{ m.blanks[loop.index0] }}">{% endfor %}
+  {% else %}<input type="hidden" name="body" value="{{ m.body }}">{% endif %}{% endmacro %}
+{% macro number_form() %}
+<form method="post" action="{{ page }}/number" class="wa-form" data-submit-once="Saving…">{{ target() }}
+  {% if view.candidates %}<fieldset class="wa-pick"><legend>Numbers on their record</legend>
+    {% for c in view.candidates %}<label><input type="radio" name="point" value="{{ c.point }}"{% if loop.first %} checked{% endif %}> {{ c.masked }} <span class="muted">({{ c.kind }})</span></label>{% endfor %}</fieldset>{% endif %}
+  <div class="field"><label for="wa-number">{{ "Or type a different number" if view.candidates else "Their WhatsApp number" }}</label>
+    <input id="wa-number" name="number" type="tel" inputmode="tel" autocomplete="off" maxlength="32" placeholder="+44 7700 900123"{% if not view.candidates %} required{% endif %}>
+    <span class="hint">Include the country code, for example +44.</span></div>
+  {% if view.unreadable %}<p class="small muted">A number on their record couldn't be read. Type it here with its country code.</p>{% endif %}
+  <div class="field field-check"><label><input type="checkbox" name="confirm" value="yes" required> {{ confirm_number }}</label></div>
+  <button class="btn btn-primary wa-main" type="submit">Use this number</button>
+</form>{% endmacro %}
+{% block content %}
+<p><a href="{{ view.back }}">← Back</a></p>
+<div class="page-title"><span class="eyebrow">{{ view.brand_name }}</span><h1>Send a WhatsApp</h1>
+  <p class="help">One message to one person, from the {{ sender }} WhatsApp number.</p></div>
+<div class="wa-send">
+{% if view.off %}
+<section class="panel wa-quiet" aria-label="WhatsApp sending">
+  <h2>{{ off_title }}</h2>
+  <p>There is nothing to press here for now, and nothing has been sent.</p>
+  <p class="muted">When sending is switched on, this page will take you through one message to {{ who }} in three steps: who, what, and a final check.</p>
+</section>
+{% elif problem %}
+<section class="panel" aria-live="polite">
+  <h2>{{ "We couldn't confirm that" if problem.again == "send" else "That message was not sent" }}</h2>
+  <p>{{ problem.sentence }}</p>
+  {% if problem.again == "send" %}
+  <form method="post" action="{{ page }}" class="wa-form" data-submit-once="Sending…">{{ target() }}{{ carry(problem, problem.link) }}
+    <input type="hidden" name="request_id" value="{{ problem.request_id }}"><input type="hidden" name="sha" value="{{ problem.sha }}">
+    <input type="hidden" name="reason" value="{{ problem.reason }}"><input type="hidden" name="note" value="{{ problem.note }}">
+    <input type="hidden" name="needs_tick" value="{{ problem.needs_tick }}"><input type="hidden" name="confirm" value="{{ problem.confirm }}">
+    <button class="btn btn-primary wa-main" type="submit">Try again</button></form>
+  {% elif problem.again == "check" %}
+  <form method="post" action="{{ page }}/check" class="wa-form">{{ target() }}{{ carry(problem, problem.link) }}
+    <input type="hidden" name="reason" value="{{ problem.reason }}"><input type="hidden" name="note" value="{{ problem.note }}">
+    <button class="btn btn-primary wa-main" type="submit">Check the message again</button></form>
+  {% elif problem.again == "approved" %}
+  <p><a class="btn btn-primary wa-main" href="{{ whatsapp_send_url(view.brand, view.contact, link=problem.link, mode='approved') }}">Choose an approved message</a></p>
+  {% endif %}
+  <p class="small"><a href="{{ view.back }}">Back to {{ who }}</a></p>
+</section>
+{% elif view.unavailable %}
+<section class="panel"><h2>We couldn't reach the CRM</h2><p>{{ unavailable_text }}</p>
+  <p><a class="btn btn-ghost" href="{{ whatsapp_send_url(view.brand, view.contact) }}">Try again</a></p></section>
+{% else %}
+{% if status %}
+<section class="panel wa-status{% if status.good %} wa-good{% elif status.bad %} wa-bad{% endif %}" aria-live="polite">
+  <span class="eyebrow">Your message to {{ who }}</span>
+  <h2>{{ status.label }}</h2>
+  {% if status.detail %}<p>{{ status.detail }}</p>{% endif %}
+  {% if status.text %}<blockquote class="wa-bubble">{{ status.text }}</blockquote>{% endif %}
+  {% if status.waiting %}<p><a class="btn btn-primary wa-main" href="{{ whatsapp_send_url(view.brand, view.contact, link=chosen.link, sent=status.id) }}">Check again</a></p>{% endif %}
+</section>
+{% endif %}
+<section class="panel{% if status %} mt-1{% endif %}">
+  <span class="eyebrow">Step 1</span><h2>Who</h2>
+  <p class="wa-who"><strong>{{ who }}</strong> <span class="chip">{{ view.brand_name }}</span></p>
+  {% if view.stop %}<p class="flash flash-err">{{ view.stop }}</p>
+  {% elif chosen %}
+    <p>WhatsApp number: <strong>{{ chosen.masked }}</strong></p>
+    {% if chosen.stop %}<p class="flash flash-err">{{ chosen.stop }}</p>{% endif %}
+    {% if view.numbers|length > 1 %}<p class="small">Other numbers:
+      {% for n in view.numbers %}{% if n.link != chosen.link %}<a href="{{ whatsapp_send_url(view.brand, view.contact, link=n.link) }}">{{ n.masked }}</a>{% if not loop.last %} {% endif %}{% endif %}{% endfor %}</p>{% endif %}
+    {% if not status and not check %}<details class="wa-more"><summary>Use a different number</summary>{{ number_form() }}</details>{% endif %}
+  {% else %}
+    <p>There is no WhatsApp number for {{ who }} yet. Add one to carry on.</p>
+    {{ number_form() }}
+  {% endif %}
+</section>
+{% if what %}
+<section class="panel mt-1">
+  <span class="eyebrow">Step 2</span><h2>What</h2>
+  {% if what.stop %}<p>{{ what.stop }}</p>
+  {% elif what.typed %}
+    <p>{{ who }} messaged this number in the last 24 hours, so you can type a reply.{% if chosen.closes %} You have until {{ chosen.closes }}.{% endif %}</p>
+    <form method="post" action="{{ page }}/check" class="wa-form">{{ target() }}
+      <input type="hidden" name="link" value="{{ chosen.link }}"><input type="hidden" name="kind" value="text"><input type="hidden" name="checked" value="{{ checked }}">
+      <div class="field"><label for="wa-body">Your message</label><textarea id="wa-body" name="body" required maxlength="4096" rows="5">{{ draft }}</textarea></div>
+      <button class="btn btn-primary wa-main" type="submit">Check this message</button></form>
+    <p class="small"><a href="{{ whatsapp_send_url(view.brand, view.contact, link=chosen.link, mode='approved', checked=checked) }}">Use an approved message instead</a></p>
+  {% elif what.picked %}
+    {% set picked = what.picked %}
+    <blockquote class="wa-bubble">{{ picked.text }}</blockquote>
+    <form method="post" action="{{ page }}/check" class="wa-form">{{ target() }}
+      <input type="hidden" name="link" value="{{ chosen.link }}"><input type="hidden" name="kind" value="template"><input type="hidden" name="checked" value="{{ checked }}">
+      <input type="hidden" name="template" value="{{ picked.id }}"><input type="hidden" name="layout" value="{{ picked.format }}">
+      {% if picked.blanks %}<p>Fill in the gaps marked {{ "{{" }}like this{{ "}}" }} in the message.</p>{% else %}<p>This message goes exactly as written.</p>{% endif %}
+      {% for b in picked.blanks %}<input type="hidden" name="name" value="{{ b.name }}">
+      <div class="field"><label for="wa-blank-{{ loop.index }}">{{ b.label }} <span class="muted">{{ "{{" }}{{ b.name }}{{ "}}" }}</span></label>
+        <input id="wa-blank-{{ loop.index }}" name="blank" required maxlength="500" value="{{ values[loop.index0] if values|length == picked.blanks|length else '' }}"></div>{% endfor %}
+      <button class="btn btn-primary wa-main" type="submit">Check this message</button></form>
+    <p class="small"><a href="{{ whatsapp_send_url(view.brand, view.contact, link=chosen.link, mode='approved', checked=checked) }}">Choose a different message</a></p>
+  {% elif what.messages %}
+    <p>{% if chosen.window_open %}Choose one of your approved messages.{% else %}It has been more than 24 hours since {{ who }} last messaged this number, or they never have, so choose one of your approved messages.{% endif %}</p>
+    {% if view.remaining is not none %}<p class="small muted">You can send {{ view.remaining }} more approved {{ "message" if view.remaining == 1 else "messages" }} today.</p>{% endif %}
+    <ul class="wa-messages">{% for m in what.messages %}<li><h3>{{ m.title }}</h3><blockquote class="wa-bubble">{{ m.text }}</blockquote>
+      <a class="btn btn-ghost btn-sm" href="{{ whatsapp_send_url(view.brand, view.contact, link=chosen.link, message=m.id, mode='approved', checked=checked) }}">Use this message</a></li>{% endfor %}</ul>
+  {% else %}<p>There are no approved messages to choose from yet. Messages are approved in WhatsApp Manager.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% if check %}
+<section class="panel mt-1">
+  <span class="eyebrow">Step 3</span><h2>Check</h2>
+  <p>This is exactly what {{ who }} will receive.</p>
+  <blockquote class="wa-bubble">{{ check.text }}</blockquote>
+  <table class="data wa-facts"><tbody>
+    <tr><td class="k">To</td><td>{{ who }} · {{ chosen.masked }}</td></tr>
+    <tr><td class="k">From</td><td>The {{ sender }} WhatsApp number</td></tr>
+  </tbody></table>
+  <form method="post" action="{{ page }}" class="wa-form" data-submit-once="Sending…">{{ target() }}{{ carry(check, chosen.link) }}
+    <input type="hidden" name="request_id" value="{{ check.request_id }}"><input type="hidden" name="sha" value="{{ check.sha }}">
+    {% if check.needs_reason %}
+    <fieldset class="wa-pick"><legend>How do you know {{ who }}?</legend>
+      {% for key, label in reasons.items() %}<label><input type="radio" name="reason" value="{{ key }}" required{% if check.reason == key %} checked{% endif %}> {{ label }}</label>{% endfor %}</fieldset>
+    <div class="field"><label for="wa-note">A short note for your records</label>
+      <input id="wa-note" name="note" required minlength="8" maxlength="500" value="{{ check.note }}" placeholder="For example: bought through us in March">
+      <span class="hint">At least 8 characters. It is kept with their record and is not sent to them.</span></div>
+    {% if check.needs_tick %}<input type="hidden" name="needs_tick" value="1">
+      {% if check.ticked %}<p class="small">You have confirmed this is their WhatsApp number.</p>
+      {% else %}<div class="field field-check"><label><input type="checkbox" name="confirm" value="yes" required> {{ confirm_number }}</label></div>{% endif %}
+    {% endif %}
+    {% endif %}
+    <button class="btn btn-primary wa-main" type="submit">Send this message</button>
+  </form>
+  <p class="small"><a href="{{ whatsapp_send_url(view.brand, view.contact, link=chosen.link, message=check.template, mode='approved' if check.kind == 'template' else '', checked=check.checked) }}">Change the message</a></p>
+</section>
+{% endif %}
+{% if status %}<p class="mt-1"><a href="{{ whatsapp_send_url(view.brand, view.contact, link=chosen.link) }}">Send another message</a></p>{% endif %}
+{% if view.history or not view.stop %}<section class="panel mt-1">
+  <h2>Earlier messages to {{ who }}</h2>
+  {% if view.history %}<ul class="wa-history">{% for h in view.history[:10] %}
+    <li><p><span class="status{% if h.good %} status-active{% elif h.bad %} status-lapsed{% else %} status-pending{% endif %}">{{ h.label }}</span>
+      <span class="help">{{ h.at }}{% if h.number %} · {{ h.number }}{% endif %}</span></p>
+      {% if h.text %}<blockquote class="wa-bubble">{{ h.text }}</blockquote>{% endif %}
+      {% if h.detail and not h.good %}<p class="small muted">{{ h.detail }}</p>{% endif %}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">Nothing has been sent to {{ who }} from here yet.</p>{% endif %}
+</section>{% endif %}
+{% endif %}
+</div>
+{% endblock %}

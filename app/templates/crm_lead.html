@@ -8,6 +8,7 @@
 <section class="panel campaign-notice" aria-label="Channel status">
   <strong>Planning only.</strong> The source CRM owns contact details and permission. Group HQ has no email address or phone number from this feed, and these tasks cannot send an email, text or WhatsApp.
 </section>
+{% if whatsapp_send_url("pp", lead.external_id) %}<p class="mt-1"><a class="btn btn-ghost" href="{{ whatsapp_send_url("pp", lead.external_id) }}">Send a WhatsApp</a></p>{% endif %}
 {% if not plan and lead.lifecycle == "lead" %}
 <section class="panel mt-2"><h2>Start a useful follow-up</h2><p>Six touchpoints across 14 days: a first call, a useful answer, a short check-in, a second call, a WhatsApp option and a clear close. Only call outcomes can be logged in this release.</p>
   <form method="post" action="/crm/leads/{{ lead.id }}/start"><button class="btn btn-primary" type="submit">Create my follow-up plan</button></form>
