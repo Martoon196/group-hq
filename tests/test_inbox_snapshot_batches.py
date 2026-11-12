@@ -27,11 +27,14 @@ def test_local_snapshot_exposes_imported_metadata_beyond_100_without_per_thread_
     def capture(conn, cursor, statement, parameters, context, executemany):
         if statement.lstrip().upper().startswith("SELECT"):
             queries.append(statement)
-    event.listen(db.bind, "before_cursor_execute", capture)
+    # Listen on this session's own connection, not the whole engine: a background thread left running by an earlier
+    # test (the LAPS refresh reads app_settings) would otherwise be counted here and fail the limit at random.
+    own = db.connection()
+    event.listen(own, "before_cursor_execute", capture)
     try:
         _, results, threads = inbox.snapshot(user.id, [], db=db, user_email=user.email)
     finally:
-        event.remove(db.bind, "before_cursor_execute", capture)
+        event.remove(own, "before_cursor_execute", capture)
     assert len(threads) == 521 and not results[0]["has_more"]
     assert len(queries) <= 7  # Account registry, one metadata window, two batches each of choices/links.
     assert all("inbox_threads.messages" not in statement for statement in queries)
