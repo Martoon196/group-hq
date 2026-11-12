@@ -48,6 +48,26 @@ def _owner_whatsapp_refusal(response):
     return code if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,60}", code) else f"http_{response.status_code}"
 
 
+def leadrelay_status(user, *, transport=None):
+    """The LeadRelay feed's state for the Today page: {level, title, why}, or None when this Growth HQ has no CRM
+    link at all (nothing to say). Any failure to read it is itself reported, never hidden and never an error page."""
+    if not 32 <= len(config.R72_GROUP_HQ_INBOX_SECRET) <= 256:
+        return None
+    try:
+        status = command(user, "pp", "leadrelayFeedStatus", transport=transport)
+    except Exception:  # noqa: BLE001  (CRM down, an older Relaunch72, or an answer that does not check out)
+        return {"level": "warn", "title": "LeadRelay could not be checked",
+                "why": "Growth HQ could not read LeadRelay's status just now. Nothing was sent to anyone."}
+    if not status["switchedOn"]:
+        return {"level": "warn", "title": "LeadRelay is not connected", "why": status["summary"]}
+    if status["problem"]:
+        return {"level": "bad", "title": "LeadRelay needs a look", "why": status["summary"]}
+    waiting = status.get("waitingAfterRepeatedFailures"), status.get("needsTheOwner")
+    attention = (isinstance(waiting[0], int) and waiting[0] > 0) or (isinstance(waiting[1], list) and len(waiting[1]) > 0)
+    return {"level": "warn" if attention else "ok", "title": "LeadRelay needs a look" if attention else "LeadRelay is connected",
+            "why": status["summary"]}
+
+
 def command(user, brand, action, *, transport=None, request_id=None, **payload):
     if brand == "piuk" and not config.GHQ_INBOX_PIUK_CRM_ENABLED:
         raise CrmUnavailable("The Prop Invest UK CRM workspace needs connecting.")
@@ -88,6 +108,13 @@ def command(user, brand, action, *, transport=None, request_id=None, **payload):
             return result
         if action == "leads":
             return _leads_page(result, brand)
+        if action == "leadrelayFeedStatus":
+            # Read only: what Relaunch72's LeadRelay feed last saw, with a ready-made plain sentence.
+            if (result.get("brand") != brand or not isinstance(result.get("switchedOn"), bool)
+                    or not isinstance(result.get("summary"), str) or not 0 < len(result["summary"]) <= 1200
+                    or not (result.get("problem") is None or isinstance(result["problem"], str))):
+                raise ValueError()
+            return result
         if action == "search":
             rows = result.get("contacts")
             if not isinstance(rows, list) or len(rows) > 20:
