@@ -627,7 +627,7 @@ def test_the_needs_a_region_queue_reads_the_cache_and_links_to_hnh(admin_client,
     db.commit()
     assert [r["person"].person_key for r in earnings.needs_region(db)] == [EMAIL]
     with respx.mock(assert_all_called=False) as mock:
-        page = admin_client.get("/")
+        page = admin_client.get("/overview")
         listed = admin_client.get("/mentees?region=needed")
         unfiltered = admin_client.get("/mentees")
     assert mock.calls.call_count == 0, "the queue needs no live call"

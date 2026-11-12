@@ -246,7 +246,9 @@ def test_security_headers_on_every_page(client, admin_client):
         assert "strict-transport-security" not in r.headers, "HSTS only with Secure cookies"
     assert client.get("/login").headers["cache-control"] == "no-store"
     assert admin_client.get("/password").headers["cache-control"] == "no-store"
-    assert "cache-control" not in admin_client.get("/").headers or admin_client.get("/").headers["cache-control"] != "no-store"
+    overview = admin_client.get("/overview").headers
+    assert "cache-control" not in overview or overview["cache-control"] != "no-store"
+    assert admin_client.get("/").headers["cache-control"] == "no-store", "Today shows inbox previews, never cached like the inbox"
 
 
 # ---- CSRF ------------------------------------------------------------------------------

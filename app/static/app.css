@@ -247,3 +247,33 @@ table.data td.detail { max-width: 46ch; word-break: break-word; }
 .wa-steps strong { font-size: 1.1rem; }
 .wa-steps p { margin: .45rem 0 .8rem; }
 @media (max-width: 1000px) { .wa-layout { grid-template-columns: 1fr; } }
+
+/* ---- Today ------------------------------------------------------------------------------------------------ */
+.today-lead { margin: .2rem 0 0; color: var(--muted); font-size: 1.05rem; }
+.today-lead strong { color: var(--pink-deep); font-size: 1.25rem; }
+.today-groups { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); align-items: start; }
+.today-count { display: inline-block; min-width: 1.7em; padding: .05rem .5rem; margin-left: .3rem; border-radius: 999px; background: var(--pink-soft); color: var(--pink-deep); font-size: .85rem; text-align: center; vertical-align: middle; }
+.today-items { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; }
+.today-item { display: flex; justify-content: space-between; gap: .8rem; padding: .7rem .85rem; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); text-decoration: none; background: var(--paper); min-height: 44px; }
+.today-item:hover { border-color: var(--pink); color: var(--ink); background: var(--blush); }
+.today-item.is-overdue { border-left: 4px solid #9B1C4B; }
+.today-item-main { display: flex; flex-direction: column; min-width: 0; }
+.today-item-main strong { overflow-wrap: anywhere; }
+.today-item-detail { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+.today-item-side { display: flex; flex-direction: column; align-items: flex-end; gap: .3rem; flex-shrink: 0; }
+.today-brand { font-size: .7rem; padding: .1rem .5rem; }
+.today-due { font-size: .8rem; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.is-overdue .today-due { color: #9B1C4B; }
+.today-more { margin: .6rem 0 0; }
+.today-health { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.today-health li { display: grid; grid-template-columns: auto 1fr auto; gap: .8rem; align-items: center; padding: .7rem .85rem; border-radius: 10px; background: var(--mist); }
+.today-health-text { display: flex; flex-direction: column; }
+.today-health-text span { color: var(--muted); font-size: .92rem; }
+.today-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--green); }
+.today-health-warn .today-dot { background: var(--amber); }
+.today-health-bad { background: #FDE8EE !important; }
+.today-health-bad .today-dot { background: #9B1C4B; }
+@media (max-width: 560px) {
+  .today-health li { grid-template-columns: auto 1fr; }
+  .today-health li .btn { grid-column: 2; justify-self: start; }
+}
