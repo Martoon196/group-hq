@@ -1,15 +1,17 @@
-"""The home screen: counts that matter, the "Needs a region" queue (active mentees whose Hello New Home partner has no
-area yet, from what the recompute last read: no live call) and the latest audit entries."""
+"""The home screen is Today: everything waiting for the founder and the health of what feeds it. The older overview
+(counts, the "Needs a region" queue from what the recompute last read, and the latest audit entries) moved to
+/overview."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
+from .. import config
 from ..auth import check_origin, require_admin
 from ..db import get_db
 from ..models import AuditLog, ConnectorCall, EntitlementGrant, Mentee, Person, Programme, User
-from ..services import earnings
+from ..services import earnings, inbox_scanner, today as today_service
 from ..templating import render
 
 REGION_CARD_ROWS = 8            # the dashboard lists this many; /mentees?region=needed lists them all
@@ -18,6 +20,22 @@ router = APIRouter(dependencies=[Depends(check_origin)])
 
 
 @router.get("/", response_class=HTMLResponse)
+def today(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    from .inbox import conversation_list
+    threads, results, error = [], [], None
+    try:
+        _, results, threads, error = conversation_list(db, user, [])
+    except Exception:   # noqa: BLE001  (a broken inbox read never takes the home screen down)
+        error = "The inbox could not be read just now."
+    owner = user.email.lower() == config.GHQ_PERSONAL_INBOX_OWNER_EMAIL
+    scanning = inbox_scanner.enabled(db, user) if owner else None
+    ctx = today_service.build(db, threads, results, error, scanning, earnings.needs_region(db))
+    response = render(request, "today.html", {"user": user, "section": "today", **ctx})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/overview", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     stats = {
         "people": db.query(Person).count(),

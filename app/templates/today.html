@@ -1,0 +1,49 @@
+{% extends "app_base.html" %}
+{% set title = "Today | Group HQ" %}
+{% block content %}
+<div class="page-title today-head">
+  <span class="eyebrow">{{ today.strftime("%A %-d %B") }}</span>
+  <h1>Today</h1>
+  <p class="today-lead">{% if total %}<strong>{{ total }}</strong> thing{{ "s" if total != 1 else "" }} waiting for you{% else %}Nothing is waiting for you{% endif %}{% set problems = health | selectattr("level", "ne", "ok") | list %}{% if problems %} · <a href="#health">{{ problems | length }} health problem{{ "s" if problems | length != 1 else "" }}</a>{% endif %}.</p>
+</div>
+
+{% if waiting %}
+<div class="today-groups">
+  {% for group in waiting %}
+  <section class="panel today-group" id="{{ group.key }}">
+    <div class="panel-head"><h2>{{ group.title }} <span class="today-count">{{ group.total }}</span></h2>{% if group.more %}<a class="btn btn-ghost btn-sm" href="{{ group.href }}">All {{ group.total }}</a>{% endif %}</div>
+    <ul class="today-items">
+      {% for item in group.items %}
+      <li>
+        <a class="today-item{% if item.overdue(today) %} is-overdue{% endif %}" href="{{ item.href }}"{% if item.href.startswith("http") %} target="_blank" rel="noopener noreferrer"{% endif %}>
+          <span class="today-item-main"><strong>{{ item.title }}</strong><span class="today-item-detail">{{ item.detail }}</span></span>
+          <span class="today-item-side">{% if item.brand %}<span class="chip today-brand">{{ item.brand | upper }}</span>{% endif %}{% set due = item.due_words(today) %}{% if due %}<span class="today-due">{{ due }}</span>{% endif %}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% if group.more %}<p class="small muted today-more"><a href="{{ group.href }}">{{ group.more }} more</a></p>{% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<section class="panel today-clear-all"><h2>All clear</h2><p class="muted">No replies, next steps, follow-ups or payments need you today.</p></section>
+{% endif %}
+
+<section class="panel mt-2" id="health">
+  <div class="panel-head"><h2>Health</h2></div>
+  <ul class="today-health">
+    {% for h in health %}
+    <li class="today-health-{{ h.level }}">
+      <span class="today-dot" aria-hidden="true"></span>
+      <span class="today-health-text"><strong>{{ h.title }}</strong><span>{{ h.why }}</span></span>
+      {% if h.href %}<a class="btn btn-ghost btn-sm" href="{{ h.href }}">{{ h.action }}</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% if clear %}
+<p class="small muted mt-2 today-quiet">Nothing due in: {% for group in clear %}<a href="{{ group.href }}">{{ group.title | lower }}</a>{{ ", " if not loop.last else "." }}{% endfor %}</p>
+{% endif %}
+{% endblock %}
