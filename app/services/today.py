@@ -2,8 +2,9 @@
 that feed it, in plain English.
 
 Read only. Every item links to the screen where it is dealt with; nothing here changes a record. Dates are UK
-dates: a next step "due" is one dated today or earlier in London. The inbox part is passed in by the router
-(its conversation read is live and may fail on its own); everything else is read from this database.
+dates: a next step "due" is one dated today or earlier in London. The page itself is built from this database
+alone, so it opens at once. The inbox part (replies waiting, accounts not connected) needs a live read of every
+connected account, which takes seconds, so the page loads it afterwards as its own panel (build_inbox).
 """
 from __future__ import annotations
 
@@ -201,11 +202,8 @@ def regions(region_rows: list[dict]) -> Group:
 
 
 # ---- health ------------------------------------------------------------------------------------------------
-def health(db: Session, inbox_results: list[dict], inbox_error: str | None, scanning: bool | None,
-           now: datetime | None = None) -> list[Health]:
-    """Problems first, each with why it matters and the next useful step. An empty problem list ends with one
-    "all fine" line so the screen never looks unfinished."""
-    now = now or utcnow()
+def inbox_health(inbox_results: list[dict], inbox_error: str | None) -> list[Health]:
+    """What the live inbox read found wrong: the read itself failing, or an account that is not connected."""
     out: list[Health] = []
     if inbox_error:
         out.append(Health("bad", "The inbox could not be read", inbox_error + " Replies waiting cannot be counted until it can.",
@@ -216,6 +214,14 @@ def health(db: Session, inbox_results: list[dict], inbox_error: str | None, scan
             out.append(Health("bad", f"{account.label} is not connected",
                               f"Messages to {_brand(account.brand)} on {account.channel.title()} are not reaching Growth HQ ({result['error'].rstrip('.')}).",
                               "Check the connection", "/settings"))
+    return out
+
+
+def health(db: Session, scanning: bool | None, now: datetime | None = None) -> list[Health]:
+    """Problems first, each with why it matters and the next useful step. With nothing wrong it ends on one
+    "all running" line so the screen never looks unfinished. Inbox connections are reported by inbox_health."""
+    now = now or utcnow()
+    out: list[Health] = []
     if scanning is False:
         out.append(Health("warn", "Inbox sorting is paused",
                           "New conversations are not sorted, so nothing is flagged as needing you.", "Turn it back on", "/inbox"))
@@ -243,7 +249,10 @@ def health(db: Session, inbox_results: list[dict], inbox_error: str | None, scan
     if failed_grants:
         out.append(Health("bad", f"{failed_grants} access grant{'s' if failed_grants != 1 else ''} failed",
                           "Someone who has paid may not have their product access.", "See the failed grants", "/grants?state=failed"))
-    failed_calls = db.scalar(select(func.count()).select_from(ConnectorCall).where(ConnectorCall.status == "failed")) or 0
+    # A failed call whose grant is itself failed is the same problem as the line above, not a second one.
+    covered = select(EntitlementGrant.id).where(EntitlementGrant.state == "failed")
+    failed_calls = db.scalar(select(func.count()).select_from(ConnectorCall).where(
+        ConnectorCall.status == "failed", ConnectorCall.grant_id.is_(None) | ConnectorCall.grant_id.not_in(covered))) or 0
     if failed_calls:
         out.append(Health("warn", f"{failed_calls} product call{'s' if failed_calls != 1 else ''} failed",
                           "A change Growth HQ asked another product to make did not happen.", "See the audit log", "/audit"))
@@ -260,7 +269,7 @@ def health(db: Session, inbox_results: list[dict], inbox_error: str | None, scan
     order = {"bad": 0, "warn": 1, "ok": 2}
     out.sort(key=lambda h: order[h.level])
     if not out:
-        out.append(Health("ok", "Everything is connected", "Every inbox, CRM link and scheduled job that Growth HQ watches looks healthy."))
+        out.append(Health("ok", "Leads, access and reports are all running", "The CRM link, the LAPS board, product access and the Growth figures look healthy."))
     return out
 
 
@@ -272,11 +281,17 @@ def _source_name(source: str) -> str:
         return source
 
 
-def build(db: Session, inbox_threads: list[dict], inbox_results: list[dict], inbox_error: str | None,
-          scanning: bool | None, region_rows: list[dict], now: datetime | None = None) -> dict:
+def build(db: Session, scanning: bool | None, region_rows: list[dict], now: datetime | None = None) -> dict:
+    """Everything the page shows at once. Replies and inbox connections arrive separately (build_inbox)."""
     today = uk_today(now)
-    groups = [replies(inbox_threads), sales_steps(db, today), new_leads(db), crm_actions(db, today),
-              property_steps(db, today), mentee_money(db, today), franchise_tasks(db, today), regions(region_rows)]
+    groups = [sales_steps(db, today), new_leads(db), crm_actions(db, today), property_steps(db, today),
+              mentee_money(db, today), franchise_tasks(db, today), regions(region_rows)]
     waiting = [g for g in groups if g.total]
     return {"today": today, "waiting": waiting, "clear": [g for g in groups if not g.total],
-            "total": sum(g.total for g in waiting), "health": health(db, inbox_results, inbox_error, scanning, now)}
+            "total": sum(g.total for g in waiting), "health": health(db, scanning, now),
+            "approvals_url": f"https://{config.R72_PP_HOST}/portal/approvals" if config.R72_PP_HOST else ""}
+
+
+def build_inbox(inbox_threads: list[dict], inbox_results: list[dict], inbox_error: str | None) -> dict:
+    """The panel loaded after the page: replies that need the founder and inbox connections that are down."""
+    return {"group": replies(inbox_threads), "problems": inbox_health(inbox_results, inbox_error)}

@@ -1,4 +1,5 @@
-"""The home screen is Today: everything waiting for the founder and the health of what feeds it. The older overview
+"""The home screen is Today: everything waiting for the founder and the health of what feeds it. It opens from this
+database alone; the inbox part loads into it afterwards (/today/replies). The older overview
 (counts, the "Needs a region" queue from what the recompute last read, and the latest audit entries) moved to
 /overview."""
 from __future__ import annotations
@@ -21,17 +22,24 @@ router = APIRouter(dependencies=[Depends(check_origin)])
 
 @router.get("/", response_class=HTMLResponse)
 def today(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    owner = user.email.lower() == config.GHQ_PERSONAL_INBOX_OWNER_EMAIL
+    scanning = inbox_scanner.enabled(db, user) if owner else None
+    ctx = today_service.build(db, scanning, earnings.needs_region(db))
+    return render(request, "today.html", {"user": user, "section": "today", **ctx})
+
+
+@router.get("/today/replies", response_class=HTMLResponse)
+def today_replies(request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """The inbox part of Today, fetched after the page shows: reading every connected account takes seconds."""
     from .inbox import conversation_list
     threads, results, error = [], [], None
     try:
         _, results, threads, error = conversation_list(db, user, [])
-    except Exception:   # noqa: BLE001  (a broken inbox read never takes the home screen down)
+    except Exception:   # noqa: BLE001  (a broken inbox read is reported in the panel, never an error page)
         error = "The inbox could not be read just now."
-    owner = user.email.lower() == config.GHQ_PERSONAL_INBOX_OWNER_EMAIL
-    scanning = inbox_scanner.enabled(db, user) if owner else None
-    ctx = today_service.build(db, threads, results, error, scanning, earnings.needs_region(db))
-    response = render(request, "today.html", {"user": user, "section": "today", **ctx})
-    response.headers["Cache-Control"] = "no-store"
+    response = render(request, "_today_inbox.html", {"user": user, "today": today_service.uk_today(),
+                                                     **today_service.build_inbox(threads, results, error)})
+    response.headers["Cache-Control"] = "no-store"      # it carries message previews, like the inbox
     return response
 
 

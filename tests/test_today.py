@@ -71,7 +71,7 @@ def seed(db):
 
 def test_build_lists_what_is_due_in_order_and_leaves_the_rest(db):
     seed(db)
-    ctx = today_service.build(db, [], [], None, True, [], now=NOW)
+    ctx = today_service.build(db, True, [], now=NOW)
     groups = {g.key: g for g in ctx["waiting"]}
     sales = [i.title for i in groups["sales"].items]
     assert sales == ["Overdue Olive", "Today Tom"], "due today or earlier, open stages only, oldest first"
@@ -96,15 +96,16 @@ def test_replies_and_disconnected_inbox_accounts(db):
     results = [{"account": acct, "threads": threads, "has_more": False, "error": None},
                {"account": Account(key="pp-ig", brand="pp", channel="instagram", label="Property Predator Instagram",
                                    provider="zernio", account_id="2"), "threads": [], "has_more": False, "error": "Reconnect this account."}]
-    ctx = today_service.build(db, threads, results, None, False, [], now=NOW)
-    replies = next(g for g in ctx["waiting"] if g.key == "replies")
-    assert [i.title for i in replies.items] == ["Sam Seller"]
+    panel = today_service.build_inbox(threads, results, None)
+    replies = panel["group"]
+    assert [i.title for i in replies.items] == ["Sam Seller"] and replies.total == 1
     assert replies.items[0].href == "/inbox?account=kp-fb&thread=t1"
     assert replies.items[0].detail == "Key Properties Facebook · Can we talk about my four flats?"
-    titles = [h.title for h in ctx["health"]]
-    assert "Property Predator Instagram is not connected" in titles
+    assert [(h.level, h.title) for h in panel["problems"]] == [("bad", "Property Predator Instagram is not connected")]
+    failed = today_service.build_inbox([], [], "The inbox could not be read just now.")
+    assert failed["group"].total == 0 and failed["problems"][0].title == "The inbox could not be read"
+    titles = [h.title for h in today_service.health(db, False, now=NOW)]
     assert "Inbox sorting is paused" in titles
-    assert ctx["health"][0].level == "bad", "problems that stop something working come first"
 
 
 def test_health_reads_failures_in_plain_english_and_says_when_all_is_well(db, monkeypatch):
@@ -117,7 +118,7 @@ def test_health_reads_failures_in_plain_english_and_says_when_all_is_well(db, mo
     db.add(EntitlementGrant(person_id=person.id, mentee_id=mentee.id, product="pp", kind="comp_tier", value="pro_buyer", state="failed"))
     db.add(MetricSource(source="ga4", status="failing", last_error="401 from Google"))
     db.commit()
-    health = today_service.health(db, [], None, True, now=NOW)
+    health = today_service.health(db, True, now=NOW)
     words = {h.title: h for h in health}
     assert "1 access grant failed" in words and words["1 access grant failed"].href == "/grants?state=failed"
     assert "Growth figures from Google Analytics 4 are failing" in words and "401 from Google" in words["Growth figures from Google Analytics 4 are failing"].why
@@ -130,18 +131,50 @@ def test_health_reads_failures_in_plain_english_and_says_when_all_is_well(db, mo
     from app.models import AppSetting
     db.add(AppSetting(key=laps_sync.SYNC_KEY, value={"at": (NOW - timedelta(minutes=5)).isoformat(), "brands": {}, "problem": ""}))
     db.commit()
-    assert [(h.level, h.title) for h in today_service.health(db, [], None, True, now=NOW)] == [("ok", "Everything is connected")]
+    assert [(h.level, h.title) for h in today_service.health(db, True, now=NOW)] == [("ok", "Leads, access and reports are all running")]
 
 
-def test_home_is_today_and_the_old_dashboard_is_overview(admin_client, db, monkeypatch):
+def test_a_failed_call_behind_a_failed_grant_is_one_problem_not_two(db, monkeypatch):
+    from app.models import ConnectorCall
+    person = _person(db, "c@example.test", "Call Cal")
+    grant = EntitlementGrant(person_id=person.id, product="pp", kind="comp_tier", value="pro_buyer", state="failed")
+    db.add(grant)
+    db.flush()
+    db.add(ConnectorCall(grant_id=grant.id, product="pp", action="grant", idempotency_key="k1", status="failed"))
+    db.commit()
+    titles = [h.title for h in today_service.health(db, True, now=NOW)]
+    assert "1 access grant failed" in titles and not any("product call" in t for t in titles)
+    db.add(ConnectorCall(grant_id=None, product="kp", action="lookup", idempotency_key="k2", status="failed"))
+    db.commit()
+    assert "1 product call failed" in [h.title for h in today_service.health(db, True, now=NOW)]
+
+
+def test_home_opens_without_reading_the_inbox_and_the_old_dashboard_is_overview(admin_client, db, monkeypatch):
     seed(db)
-    monkeypatch.setattr("app.routers.inbox.conversation_list", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    def never(*a, **k):
+        raise AssertionError("the home page must not wait on a live inbox read")
+    monkeypatch.setattr("app.routers.inbox.conversation_list", never)
     page = admin_client.get("/")
     assert page.status_code == 200 and "<h1>Today</h1>" in page.text
-    assert page.headers["cache-control"] == "no-store"
+    assert 'data-fragment-src="/today/replies"' in page.text and "Checking your inboxes" in page.text
     assert "Overdue Olive" in page.text and "Send the proposal" in page.text and "3 days overdue" in page.text
     assert "Later Lily" not in page.text and "Won Walter" not in page.text
-    assert "The inbox could not be read" in page.text, "a broken inbox read shows as health, never a crash"
     assert 'href="/laps/deals/' in page.text and 'href="/overview"' in page.text
+    assert "/portal/approvals" in page.text, "content approvals are one tap away"
+    assert 'for="nav-toggle"' in page.text and "Admin and set-up" in page.text
     overview = admin_client.get("/overview")
     assert overview.status_code == 200 and "<h1>Overview</h1>" in overview.text and "Latest activity" in overview.text
+    assert '<details class="nav-more" open>' in overview.text, "the folded menu is open on a screen inside it"
+
+
+def test_replies_panel_loads_after_the_page_and_survives_a_broken_inbox(admin_client, db, monkeypatch):
+    acct = Account(key="kp-fb", brand="kp", channel="facebook", label="Key Properties Facebook", provider="zernio", account_id="1")
+    threads = [{"name": "Sam <b>Seller</b>", "preview": "Four flats", "account": acct, "ticket": "t1", "needs_owner": True}]
+    monkeypatch.setattr("app.routers.inbox.conversation_list",
+                        lambda *a, **k: ([acct], [{"account": acct, "threads": threads, "error": None}], threads, None))
+    panel = admin_client.get("/today/replies")
+    assert panel.status_code == 200 and panel.headers["cache-control"] == "no-store"
+    assert "Sam &lt;b&gt;Seller&lt;/b&gt;" in panel.text and 'data-count="1"' in panel.text and "<html" not in panel.text
+    monkeypatch.setattr("app.routers.inbox.conversation_list", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    broken = admin_client.get("/today/replies")
+    assert broken.status_code == 200 and "The inbox could not be read" in broken.text and 'data-count="0"' in broken.text

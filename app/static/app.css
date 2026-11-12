@@ -277,3 +277,26 @@ table.data td.detail { max-width: 46ch; word-break: break-word; }
   .today-health li { grid-template-columns: auto 1fr; }
   .today-health li .btn { grid-column: 2; justify-self: start; }
 }
+
+/* ---- Menu: folded set-up screens, and a Menu button on a phone ------------------------------------------- */
+.nav-toggle { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.nav-toggle-btn { display: none; }
+.nav-more { margin-top: .5rem; border-top: 1px solid #2E2E34; padding-top: .5rem; }
+.nav-more summary { cursor: pointer; list-style: none; color: #A9A4AB; padding: .5rem .7rem; border-radius: 8px; font-weight: 700; font-size: .82rem; letter-spacing: .06em; text-transform: uppercase; }
+.nav-more summary::-webkit-details-marker { display: none; }
+.nav-more summary::after { content: "+"; float: right; font-size: 1rem; line-height: 1; }
+.nav-more[open] summary::after { content: "\2212"; }
+.nav-more summary:hover { background: #26262B; color: #fff; }
+.nav-more a { display: block; font-weight: 400; font-size: .9rem; }
+@media (max-width: 860px) {
+  .app-side { padding: .7rem 1rem; gap: .6rem; }
+  .app-side-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .nav-toggle-btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 1.1rem; border: 1px solid #55505A; border-radius: 999px; color: #fff; font-weight: 700; cursor: pointer; }
+  .nav-toggle:checked ~ .app-side-top .nav-toggle-btn { background: var(--pink); border-color: var(--pink); }
+  .nav-toggle:focus-visible ~ .app-side-top .nav-toggle-btn { outline: 3px solid var(--pink); outline-offset: 3px; }
+  .app-side .app-nav, .app-side .app-side-foot { display: none; }
+  .nav-toggle:checked ~ .app-nav, .nav-toggle:checked ~ .app-side-foot { display: flex; }
+  .app-nav a { padding: .7rem .7rem; }
+}
+.today-inbox-problems { margin-bottom: .9rem; }
+.today-clear-all { margin-left: .2rem; }

@@ -4,30 +4,21 @@
 <div class="page-title today-head">
   <span class="eyebrow">{{ today.strftime("%A %-d %B") }}</span>
   <h1>Today</h1>
-  <p class="today-lead">{% if total %}<strong>{{ total }}</strong> thing{{ "s" if total != 1 else "" }} waiting for you{% else %}Nothing is waiting for you{% endif %}{% set problems = health | selectattr("level", "ne", "ok") | list %}{% if problems %} · <a href="#health">{{ problems | length }} health problem{{ "s" if problems | length != 1 else "" }}</a>{% endif %}.</p>
+  <p class="today-lead">Waiting for you: <strong data-today-total>{{ total }}</strong>{% set problems = health | selectattr("level", "ne", "ok") | list %}{% if problems %} · <a href="#health">{{ problems | length }} thing{{ "s" if problems | length != 1 else "" }} to fix</a>{% endif %}</p>
 </div>
 
-{% if waiting %}
 <div class="today-groups">
-  {% for group in waiting %}
-  <section class="panel today-group" id="{{ group.key }}">
-    <div class="panel-head"><h2>{{ group.title }} <span class="today-count">{{ group.total }}</span></h2>{% if group.more %}<a class="btn btn-ghost btn-sm" href="{{ group.href }}">All {{ group.total }}</a>{% endif %}</div>
-    <ul class="today-items">
-      {% for item in group.items %}
-      <li>
-        <a class="today-item{% if item.overdue(today) %} is-overdue{% endif %}" href="{{ item.href }}"{% if item.href.startswith("http") %} target="_blank" rel="noopener noreferrer"{% endif %}>
-          <span class="today-item-main"><strong>{{ item.title }}</strong><span class="today-item-detail">{{ item.detail }}</span></span>
-          <span class="today-item-side">{% if item.brand %}<span class="chip today-brand">{{ item.brand | upper }}</span>{% endif %}{% set due = item.due_words(today) %}{% if due %}<span class="today-due">{{ due }}</span>{% endif %}</span>
-        </a>
-      </li>
-      {% endfor %}
-    </ul>
-    {% if group.more %}<p class="small muted today-more"><a href="{{ group.href }}">{{ group.more }} more</a></p>{% endif %}
+  <section class="panel today-group" id="replies" aria-busy="true" data-fragment-src="/today/replies" data-fragment-add-to="[data-today-total]"
+           data-fragment-fail="Couldn't check the inbox. Open the inbox to see your replies; you may need to sign in again.">
+    <div class="panel-head"><h2>Replies waiting for you</h2><a class="btn btn-ghost btn-sm" href="/inbox">Open the inbox</a></div>
+    <p class="muted">Checking your inboxes…</p>
   </section>
+  {% for group in waiting %}
+  <section class="panel today-group" id="{{ group.key }}">{% include "_today_group.html" %}</section>
   {% endfor %}
 </div>
-{% else %}
-<section class="panel today-clear-all"><h2>All clear</h2><p class="muted">No replies, next steps, follow-ups or payments need you today.</p></section>
+{% if not waiting %}
+<p class="muted mt-2 today-clear-all">No next steps, follow-ups or payments need you today.</p>
 {% endif %}
 
 <section class="panel mt-2" id="health">
@@ -43,7 +34,8 @@
   </ul>
 </section>
 
-{% if clear %}
-<p class="small muted mt-2 today-quiet">Nothing due in: {% for group in clear %}<a href="{{ group.href }}">{{ group.title | lower }}</a>{{ ", " if not loop.last else "." }}{% endfor %}</p>
-{% endif %}
+<p class="small muted mt-2 today-quiet">
+  {% if approvals_url %}Articles, posts and images to approve are in <a href="{{ approvals_url }}" target="_blank" rel="noopener noreferrer">Property Predator approvals</a>. {% endif %}
+  {% if clear %}Nothing due in: {% for group in clear %}<a href="{{ group.href }}">{{ group.title | lower }}</a>{{ ", " if not loop.last else "." }}{% endfor %}{% endif %}
+</p>
 {% endblock %}
