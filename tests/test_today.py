@@ -178,3 +178,66 @@ def test_replies_panel_loads_after_the_page_and_survives_a_broken_inbox(admin_cl
     monkeypatch.setattr("app.routers.inbox.conversation_list", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
     broken = admin_client.get("/today/replies")
     assert broken.status_code == 200 and "The inbox could not be read" in broken.text and 'data-count="0"' in broken.text
+
+
+def _leadrelay_answer(**over):
+    base = {"brand": "pp", "switchedOn": True, "problem": None, "lastSucceededAt": "2026-11-12T22:00:00.000Z",
+            "lastAnsweredAt": "2026-11-12T22:00:00.000Z", "today": {}, "countingSince": "2026-11-12T00:00:00.000Z",
+            "waitingAfterRepeatedFailures": 0, "needsTheOwner": [], "sentences": [],
+            "summary": "LeadRelay is connected. 3 enquiries and 2 call results copied to the CRM today.",
+            "workspaceId": "d975ff66-336a-46c2-b36b-d7095a11af97"}
+    return {**base, **over}
+
+
+def test_leadrelay_line_says_what_relaunch72_says_and_never_hides_a_failed_check(db, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    import httpx
+
+    from app import config
+    from app.services import inbox_crm
+    user = SimpleNamespace(email="founder@example.test")
+    monkeypatch.setattr(config, "R72_GROUP_HQ_INBOX_SECRET", "")
+    assert inbox_crm.leadrelay_status(user) is None, "no CRM link at all: nothing to say, and nothing is called"
+    monkeypatch.setattr(config, "R72_GROUP_HQ_INBOX_SECRET", "fixture-credential-" * 3)
+    asked = []
+
+    def relaunch72(answer, status=200):
+        def handler(request):
+            asked.append(json.loads(request.content))
+            return httpx.Response(status, json=answer)
+        return httpx.MockTransport(handler)
+
+    ok = inbox_crm.leadrelay_status(user, transport=relaunch72(_leadrelay_answer()))
+    assert ok == {"level": "ok", "title": "LeadRelay is connected",
+                  "why": "LeadRelay is connected. 3 enquiries and 2 call results copied to the CRM today."}
+    assert asked[-1]["action"] == "leadrelayFeedStatus" and asked[-1]["brand"] == "pp" and asked[-1]["actorEmail"] == user.email
+    off = inbox_crm.leadrelay_status(user, transport=relaunch72(_leadrelay_answer(
+        switchedOn=False, summary="LeadRelay is not connected yet, so its enquiries are not reaching the CRM.")))
+    assert off["level"] == "warn" and off["title"] == "LeadRelay is not connected" and "not reaching the CRM" in off["why"]
+    down = inbox_crm.leadrelay_status(user, transport=relaunch72(_leadrelay_answer(
+        problem="unreachable", summary="LeadRelay did not answer (last heard 14:05 yesterday). Nothing was sent to anyone.")))
+    assert down["level"] == "bad" and down["title"] == "LeadRelay needs a look"
+    owner = inbox_crm.leadrelay_status(user, transport=relaunch72(_leadrelay_answer(
+        needsTheOwner=[{"leadRelayLeadId": "x", "reason": "two_contacts", "at": "2026-11-12T21:00:00.000Z"}],
+        summary="1 LeadRelay enquiry matches two CRM contacts and was not copied.")))
+    assert owner["level"] == "warn" and owner["title"] == "LeadRelay needs a look"
+    # An older Relaunch72, a refusal, or an answer for another business is reported as "could not be checked".
+    for transport in (relaunch72({"error": "invalid_request"}, 400), relaunch72(_leadrelay_answer(brand="mhp")),
+                      relaunch72(_leadrelay_answer(summary="")), relaunch72(_leadrelay_answer(switchedOn="yes"))):
+        failed = inbox_crm.leadrelay_status(user, transport=transport)
+        assert failed["level"] == "warn" and failed["title"] == "LeadRelay could not be checked"
+        assert "Nothing was sent to anyone" in failed["why"]
+
+
+def test_today_panel_shows_the_leadrelay_line_escaped_and_survives_its_failure(admin_client, db, monkeypatch):
+    monkeypatch.setattr("app.routers.inbox.conversation_list", lambda *a, **k: ([], [], [], None))
+    monkeypatch.setattr("app.services.inbox_crm.leadrelay_status", lambda user: {
+        "level": "ok", "title": "LeadRelay is connected", "why": "2 enquiries copied <b>today</b>."})
+    panel = admin_client.get("/today/replies")
+    assert panel.status_code == 200 and "<strong>LeadRelay is connected</strong>" in panel.text
+    assert "2 enquiries copied &lt;b&gt;today&lt;/b&gt;." in panel.text and 'class="today-health-ok"' in panel.text
+    assert 'data-count="0"' in panel.text, "a status line is not something waiting for the founder"
+    monkeypatch.setattr("app.services.inbox_crm.leadrelay_status", lambda user: None)
+    assert "LeadRelay" not in admin_client.get("/today/replies").text

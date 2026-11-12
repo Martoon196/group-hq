@@ -292,6 +292,11 @@ def build(db: Session, scanning: bool | None, region_rows: list[dict], now: date
             "approvals_url": f"https://{config.R72_PP_HOST}/portal/approvals" if config.R72_PP_HOST else ""}
 
 
-def build_inbox(inbox_threads: list[dict], inbox_results: list[dict], inbox_error: str | None) -> dict:
-    """The panel loaded after the page: replies that need the founder and inbox connections that are down."""
-    return {"group": replies(inbox_threads), "problems": inbox_health(inbox_results, inbox_error)}
+def build_inbox(inbox_threads: list[dict], inbox_results: list[dict], inbox_error: str | None,
+                leadrelay: dict | None = None) -> dict:
+    """The panel loaded after the page: replies that need the founder, inbox connections that are down, and one
+    line on LeadRelay (its enquiries and call results being copied into the CRM), when there is a CRM link."""
+    notes = inbox_health(inbox_results, inbox_error)
+    if leadrelay:
+        notes.append(Health(leadrelay["level"], leadrelay["title"], leadrelay["why"]))
+    return {"group": replies(inbox_threads), "problems": notes}

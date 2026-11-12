@@ -37,8 +37,9 @@ def today_replies(request: Request, db: Session = Depends(get_db), user: User = 
         _, results, threads, error = conversation_list(db, user, [])
     except Exception:   # noqa: BLE001  (a broken inbox read is reported in the panel, never an error page)
         error = "The inbox could not be read just now."
+    from ..services import inbox_crm
     response = render(request, "_today_inbox.html", {"user": user, "today": today_service.uk_today(),
-                                                     **today_service.build_inbox(threads, results, error)})
+        **today_service.build_inbox(threads, results, error, inbox_crm.leadrelay_status(user))})
     response.headers["Cache-Control"] = "no-store"      # it carries message previews, like the inbox
     return response
 
