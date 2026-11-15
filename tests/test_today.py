@@ -241,3 +241,70 @@ def test_today_panel_shows_the_leadrelay_line_escaped_and_survives_its_failure(a
     assert 'data-count="0"' in panel.text, "a status line is not something waiting for the founder"
     monkeypatch.setattr("app.services.inbox_crm.leadrelay_status", lambda user: None)
     assert "LeadRelay" not in admin_client.get("/today/replies").text
+
+
+def _protection_answer(items, **over):
+    base = {"workspaceId": "d975ff66-336a-46c2-b36b-d7095a11af97", "available": True, "needsYou": bool(items),
+            "sentences": [i["sentence"] for i in items], "items": items,
+            "summary": items[0]["sentence"] if items else "Email sending needs nothing from you."}
+    return {**base, **over}
+
+
+def test_email_protection_lines_only_appear_when_the_founder_is_needed(db, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    import httpx
+
+    from app import config
+    from app.services import inbox_crm
+    user = SimpleNamespace(email="founder@example.test")
+    monkeypatch.setattr(config, "R72_GROUP_HQ_INBOX_SECRET", "")
+    assert inbox_crm.email_protection_items(user) == [], "no CRM link: nothing is asked and nothing is shown"
+    monkeypatch.setattr(config, "R72_GROUP_HQ_INBOX_SECRET", "fixture-credential-" * 3)
+    monkeypatch.setattr(config, "R72_PP_HOST", "hq.propertypredator.com")
+    asked = []
+
+    def relaunch72(answer, status=200):
+        def handler(request):
+            asked.append(json.loads(request.content))
+            return httpx.Response(status, json=answer)
+        return httpx.MockTransport(handler)
+
+    paused = {"tone": "red", "sentence": "Emails paused for Acme Lettings. 6 of their last 120 emails bounced (5%, last 7 days).",
+              "button": {"label": "Review and decide", "url": "https://hq.propertypredator.com/portal/email/founder"}}
+    ready = {"tone": "amber", "sentence": "Acme Lettings is ready to go live, sending from acme.example.",
+             "button": {"label": "Approve", "url": "https://hq.propertypredator.com/portal/email/founder"}}
+    items = inbox_crm.email_protection_items(user, transport=relaunch72(_protection_answer([paused, ready])))
+    assert asked[-1]["action"] == "emailProtectionStatus" and asked[-1]["brand"] == "pp"
+    assert items == [
+        {"level": "bad", "title": "Email sending needs you", "why": paused["sentence"], "action": "Review and decide",
+         "href": "https://hq.propertypredator.com/portal/email/founder"},
+        {"level": "warn", "title": "Email sending needs you", "why": ready["sentence"], "action": "Approve",
+         "href": "https://hq.propertypredator.com/portal/email/founder"}]
+    # All well, not switched on yet, an older Relaunch72, a refusal or a malformed answer: nothing is shown.
+    for transport in (relaunch72(_protection_answer([])), relaunch72(_protection_answer([], available=False)),
+                      relaunch72({"error": "invalid_request"}, 400), relaunch72(_protection_answer([{**paused, "tone": "blue"}])),
+                      relaunch72(_protection_answer([{**paused, "sentence": ""}])), relaunch72({**_protection_answer([paused]), "items": "x"})):
+        assert inbox_crm.email_protection_items(user, transport=transport) == []
+    # A button is only offered when it points at our own portal over https; the sentence still shows.
+    for bad in ("https://evil.example/portal/email/founder", "http://hq.propertypredator.com/portal/email/founder",
+                "https://hq.propertypredator.com.evil.example/x", "javascript:alert(1)", "https://hq.propertypredator.com/a b",
+                "//hq.propertypredator.com/portal/email/founder"):
+        shown = inbox_crm.email_protection_items(user, transport=relaunch72(_protection_answer([{**paused, "button": {"label": "Review and decide", "url": bad}}])))
+        assert shown and shown[0]["href"] == "" and shown[0]["action"] == "" and shown[0]["why"] == paused["sentence"], bad
+
+
+def test_today_panel_shows_email_protection_first_and_escaped(admin_client, db, monkeypatch):
+    monkeypatch.setattr("app.routers.inbox.conversation_list", lambda *a, **k: ([], [], [], None))
+    monkeypatch.setattr("app.services.inbox_crm.leadrelay_status", lambda user: {
+        "level": "ok", "title": "LeadRelay is connected", "why": "All quiet."})
+    monkeypatch.setattr("app.services.inbox_crm.email_protection_items", lambda user: [{
+        "level": "bad", "title": "Email sending needs you", "why": "Emails paused for <b>Acme</b>.",
+        "action": "Review and decide", "href": "https://hq.propertypredator.com/portal/email/founder"}])
+    panel = admin_client.get("/today/replies")
+    assert panel.status_code == 200 and "Emails paused for &lt;b&gt;Acme&lt;/b&gt;." in panel.text
+    assert '<a class="btn btn-ghost btn-sm" href="https://hq.propertypredator.com/portal/email/founder">Review and decide</a>' in panel.text
+    assert panel.text.index("Email sending needs you") < panel.text.index("LeadRelay is connected"), "what needs him comes first"
+    monkeypatch.setattr("app.services.inbox_crm.email_protection_items", lambda user: [])
+    assert "Email sending needs you" not in admin_client.get("/today/replies").text

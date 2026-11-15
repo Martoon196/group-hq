@@ -293,10 +293,12 @@ def build(db: Session, scanning: bool | None, region_rows: list[dict], now: date
 
 
 def build_inbox(inbox_threads: list[dict], inbox_results: list[dict], inbox_error: str | None,
-                leadrelay: dict | None = None) -> dict:
+                leadrelay: dict | None = None, email_protection: list[dict] | None = None) -> dict:
     """The panel loaded after the page: replies that need the founder, inbox connections that are down, and one
     line on LeadRelay (its enquiries and call results being copied into the CRM), when there is a CRM link."""
     notes = inbox_health(inbox_results, inbox_error)
+    # Email sending: only ever a line when a business is paused, switched off, held or waiting for the founder's approval.
+    notes = [Health(item["level"], item["title"], item["why"], item["action"], item["href"]) for item in email_protection or []] + notes
     if leadrelay:
         notes.append(Health(leadrelay["level"], leadrelay["title"], leadrelay["why"]))
     return {"group": replies(inbox_threads), "problems": notes}

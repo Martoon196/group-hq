@@ -39,7 +39,8 @@ def today_replies(request: Request, db: Session = Depends(get_db), user: User = 
         error = "The inbox could not be read just now."
     from ..services import inbox_crm
     response = render(request, "_today_inbox.html", {"user": user, "today": today_service.uk_today(),
-        **today_service.build_inbox(threads, results, error, inbox_crm.leadrelay_status(user))})
+        **today_service.build_inbox(threads, results, error, inbox_crm.leadrelay_status(user),
+                                    inbox_crm.email_protection_items(user))})
     response.headers["Cache-Control"] = "no-store"      # it carries message previews, like the inbox
     return response
 
