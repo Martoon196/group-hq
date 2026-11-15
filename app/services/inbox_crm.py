@@ -48,6 +48,29 @@ def _owner_whatsapp_refusal(response):
     return code if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,60}", code) else f"http_{response.status_code}"
 
 
+def email_protection_items(user, *, transport=None):
+    """What email sending needs from the founder, for the Today page: a list of {level, title, why, action, href}.
+    Empty when nothing needs him, when this Growth HQ has no CRM link, and when the check could not be made (the same
+    alerts are emailed, so a failed check here is not the only way he hears). A button is only offered when it points
+    at our own Relaunch72 portal over https."""
+    if not 32 <= len(config.R72_GROUP_HQ_INBOX_SECRET) <= 256:
+        return []
+    try:
+        status = command(user, "pp", "emailProtectionStatus", transport=transport)
+    except Exception:  # noqa: BLE001  (CRM down, an older Relaunch72 without this check, or an answer that does not check out)
+        return []
+    if not status["available"] or not status["needsYou"]:
+        return []
+    own = f"https://{config.R72_PP_HOST}/" if config.R72_PP_HOST else ""
+    out = []
+    for item in status["items"]:
+        url = item["button"]["url"]
+        safe = bool(own) and url.startswith(own) and not any(ch in url for ch in "\r\n\t \\\"'<>")
+        out.append({"level": "bad" if item["tone"] == "red" else "warn", "title": "Email sending needs you",
+                    "why": item["sentence"], "action": item["button"]["label"] if safe else "", "href": url if safe else ""})
+    return out
+
+
 def leadrelay_status(user, *, transport=None):
     """The LeadRelay feed's state for the Today page: {level, title, why}, or None when this Growth HQ has no CRM
     link at all (nothing to say). Any failure to read it is itself reported, never hidden and never an error page."""
@@ -108,6 +131,20 @@ def command(user, brand, action, *, transport=None, request_id=None, **payload):
             return result
         if action == "leads":
             return _leads_page(result, brand)
+        if action == "emailProtectionStatus":
+            # Read only: what Relaunch72's sender protection needs from the founder, as ready-made sentences.
+            items = result.get("items")
+            if (not isinstance(result.get("available"), bool) or not isinstance(result.get("needsYou"), bool)
+                    or not isinstance(items, list) or len(items) > 20):
+                raise ValueError()
+            for item in items:
+                button = item.get("button") if isinstance(item, dict) else None
+                if (not isinstance(item, dict) or item.get("tone") not in ("red", "amber")
+                        or not isinstance(item.get("sentence"), str) or not 0 < len(item["sentence"]) <= 1200
+                        or not isinstance(button, dict) or not isinstance(button.get("label"), str)
+                        or not 0 < len(button["label"]) <= 60 or not isinstance(button.get("url"), str)):
+                    raise ValueError()
+            return result
         if action == "leadrelayFeedStatus":
             # Read only: what Relaunch72's LeadRelay feed last saw, with a ready-made plain sentence.
             if (result.get("brand") != brand or not isinstance(result.get("switchedOn"), bool)
